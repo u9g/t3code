@@ -164,6 +164,9 @@ export function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconNa
         return "zap";
     }
   }
+  if (workEntry.structuredPayload?.type === "system_notice") {
+    return workEntry.structuredPayload.tone === "info" ? "info" : "circle-alert";
+  }
   if (workEntry.itemType === "user_input_request" || workEntry.itemType === "approval_request") {
     return "message-circle";
   }

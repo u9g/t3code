@@ -543,11 +543,13 @@ const threadStartCommand = Command.make("start", {
     Flag.optional,
   ),
   provider: Flag.String("provider").pipe(
-    Flag.withDescription("Provider instance id. Pass with --model."),
+    Flag.withDescription(
+      "Provider instance id. Defaults to the project's default provider; without --model, runs the model the composer picks for it.",
+    ),
     Flag.optional,
   ),
   model: Flag.String("model").pipe(
-    Flag.withDescription("Model slug. Defaults to the project's default model."),
+    Flag.withDescription("Model slug. Defaults to the project's default model. Needs --provider."),
     Flag.optional,
   ),
   worktree: Flag.String("worktree").pipe(
@@ -568,8 +570,8 @@ const threadStartCommand = Command.make("start", {
     Effect.gen(function* () {
       const message = yield* readMessageArgument(flags.message);
       const workspaceStrategy = yield* launchWorkspaceStrategy(flags);
-      if (Option.isSome(flags.provider) !== Option.isSome(flags.model)) {
-        return yield* new ThreadUsageError({ detail: "--provider and --model go together." });
+      if (Option.isSome(flags.model) && Option.isNone(flags.provider)) {
+        return yield* new ThreadUsageError({ detail: "--model needs --provider." });
       }
       const title = yield* decodeTitle(
         Option.getOrElse(flags.title, () => titleFromMessage(message)),
@@ -585,14 +587,16 @@ const threadStartCommand = Command.make("start", {
               title,
               message,
               ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-              ...(Option.isSome(flags.provider) && Option.isSome(flags.model)
-                ? {
-                    modelSelection: {
-                      instanceId: flags.provider.value,
-                      model: flags.model.value,
-                    },
-                  }
-                : {}),
+              ...(Option.isNone(flags.provider)
+                ? {}
+                : Option.isNone(flags.model)
+                  ? { providerInstanceId: flags.provider.value }
+                  : {
+                      modelSelection: {
+                        instanceId: flags.provider.value,
+                        model: flags.model.value,
+                      },
+                    }),
             },
             ThreadLaunchResult,
           );

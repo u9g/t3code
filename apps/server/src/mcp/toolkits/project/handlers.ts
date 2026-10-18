@@ -1,4 +1,11 @@
-import { MessageId, ThreadId, OrchestratorMcpFailure, ProjectId } from "@t3tools/contracts";
+import {
+  MessageId,
+  type ModelSelection,
+  ThreadId,
+  OrchestratorMcpFailure,
+  ProjectId,
+  type ProviderInstanceId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -6,10 +13,12 @@ import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as Project from "../../../project/ProjectService.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
+import { defaultProviderInstanceModel } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { resolveRuntimeMode } from "../../OrchestratorMcpService.ts";
@@ -48,6 +57,35 @@ const assertProjectWorktree = Effect.fn("mcp.assertProjectWorktree")(function* (
     });
 });
 
+/**
+ * The selection a launch on `instanceId` starts with: the one it would inherit
+ * when that is on the same instance, options included, otherwise the instance's
+ * default model, as the composer picks it.
+ */
+const providerDefaultModelSelection = Effect.fn("mcp.providerDefaultModelSelection")(function* (
+  instanceId: ProviderInstanceId,
+  inherited: ModelSelection | undefined,
+) {
+  if (inherited?.instanceId === instanceId) return inherited;
+  const providers = yield* ProviderRegistry.ProviderRegistry.pipe(
+    Effect.flatMap((registry) => registry.getProviders),
+  );
+  const provider = providers.find((candidate) => candidate.instanceId === instanceId);
+  const model =
+    provider === undefined
+      ? undefined
+      : defaultProviderInstanceModel({ driverKind: provider.driver, models: provider.models });
+  if (model === undefined)
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message:
+        provider === undefined
+          ? `Provider instance ${instanceId} is not registered. orchestrator_capabilities lists providers.`
+          : `Provider instance ${instanceId} has no model to start with. Pass modelSelection.`,
+    });
+  return { instanceId, model } satisfies ModelSelection;
+});
+
 const access = Effect.gen(function* () {
   yield* readCaller();
   return yield* Project.ProjectService;
@@ -76,6 +114,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             code: "invalid_request",
             message:
               "scratch:true picks its own project and folder; omit projectId and workspaceStrategy.",
+          });
+        if (input.modelSelection !== undefined && input.providerInstanceId !== undefined)
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "Pass modelSelection or providerInstanceId, not both.",
           });
         const projectId =
           input.scratch === true
@@ -139,11 +182,13 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 ),
               )
             : undefined;
+        const inherited =
+          caller?.modelSelection ?? projectDefaults?.defaultModelSelection ?? undefined;
         const modelSelection =
           input.modelSelection ??
-          caller?.modelSelection ??
-          projectDefaults?.defaultModelSelection ??
-          undefined;
+          (input.providerInstanceId === undefined
+            ? inherited
+            : yield* providerDefaultModelSelection(input.providerInstanceId, inherited));
         if (modelSelection === undefined)
           return yield* new OrchestratorMcpFailure({
             code: "invalid_request",

@@ -299,6 +299,8 @@ export interface DesktopUpdateState {
   channelBlockedByPolicy?: true;
   /** The check failed only because this build's track differs from the saved `channel`. */
   trackMismatch?: { readonly buildChannel: DesktopUpdateChannel };
+  /** GitHub `owner/repo` the desktop app takes updates and their release notes from. */
+  updateRepository?: string;
 }
 
 export interface DesktopUpdateReleaseNote {
@@ -344,6 +346,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   notAppliedVersion: Schema.optionalKey(Schema.String),
   channelBlockedByPolicy: Schema.optionalKey(Schema.Literal(true)),
   trackMismatch: Schema.optionalKey(Schema.Struct({ buildChannel: DesktopUpdateChannelSchema })),
+  updateRepository: Schema.optionalKey(Schema.String),
 });
 
 export const DesktopCliCommandStateSchema = Schema.Struct({

@@ -4,6 +4,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { CLI_RELEASE_BASE_URL_ENV } from "@t3tools/shared/cliRelease";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import serverPackageJson from "../../../server/package.json" with { type: "json" };
 
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -30,7 +31,7 @@ const packagedEnvironment = DesktopEnvironment.DesktopEnvironment.pipe(
 );
 
 describe("resolveDesktopSshCliRunner", () => {
-  it.effect("downloads the remote runner from the release mirror", () =>
+  it.effect("downloads the bundled server's remote runner from the release mirror", () =>
     Effect.gen(function* () {
       const environment = yield* packagedEnvironment;
 
@@ -39,7 +40,7 @@ describe("resolveDesktopSshCliRunner", () => {
       });
 
       assert.deepStrictEqual(runner, {
-        archiveVersion: "0.0.22",
+        archiveVersion: serverPackageJson.version,
         releaseBaseUrl: "https://mirror.example.com/t3code",
       });
     }),

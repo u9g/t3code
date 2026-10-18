@@ -50,7 +50,10 @@ export function showDesktopUpdateDownloadedToast(
   shell: DesktopUpdateShell,
   state: DesktopUpdateState,
 ): void {
-  const releaseUrl = getDesktopUpdateReleaseUrl(getDesktopUpdateDownloadedVersion(state));
+  const releaseUrl = getDesktopUpdateReleaseUrl(
+    getDesktopUpdateDownloadedVersion(state),
+    state.updateRepository,
+  );
   toastManager.add({
     type: "success",
     title: m(msg("Update downloaded")),

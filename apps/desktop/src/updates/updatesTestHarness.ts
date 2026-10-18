@@ -44,6 +44,7 @@ export interface UpdatesHarnessOptions {
   readonly savedChannel?: DesktopAppSettings.DesktopSettings["updateChannel"];
   /** Adds a WSL backend beside the primary, as on a Windows host with WSL enabled. */
   readonly wslBackend?: boolean;
+  readonly appUpdateYml?: string | undefined;
 }
 
 export function makeHarness(options: UpdatesHarnessOptions = {}) {
@@ -256,6 +257,9 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
         ? (installRecords.get(path) ?? previousInstallRecord)
         : undefined;
       if (installRecord !== undefined) return Effect.succeed(installRecord);
+      if (path.endsWith("app-update.yml") && options.appUpdateYml !== undefined) {
+        return Effect.succeed(options.appUpdateYml);
+      }
       return path === "/missing/resources/package-type" && options.packageType !== undefined
         ? Effect.succeed(options.packageType)
         : Effect.fail(

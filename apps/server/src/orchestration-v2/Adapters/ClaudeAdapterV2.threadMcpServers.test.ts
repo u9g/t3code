@@ -1,5 +1,5 @@
 // A thread's own MCP servers, as `t3 thread start --mcp-config` gives them, on local
-// Claude. Kept apart from ClaudeAdapterV2.test.ts.
+// Claude and on Claude Cloud. Kept apart from ClaudeAdapterV2.test.ts like the remote tests.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ClaudeSettings,
@@ -10,6 +10,7 @@ import {
   type OrchestrationV2AppThread,
   type OrchestrationV2ProviderThread,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionId,
   RunAttemptId,
@@ -128,6 +129,19 @@ describe("claudeMcpQueryOverrides with thread MCP servers", () => {
     assert.notEqual(key(GEM), key(rotated));
     assert.equal(key(GEM), key({ gem: { ...GEM.gem } }));
   });
+
+  it("matches pre-approved MCP tools by exact name or server wildcard", () => {
+    const allowed = ["Read", "mcp__gem__*", "mcp__t3-code__t3_thread_list"];
+    assert.isTrue(ClaudeAdapterV2.claudeMcpToolPreApproved("mcp__gem__propose", allowed));
+    assert.isTrue(
+      ClaudeAdapterV2.claudeMcpToolPreApproved("mcp__t3-code__t3_thread_list", allowed),
+    );
+    assert.isFalse(
+      ClaudeAdapterV2.claudeMcpToolPreApproved("mcp__t3-code__t3_thread_send", allowed),
+    );
+    assert.isFalse(ClaudeAdapterV2.claudeMcpToolPreApproved("mcp__gemini__ask", allowed));
+    assert.isFalse(ClaudeAdapterV2.claudeMcpToolPreApproved("Read", allowed));
+  });
 });
 
 function turnInput(input: {
@@ -182,74 +196,105 @@ function turnInput(input: {
   };
 }
 
-describe.each(["local"] as const)("ClaudeAdapterV2 %s thread MCP servers", (transport) => {
-  /** Starts one turn of a thread with servers and returns the options its query opened with. */
-  const openedQueryOptions = (runtimeMode: "full-access" | "approval-required") =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOpenInput> = [];
-      const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
-        instanceId: MODEL_SELECTION.instanceId,
-        settings: DEFAULT_CLAUDE_SETTINGS,
-        environment: {},
-        attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-thread-mcp-" }),
-        fileSystem,
-        path: yield* Path.Path,
-        crypto: yield* Crypto.Crypto,
-        idAllocator: yield* IdAllocator.IdAllocatorV2,
-        queryRunner: {
-          allocateSessionId: Effect.succeed("native-thread-mcp"),
-          open: (input) =>
-            Effect.sync(() => {
-              opened.push(input);
-              return {
-                messages: Stream.never,
-                offer: () => Effect.void,
-                setModel: () => Effect.void,
-                applyFlagSettings: () => Effect.void,
-                setPermissionMode: () => Effect.void,
-                backgroundTasks: () => Effect.succeed(false),
-                stopTask: () => Effect.void,
-                interrupt: Effect.void,
-                close: Effect.void,
-              };
-            }),
-          forkSession: () => Effect.die("unused forkSession"),
-          subagentLaunchToolUseId: () => Effect.succeed(null),
-          assertComplete: Effect.void,
-        },
-      });
-      const threadId = ThreadId.make(`thread-mcp-${transport}-${runtimeMode}`);
-      yield* (yield* McpProviderSessions.McpProviderSessions).set(mcpSessionFor(threadId));
-      const runtime = yield* adapter.openSession({
-        threadId,
-        providerSessionId: ProviderSessionId.make(`provider-session-${threadId}`),
-        modelSelection: MODEL_SELECTION,
-        runtimePolicy: runtimePolicy(runtimeMode),
-      });
-      const providerThread = yield* runtime.ensureThread({
-        threadId,
-        modelSelection: MODEL_SELECTION,
-        runtimePolicy: runtimePolicy(runtimeMode),
-      });
-      yield* runtime.startTurn(
-        turnInput({ threadId, providerThread, now: yield* DateTime.now, runtimeMode }),
+describe.each(["local", "remote"] as const)(
+  "ClaudeAdapterV2 %s thread MCP servers",
+  (transport) => {
+    /** Starts one turn of a thread with servers and returns the options its query opened with. */
+    const openedQueryOptions = (runtimeMode: "full-access" | "approval-required") =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const opened: Array<ClaudeAdapterV2.ClaudeAgentSdkQueryOpenInput> = [];
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: MODEL_SELECTION.instanceId,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: {},
+          attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-thread-mcp-" }),
+          fileSystem,
+          path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          ...(transport === "remote"
+            ? { driverKind: ProviderDriverKind.make("claudeCloud"), transport: "remote" as const }
+            : {}),
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-mcp"),
+            allocateSessionIdFor: () => Effect.succeed("cse_thread_mcp"),
+            open: (input) =>
+              Effect.sync(() => {
+                opened.push(input);
+                return {
+                  messages: Stream.never,
+                  offer: () => Effect.void,
+                  setModel: () => Effect.void,
+                  applyFlagSettings: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  backgroundTasks: () => Effect.succeed(false),
+                  stopTask: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.void,
+                };
+              }),
+            forkSession: () => Effect.die("unused forkSession"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const threadId = ThreadId.make(`thread-mcp-${transport}-${runtimeMode}`);
+        yield* (yield* McpProviderSessions.McpProviderSessions).set(mcpSessionFor(threadId));
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make(`provider-session-${threadId}`),
+          modelSelection: MODEL_SELECTION,
+          runtimePolicy: runtimePolicy(runtimeMode),
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: MODEL_SELECTION,
+          runtimePolicy: runtimePolicy(runtimeMode),
+        });
+        yield* runtime.startTurn(
+          turnInput({ threadId, providerThread, now: yield* DateTime.now, runtimeMode }),
+        );
+        assert.equal(opened.length, 1);
+        return opened[0]!.options;
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
       );
-      assert.equal(opened.length, 1);
-      return opened[0]!.options;
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+
+    it.effect("opens the query with the thread's servers pre-approved beside t3-code", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const options = yield* openedQueryOptions("full-access");
+          assert.deepEqual(options.mcpServers, { ...GEM, "t3-code": T3_CODE_SERVER });
+          assert.includeMembers([...(options.allowedTools ?? [])], ["mcp__gem__*"]);
+        }),
       ),
     );
 
-  it.effect("opens the query with the thread's servers pre-approved beside t3-code", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const options = yield* openedQueryOptions("full-access");
-        assert.deepEqual(options.mcpServers, { ...GEM, "t3-code": T3_CODE_SERVER });
-        assert.includeMembers([...(options.allowedTools ?? [])], ["mcp__gem__*"]);
-      }),
-    ),
-  );
-});
+    if (transport === "remote") {
+      // The cloud never sees allowedTools, so an approval-required session asks the
+      // adapter about every MCP call; the thread's own tools must not wait on a person.
+      it.effect("answers the cloud's prompts for the thread's tools without asking", () =>
+        Effect.scoped(
+          Effect.gen(function* () {
+            const options = yield* openedQueryOptions("approval-required");
+            const decision = yield* Effect.promise(() =>
+              options.canUseTool!(
+                "mcp__gem__propose",
+                { summary: "Fix" },
+                {
+                  signal: new AbortController().signal,
+                  toolUseID: "toolu_gem_propose",
+                  requestId: "request_gem_propose",
+                },
+              ),
+            );
+            assert.deepInclude(decision, { behavior: "allow", toolUseID: "toolu_gem_propose" });
+          }),
+        ),
+      );
+    }
+  },
+);

@@ -1,5 +1,6 @@
 import {
   type CustomModelSetting,
+  DEFAULT_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   ModelCapabilities,
   type ModelSelection,
@@ -7,6 +8,7 @@ import {
   ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -475,6 +477,19 @@ function cloneSelections(
   selections: ReadonlyArray<ProviderOptionSelection>,
 ): Array<ProviderOptionSelection> {
   return selections.map(cloneSelection);
+}
+
+/** The model a provider instance starts with when none is chosen, as in the composer. */
+export function defaultProviderInstanceModel(provider: {
+  readonly driverKind: ProviderDriverKind;
+  readonly models: ReadonlyArray<ServerProviderModel>;
+}): string | undefined {
+  return (
+    provider.models.find((model) => model.isDefault && !model.isCustom)?.slug ??
+    provider.models.find((model) => !model.isCustom)?.slug ??
+    provider.models[0]?.slug ??
+    DEFAULT_MODEL_BY_PROVIDER[provider.driverKind]
+  );
 }
 
 export function createModelSelection(

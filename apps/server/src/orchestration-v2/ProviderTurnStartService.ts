@@ -733,6 +733,7 @@ export const layer: Layer.Layer<
               providerThread,
               providerTurnId: abandonedTurn.id,
               requestRuntimeRestart: true,
+              recoversAbandonedTurn: true,
             }),
           );
           if (recovered._tag === "Failure") {
@@ -1215,6 +1216,7 @@ export const layer: Layer.Layer<
               runtimePolicy: resolvedRuntimePolicy,
               providerSessionId,
               existingProviderThread: providerThread,
+              messageText: message.text,
             }),
           );
         }
@@ -1319,6 +1321,7 @@ export const layer: Layer.Layer<
             // Clear the native ref to force a fresh session while preserving row identity.
             existingProviderThread: { ...providerThread, nativeThreadRef: null },
             forceNewNativeThread: true,
+            messageText: message.text,
           }),
         );
         if (replacement === undefined) return undefined;

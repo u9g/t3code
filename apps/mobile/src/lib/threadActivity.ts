@@ -105,6 +105,7 @@ export interface ThreadFeedActivity {
     | "search"
     | "stop"
     | "hammer"
+    | "info"
     | "lock"
     | "message"
     | "warning"
@@ -537,11 +538,11 @@ function itemIcon(item: OrchestrationV2TurnItem): ThreadFeedActivity["icon"] {
       return isJavaScriptReplTool(item.toolName) ? "code" : "wrench";
     case "subagent":
       return "hammer";
+    case "system_notice":
+      return item.tone === "info" ? "info" : "warning";
     case "run_interrupt_request":
     case "run_interrupt_result":
       return "stop";
-    case "system_notice":
-      return "warning";
     case "error":
       return item.failure.class === "usage_limit"
         ? item.status === "completed"

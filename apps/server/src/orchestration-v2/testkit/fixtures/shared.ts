@@ -309,6 +309,12 @@ export const CLAUDE_MODEL_SELECTION = {
   model: "claude-sonnet-4-6",
 } satisfies ModelSelection;
 
+// Recordings run real cloud sessions, so they use the cheapest model.
+export const CLAUDE_CLOUD_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("claudeCloud"),
+  model: "claude-haiku-5-5",
+} satisfies ModelSelection;
+
 export const CURSOR_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("cursor"),
   model: "composer-2.5",
@@ -1268,6 +1274,18 @@ export function assertAssistantTextIncludes(
       (item) => item.type === "assistant_message" && item.text.includes(expectedText),
     ),
     `expected assistant output to include ${JSON.stringify(expectedText)}`,
+  );
+}
+
+/** A cloud thread's first turn links its session, once, as an info notice. */
+export function assertClaudeCloudStartupNotice(projection: OrchestrationV2ThreadProjection) {
+  const notices = projection.turnItems.filter((item) => item.type === "system_notice");
+  assert.lengthOf(notices, 1);
+  assert.equal(notices[0]?.runId, projection.runs[0]?.id);
+  assert.equal(notices[0]?.tone, "info");
+  assert.match(
+    notices[0]?.message ?? "",
+    /^Running in a Claude Code cloud session: https:\/\/claude\.ai\/code\/session_\w+$/u,
   );
 }
 

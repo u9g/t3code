@@ -180,16 +180,51 @@ function callAcpMcpTool(options: {
 }
 
 export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.Effect<void> {
+  return Effect.suspend(() =>
+    runMcpHttpRelay({
+      endpoint: options.endpoint,
+      authorization: options.authorization,
+      messages: Stream.fromAsyncIterable(
+        NodeReadline.createInterface({ input: options.input }),
+        bridgeError,
+      ),
+      deliver: (message) =>
+        Effect.sync(() => {
+          options.output.write(`${JSON.stringify(message)}\n`);
+        }),
+      ...(options.fetchImplementation === undefined
+        ? {}
+        : { fetchImplementation: options.fetchImplementation }),
+    }),
+  );
+}
+
+export interface McpHttpRelayOptions {
+  readonly endpoint: string;
+  readonly authorization: string;
+  /** Sent with every request, beside the protocol's own headers. */
+  readonly headers?: Readonly<Record<string, string>>;
+  /** The client's JSON-RPC messages, each serialized; the relay ends with them. */
+  readonly messages: Stream.Stream<string, AcpMcpBridgeError>;
+  /** Hands a JSON-RPC message from T3 Code's endpoint to the client. */
+  readonly deliver: (message: unknown) => Effect.Effect<void>;
+  readonly fetchImplementation?: (url: string, init?: RequestInit) => Promise<Response>;
+}
+
+/**
+ * Relays an MCP client's JSON-RPC messages to T3 Code's HTTP endpoint and the
+ * endpoint's messages back, for clients that cannot reach the endpoint
+ * themselves: ACP agents over stdio, and Claude Cloud sessions through the
+ * SDK's in-process MCP servers.
+ */
+export function runMcpHttpRelay(options: McpHttpRelayOptions): Effect.Effect<void> {
   const fetchImplementation = options.fetchImplementation ?? fetch;
   return Effect.gen(function* () {
     let sessionId: string | null = null;
     let protocolVersion: string | null = null;
     const running = new Set<Fiber.Fiber<void>>();
 
-    const writeMessage = (message: unknown): Effect.Effect<void> =>
-      Effect.sync(() => {
-        options.output.write(`${JSON.stringify(message)}\n`);
-      });
+    const writeMessage = options.deliver;
 
     const handleServerPayload = Effect.fn("AcpMcpStdioBridge.handleServerPayload")(function* (
       payload: unknown,
@@ -220,6 +255,7 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
             fetchImplementation(options.endpoint, {
               method: "POST",
               headers: {
+                ...options.headers,
                 "content-type": "application/json",
                 accept: "application/json, text/event-stream",
                 authorization: options.authorization,
@@ -317,10 +353,7 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
       return yield* launch(task);
     });
 
-    const reader = NodeReadline.createInterface({ input: options.input });
-    yield* Stream.runForEach(Stream.fromAsyncIterable(reader, bridgeError), dispatch).pipe(
-      Effect.ignoreCause,
-    );
+    yield* Stream.runForEach(options.messages, dispatch).pipe(Effect.ignoreCause);
     yield* Fiber.awaitAll(running);
   });
 }

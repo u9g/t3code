@@ -41,6 +41,7 @@ import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import { threadHasQueuedTurnStart } from "./orchestration-v2/ThreadSettlementService.ts";
+import { sweepClaudeCloudFiles } from "./provider/claudeCloud/ClaudeCloudFiles.ts";
 import { forkParked } from "./serverActivation.ts";
 import * as Settings from "./serverSettings.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
@@ -218,6 +219,13 @@ const make = Effect.gen(function* () {
   const terminals = yield* TerminalManager.TerminalManager;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const sweepProviderFiles = sweepClaudeCloudFiles.pipe(
+    Effect.provideContext(
+      yield* Effect.context<
+        FileSystem.FileSystem | Path.Path | SqlClient.SqlClient | ServerConfig.ServerConfig
+      >(),
+    ),
+  );
   const liveTerminals = new Map<string, Map<string, TerminalSummary>>();
   const orphanSizes = new Map<string, number | null>();
   const noteTerminal = (terminal: TerminalSummary) => {
@@ -944,9 +952,12 @@ const make = Effect.gen(function* () {
             )
               return "thread or cleanup settings changed since check";
             // Durable deletion cleanup must succeed or be explicitly cancelled before removing its checkout.
+            // Provider files live outside it and can fail removal for good while another app holds one
+            // open; the files sweep removes them later, so they never keep the checkout.
             const pendingCleanup = yield* sql<{ status: string }>`
               SELECT status FROM orchestration_v2_effect_outbox
               WHERE thread_id = ${thread.id} AND status NOT IN ('succeeded', 'cancelled')
+                AND effect_type != 'provider-files.cleanup'
             `.pipe(NodeSqliteClient.readOnly);
             // Failed effects never retry, so only running work can finish and free the path.
             if (pendingCleanup.some((row) => row.status !== "failed"))
@@ -1191,6 +1202,11 @@ const make = Effect.gen(function* () {
         ),
       );
     }
+    // Not a retention setting: these files belong to deleted threads, or are downloads a
+    // crash cut short. The report has no kind for them, so they only reach the log.
+    yield* sweepProviderFiles.pipe(
+      Effect.catch((error) => Effect.logWarning("provider file cleanup failed", { error })),
+    );
     const counts = { removed: 0, kept: 0, failed: 0 };
     let bytesFreed = 0;
     for (const entry of entries) {

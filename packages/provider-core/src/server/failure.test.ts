@@ -143,6 +143,47 @@ it("uses the innermost category without carrying an outer reason into it", () =>
   );
 });
 
+it("shows a Claude query runner's message only when the runner classified the failure", () => {
+  const turnStartFailure = (runnerError: object) =>
+    new ProviderAdapter.ProviderAdapterTurnStartError({
+      driver: ProviderDriverKind.make("claudeCloud"),
+      threadId: ThreadId.make("thread:runner-error"),
+      providerThreadId: ProviderThreadId.make("provider-thread:runner-error"),
+      runId: RunId.make("run:runner-error"),
+      cause: runnerError,
+    });
+  const message =
+    "Claude Cloud works on a GitHub repository, and this project has no git remote. Push it to GitHub first.";
+  assert.equal(
+    makeProviderFailure({
+      cause: Cause.fail(
+        turnStartFailure({
+          _tag: "ClaudeAgentSdkQueryRunnerError",
+          method: "resolveRepository",
+          reason: "no_remote",
+          message,
+          cause: new Error("git remote get-url origin"),
+        }),
+      ),
+    }).message,
+    message,
+  );
+  // A local runner wraps raw SDK and CLI errors without a reason; they stay hidden.
+  assert.include(
+    makeProviderFailure({
+      cause: Cause.fail(
+        turnStartFailure({
+          _tag: "ClaudeAgentSdkQueryRunnerError",
+          method: "open",
+          message: "Claude Agent SDK query failed.",
+          cause: new Error("spawn claude ENOENT"),
+        }),
+      ),
+    }).message,
+    "The provider could not start this turn.",
+  );
+});
+
 it("does not expose defect text nested inside a known error category", () => {
   const failure = makeProviderFailure({
     cause: {

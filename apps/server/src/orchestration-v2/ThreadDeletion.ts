@@ -235,5 +235,14 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
       request: { type: "attachment.cleanup", attachmentIds },
     });
   }
+  // Every thread, not only Claude Cloud ones: a thread that switched providers keeps the
+  // files an earlier provider downloaded. Queued last because a thread's effects run in
+  // order, and a file another app holds open keeps this one retrying.
+  effects.push({
+    id: `effect:${command.commandId}:provider-files.cleanup`,
+    commandId: command.commandId,
+    threadId: command.threadId,
+    request: { type: "provider-files.cleanup" },
+  });
   return { events, effects };
 });

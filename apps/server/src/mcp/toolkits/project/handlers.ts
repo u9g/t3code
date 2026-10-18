@@ -1,6 +1,7 @@
 import {
   CommandId,
   MessageId,
+  type ModelSelection,
   ThreadId,
   OrchestratorMcpFailure,
   ProjectId,
@@ -25,6 +26,7 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import { defaultProviderInstanceModel } from "@t3tools/shared/model";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -79,6 +81,35 @@ const launchCommandId = Effect.fn("mcp.launchCommandId")(function* (
   const bytes = new TextEncoder().encode(JSON.stringify([namespace, key]));
   const digest = yield* crypto.digest("SHA-256", bytes).pipe(Effect.mapError(unavailable));
   return CommandId.make(`mcp:launch:${Hex.encode(digest)}`);
+});
+
+/**
+ * The selection a launch on `instanceId` starts with: the one it would inherit
+ * when that is on the same instance, options included, otherwise the instance's
+ * default model, as the composer picks it.
+ */
+const providerDefaultModelSelection = Effect.fn("mcp.providerDefaultModelSelection")(function* (
+  instanceId: ProviderInstanceId,
+  inherited: ModelSelection | undefined,
+) {
+  if (inherited?.instanceId === instanceId) return inherited;
+  const providers = yield* ProviderRegistry.ProviderRegistry.pipe(
+    Effect.flatMap((registry) => registry.getProviders),
+  );
+  const provider = providers.find((candidate) => candidate.instanceId === instanceId);
+  const model =
+    provider === undefined
+      ? undefined
+      : defaultProviderInstanceModel({ driverKind: provider.driver, models: provider.models });
+  if (model === undefined)
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message:
+        provider === undefined
+          ? `Provider instance ${instanceId} is not registered. orchestrator_capabilities lists providers.`
+          : `Provider instance ${instanceId} has no model to start with. Pass modelSelection.`,
+    });
+  return { instanceId, model } satisfies ModelSelection;
 });
 
 /** Fails before anything is created, rather than starting an agent without the servers. */
@@ -136,6 +167,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             code: "invalid_request",
             message:
               "scratch:true picks its own project and folder; omit projectId and workspaceStrategy.",
+          });
+        if (input.modelSelection !== undefined && input.providerInstanceId !== undefined)
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "Pass modelSelection or providerInstanceId, not both.",
           });
         const projectId =
           input.scratch === true
@@ -209,9 +245,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 ),
               )
             : undefined;
-        const modelSelection =
-          input.modelSelection ??
-          launchedModel ??
+        const inherited =
           caller?.modelSelection ??
           (projectDefaults
             ? resolveNewThreadModelSelection({
@@ -226,6 +260,12 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               }).selection
             : null) ??
           undefined;
+        const modelSelection =
+          input.modelSelection ??
+          launchedModel ??
+          (input.providerInstanceId === undefined
+            ? inherited
+            : yield* providerDefaultModelSelection(input.providerInstanceId, inherited));
         if (modelSelection === undefined)
           return yield* new OrchestratorMcpFailure({
             code: "invalid_request",

@@ -473,6 +473,7 @@ available.
 - Repository slug source:
   - `T3CODE_DESKTOP_UPDATE_REPOSITORY` (format `owner/repo`), if set.
   - otherwise `GITHUB_REPOSITORY` from GitHub Actions.
+  - An installed app also reads `T3CODE_DESKTOP_UPDATE_REPOSITORY` at startup and checks that repository instead, keeping the built-in release type and signing publisher ([user guide](../user/updating.md#take-desktop-updates-from-a-fork)).
 - Required release assets for updater:
   - platform installers (`.exe`, `.dmg`, `.AppImage`, `.deb`, plus macOS `.zip` for Squirrel.Mac update payloads)
   - channel metadata: `latest*.yml` for stable releases, `nightly*.yml` for nightly releases

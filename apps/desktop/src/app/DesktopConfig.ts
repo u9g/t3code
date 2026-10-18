@@ -2,6 +2,27 @@ import { OtlpHeadersFromString, OtlpProtocol } from "@t3tools/shared/observabili
 import * as Config from "effect/Config";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+
+interface DesktopUpdateRepository {
+  readonly owner: string;
+  readonly repo: string;
+}
+
+// Both parts end up in GitHub URL paths, so anything beyond GitHub's own
+// name characters (or a bare `.`/`..` repo) is rejected rather than escaped.
+const GITHUB_REPOSITORY_PATTERN = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)$/;
+
+const parseDesktopUpdateRepository = (
+  value: string,
+): Result.Result<DesktopUpdateRepository, string> => {
+  const match = GITHUB_REPOSITORY_PATTERN.exec(value);
+  const owner = match?.[1];
+  const repo = match?.[2];
+  return owner && repo && !/^\.+$/.test(repo)
+    ? Result.succeed({ owner, repo })
+    : Result.fail(value);
+};
 
 const trimNonEmptyOption = (value: string): Option.Option<string> => {
   const trimmed = value.trim();
@@ -58,6 +79,11 @@ export const DesktopConfig = Config.all({
   desktopLauncherPath: trimmedString("T3CODE_DESKTOP_LAUNCHER_PATH"),
   appImagePath: trimmedString("APPIMAGE"),
   disableAutoUpdate: optionalBoolean("T3CODE_DISABLE_AUTO_UPDATE"),
+  // An invalid value is kept as a failure, not a config error, so the updater
+  // can warn and fall back to the built-in feed instead of the app failing to start.
+  updateRepository: trimmedString("T3CODE_DESKTOP_UPDATE_REPOSITORY").pipe(
+    Config.map(Option.map(parseDesktopUpdateRepository)),
+  ),
   mockUpdates: optionalBoolean("T3CODE_DESKTOP_MOCK_UPDATES"),
   mockUpdateServerPort: Config.Port("T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT").pipe(
     Config.withDefault(3000),

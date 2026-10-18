@@ -19,6 +19,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -65,6 +66,8 @@ interface DesktopPreparedUpdateInstallResult extends DesktopUpdateActionResult {
 
 const AppUpdateYmlConfig = Schema.Record(Schema.String, Schema.String);
 type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type;
+
+const isGitHubReleaseType = Schema.is(Schema.Literals(["draft", "prerelease", "release"]));
 
 const UpdateInfo = Schema.Struct({
   version: Schema.String,
@@ -278,6 +281,11 @@ function parseAppUpdateYml(raw: string): Effect.Effect<Option.Option<AppUpdateYm
   );
 }
 
+function bakedGitHubRepository(appUpdateYmlConfig: AppUpdateYmlConfig): Option.Option<string> {
+  const { provider, owner, repo } = appUpdateYmlConfig;
+  return provider === "github" && owner && repo ? Option.some(`${owner}/${repo}`) : Option.none();
+}
+
 function createBaseUpdateState(
   channel: DesktopUpdateChannel,
   disabledReason: Option.Option<string>,
@@ -354,6 +362,7 @@ export const make = Effect.gen(function* () {
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
 
   const appUpdateYmlConfigRef = yield* Ref.make<Option.Option<AppUpdateYmlConfig>>(Option.none());
+  const updateRepositoryRef = yield* Ref.make(Option.none<string>());
   const activeUpdateActionRef = yield* Ref.make<Option.Option<UpdateAction>>(Option.none());
   const installRunningBackendsRef = yield* Ref.make<
     ReadonlyArray<DesktopBackendPool.DesktopBackendInstance>
@@ -656,15 +665,59 @@ export const make = Effect.gen(function* () {
   );
 
   const baseUpdateState = (channel: DesktopUpdateChannel, disabledReason: Option.Option<string>) =>
-    Ref.get(notAppliedVersionRef).pipe(
-      Effect.map((notAppliedVersion) => ({
+    Effect.all([Ref.get(notAppliedVersionRef), Ref.get(updateRepositoryRef)]).pipe(
+      Effect.map(([notAppliedVersion, updateRepository]) => ({
         ...createBaseUpdateState(channel, disabledReason, environment),
         ...Option.match(notAppliedVersion, {
           onNone: () => ({}),
           onSome: (version) => ({ notAppliedVersion: version }),
         }),
+        ...Option.match(updateRepository, {
+          onNone: () => ({}),
+          onSome: (repository) => ({ updateRepository: repository }),
+        }),
       })),
     );
+
+  // Returns the GitHub repository updates come from, which release links follow.
+  const configureUpdateFeed = Effect.fn("desktop.updates.configureUpdateFeed")(function* (
+    appUpdateYmlConfig: Option.Option<AppUpdateYmlConfig>,
+  ) {
+    if (config.mockUpdates) {
+      yield* electronUpdater.setFeedURL({
+        provider: "generic",
+        url: `http://localhost:${config.mockUpdateServerPort}`,
+      } as ElectronUpdater.ElectronUpdaterFeedUrl);
+      return Option.none<string>();
+    }
+    // electron-updater still reads app-update.yml for its cache directory and
+    // the signing publisher, so the override only redirects a build that ships one.
+    if (Option.isNone(appUpdateYmlConfig)) return Option.none<string>();
+    const bakedConfig = appUpdateYmlConfig.value;
+    const bakedRepository = bakedGitHubRepository(bakedConfig);
+    if (Option.isNone(config.updateRepository)) return bakedRepository;
+
+    const override = config.updateRepository.value;
+    if (Result.isFailure(override)) {
+      yield* logUpdaterWarning("ignoring T3CODE_DESKTOP_UPDATE_REPOSITORY; expected owner/repo", {
+        value: redactMessage(override.failure),
+        repository: Option.getOrNull(bakedRepository),
+      });
+      return bakedRepository;
+    }
+
+    const { owner, repo } = override.success;
+    const releaseType = isGitHubReleaseType(bakedConfig.releaseType)
+      ? bakedConfig.releaseType
+      : "release";
+    yield* electronUpdater.setFeedURL({ provider: "github", owner, repo, releaseType });
+    yield* logUpdaterInfo("using update repository from T3CODE_DESKTOP_UPDATE_REPOSITORY", {
+      repository: `${owner}/${repo}`,
+      releaseType,
+      replacedRepository: Option.getOrNull(bakedRepository),
+    });
+    return Option.some(`${owner}/${repo}`);
+  });
 
   const resetInstallAction = Effect.all(
     [
@@ -1083,12 +1136,7 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      if (config.mockUpdates) {
-        yield* electronUpdater.setFeedURL({
-          provider: "generic",
-          url: `http://localhost:${config.mockUpdateServerPort}`,
-        } as ElectronUpdater.ElectronUpdaterFeedUrl);
-      }
+      yield* Ref.set(updateRepositoryRef, yield* configureUpdateFeed(appUpdateYmlConfig));
 
       const settings = yield* desktopSettings.get;
       const disabledReason = yield* resolveDisabledReason;

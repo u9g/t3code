@@ -118,13 +118,15 @@ To give one thread's agent tools of your own, pass `--mcp-config` with HTTP MCP
 servers in Claude Code's format, as JSON or a path to a JSON file:
 
 ```sh
-t3 thread start . "Fix the flaky test" --provider claudeAgent --model claude-opus-5-5 \
+t3 thread start . "Fix the flaky test" --provider claudeAgent \
   --mcp-config '{"mcpServers":{"review":{"type":"http","url":"http://127.0.0.1:7341/mcp","headers":{"Authorization":"Bearer …"}}}}'
 ```
 
-Every session of that thread gets the servers. Their tools run without asking.
-Only Claude threads take them: a thread with servers will not run on another
-provider. Header values stay on this machine and never appear in the app.
+Every session of that thread gets the servers, including Claude Cloud sessions,
+which reach them through this machine. Their tools run without asking. Only
+Claude and Claude Cloud threads take them: a thread with servers will not run
+on another provider. Header values stay on this machine and never appear in the
+app.
 
 ## Remove an agent
 

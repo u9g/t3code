@@ -24,14 +24,17 @@ export class ThreadMcpServersError extends Schema.TaggedError<ThreadMcpServersEr
   }
 }
 
-const DRIVERS_TAKING_THREAD_MCP_SERVERS: ReadonlySet<string> = new Set(["claudeAgent"]);
+const DRIVERS_TAKING_THREAD_MCP_SERVERS: ReadonlySet<string> = new Set([
+  "claudeAgent",
+  "claudeCloud",
+]);
 
 /** Whether this driver's adapter hands a thread's MCP servers to its agent. */
 export const driverTakesThreadMcpServers = (driver: ProviderDriverKind) =>
   DRIVERS_TAKING_THREAD_MCP_SERVERS.has(driver);
 
 export const unsupportedThreadMcpServersMessage = (driver: ProviderDriverKind) =>
-  `This thread has MCP servers of its own, which ${driver} cannot use. Run it on Claude.`;
+  `This thread has MCP servers of its own, which ${driver} cannot use. Run it on Claude or Claude Cloud.`;
 
 /** A turn that would run without the thread's MCP servers; its message reaches the thread. */
 export class ThreadMcpServersUnsupportedError extends Schema.TaggedError<ThreadMcpServersUnsupportedError>()(
@@ -103,8 +106,9 @@ export const layer = Layer.effect(
           Effect.mapError(fail("read", threadId)),
         );
       }),
-      remove: (threadId) =>
-        secrets.remove(secretName(threadId)).pipe(Effect.mapError(fail("remove", threadId))),
+      remove: Effect.fn("ThreadMcpServers.remove")(function (threadId) {
+        return secrets.remove(secretName(threadId)).pipe(Effect.mapError(fail("remove", threadId)));
+      }),
     };
   }),
 );

@@ -91,6 +91,21 @@ describe("runtime diagnostics in the v2 work log", () => {
     expect(entry.detail).toBeUndefined();
   });
 
+  it("shows an info notice as information and keeps a notice without a tone a warning", () => {
+    const notice = (tone?: "info" | "warning") =>
+      workEntry({
+        ...baseItem,
+        type: "system_notice",
+        message: "Running in a Claude Code cloud session.",
+        ...(tone ? { tone } : {}),
+      });
+
+    expect(notice("info")).toMatchObject({ tone: "info" });
+    expect(notice("info").sourceActivityKind).toBeUndefined();
+    expect(notice("warning").sourceActivityKind).toBe("runtime.warning");
+    expect(notice().sourceActivityKind).toBe("runtime.warning");
+  });
+
   it("keeps retry progress visible while retaining its diagnostic detail", () => {
     const entry = workEntry(
       errorItem({

@@ -413,6 +413,8 @@ function workRowSymbolName(icon: ThreadFeedActivity["icon"]): WorkContentIcon {
       return "magnifyingglass";
     case "hammer":
       return { ios: "hammer", android: "construction" };
+    case "info":
+      return "info.circle";
     case "lock":
       return { ios: "lock", android: "lock" };
     case "message":

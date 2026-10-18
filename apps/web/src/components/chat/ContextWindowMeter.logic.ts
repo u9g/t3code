@@ -1,4 +1,9 @@
-import type { ModelSelection, ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  isClaudeCodeDriver,
+  type ModelSelection,
+  type ProviderDriverKind,
+  type ProviderInstanceId,
+} from "@t3tools/contracts";
 import {
   CLAUDE_RESUME_COMPACTION_NEVER_ANSWER,
   isClaudeResumeCompactionQuestion,
@@ -69,7 +74,7 @@ export function shouldOfferResumeCompaction(input: {
   readonly now: string;
 }): boolean {
   if (
-    input.provider !== "claudeAgent" ||
+    !isClaudeCodeDriver(input.provider) ||
     (input.usedTokens ?? 0) < CLAUDE_RESUME_COMPACTION_TOKENS
   ) {
     return false;

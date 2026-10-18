@@ -47,6 +47,12 @@ function causeMessage(cause: unknown): string | undefined {
         case "ClaudeBackgroundWorkBlocksQueryReplacementError":
         case "CursorModelUnavailableError":
           return stringField(cause, "message");
+        case "ClaudeAgentSdkQueryRunnerError":
+          // Only the Claude Cloud runner classifies its failures, and its
+          // message is fixed per reason. Local SDK and CLI failures have no
+          // reason and stay behind the generic message.
+          if (stringField(cause, "reason") !== undefined) return stringField(cause, "message");
+          break;
         case "ContextHandoffDeliveryUncertainError":
           return "T3 could not confirm whether conversation history reached the provider. Retry the turn to recover the session.";
         case "ProviderAdapterTurnStartError":
@@ -74,7 +80,7 @@ function causeMessage(cause: unknown): string | undefined {
   return message;
 }
 
-function stringField(value: unknown, key: "message" | "code"): string | undefined {
+function stringField(value: unknown, key: "message" | "code" | "reason"): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   try {
     const candidate = (value as Record<string, unknown>)[key];

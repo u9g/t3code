@@ -136,6 +136,7 @@ import {
   EyeIcon,
   GitForkIcon,
   GlobeIcon,
+  InfoIcon,
   type LucideIcon,
   MessageCircleIcon,
   MousePointerClickIcon,
@@ -4793,6 +4794,7 @@ type WorkEntryIconName =
   | "eye"
   | "globe"
   | "hammer"
+  | "info"
   | "message-circle"
   | "search"
   | "square-pen"
@@ -5003,6 +5005,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <GlobeIcon className={className} aria-hidden />;
     case "hammer":
       return <HammerIcon className={className} aria-hidden />;
+    case "info":
+      return <InfoIcon className={className} aria-hidden />;
     case "search":
       return <SearchIcon className={className} aria-hidden />;
     case "message-circle":
@@ -5137,6 +5141,9 @@ function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
         source satisfies never;
         return "zap";
     }
+  }
+  if (workEntry.structuredPayload?.type === "system_notice") {
+    return workEntry.structuredPayload.tone === "info" ? "info" : "circle-alert";
   }
   if (workEntry.itemType === "user_input_request" || workEntry.itemType === "approval_request") {
     return "message-circle";

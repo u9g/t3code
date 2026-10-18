@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { markdownFilePathDestination } from "@t3tools/shared/markdownLinks";
+
 import { classifyMarkdownImageSource, markdownImageSourceFragment } from "./markdownImages.js";
 
 describe("classifyMarkdownImageSource", () => {
@@ -58,6 +60,22 @@ describe("classifyMarkdownImageSource", () => {
     "file://%",
   ])("blocks unsupported or unresolved source %s", (source) => {
     expect(classifyMarkdownImageSource(source)).toEqual({ _tag: "Blocked" });
+  });
+
+  it.each([
+    [
+      "C:\\Users\\Jo Smith\\.t3\\userdata\\files\\clip (1) #2%.mp4",
+      "C:/Users/Jo Smith/.t3/userdata/files/clip (1) #2%.mp4",
+    ],
+    [
+      "/home/jo smith/.t3/userdata/files/clip (1) #2%.mp4",
+      "/home/jo smith/.t3/userdata/files/clip (1) #2%.mp4",
+    ],
+  ])("reads a destination built from %s back as the file", (path, expected) => {
+    expect(classifyMarkdownImageSource(markdownFilePathDestination(path))).toEqual({
+      _tag: "WorkspaceFile",
+      path: expected,
+    });
   });
 });
 

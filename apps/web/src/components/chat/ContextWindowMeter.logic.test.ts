@@ -186,6 +186,17 @@ describe("shouldOfferResumeCompaction", () => {
     expect(offer("2026-08-24T11:56:00.000Z")).toBe(false);
   });
 
+  it("offers it for Claude Cloud sessions, which share Claude's prompt cache", () => {
+    expect(
+      shouldOfferResumeCompaction({
+        provider: "claudeCloud",
+        usedTokens: 100_000,
+        updatedAt: "2026-08-24T10:50:00.000Z",
+        now,
+      }),
+    ).toBe(true);
+  });
+
   it("does not show Claude's resume prompt for another provider", () => {
     expect(
       shouldOfferResumeCompaction({

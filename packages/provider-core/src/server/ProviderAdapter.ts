@@ -643,5 +643,16 @@ export class ProviderAdapterV2 extends Context.Service<
     readonly openSession: (
       input: ProviderAdapterV2OpenSessionInput,
     ) => Effect.Effect<ProviderAdapterV2SessionRuntime, ProviderAdapterV2Error, Scope.Scope>;
+    /**
+     * Saves on this machine a file that a session running elsewhere sent the user, and returns
+     * its path. `output` is what the tool call that sent files returned; null means that call
+     * did not send `path`, or the file could not be saved. Only remote adapters implement it.
+     */
+    readonly saveSentFile?: (input: {
+      readonly threadId: ThreadId;
+      readonly toolName: string;
+      readonly output: unknown;
+      readonly path: string;
+    }) => Effect.Effect<string | null>;
   }
 >()("@t3tools/provider-core/server/ProviderAdapter/ProviderAdapterV2") {}

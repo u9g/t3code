@@ -167,6 +167,19 @@ describe("customModelEditor.logic", () => {
     expect(
       presets.capabilities?.optionDescriptors?.some((option) => option.id === "contextWindow"),
     ).toBe(false);
+    // Claude Cloud compiles model options exactly as Claude does.
+    const claudeCloud = ProviderDriverKind.make("claudeCloud");
+    expect(
+      descriptorsFromCapabilities(capabilities, claudeCloud).map((option) => option.id),
+    ).toEqual(["thinking"]);
+    const cloudPresets = definitionFromDraft(
+      draft({
+        descriptors: (DESCRIPTOR_PRESETS_BY_KIND[claudeCloud] ?? []).map(descriptorFromPreset),
+      }),
+    );
+    expect(cloudPresets.capabilities?.optionDescriptors?.map((option) => option.id)).toEqual(
+      presets.capabilities?.optionDescriptors?.map((option) => option.id),
+    );
     const cursorCopy = descriptorsFromCapabilities(capabilities, ProviderDriverKind.make("cursor"));
     expect(cursorCopy.map((option) => option.id)).toEqual(["contextWindow", "thinking"]);
     const authored = { slug: "custom", name: "Custom", capabilities };

@@ -971,7 +971,13 @@ it.effect("thread.stop marks a turn it cannot interrupt so a late agent watch is
   }).pipe(Effect.provide(layerTest)),
 );
 
-it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)(
+it.effect.each([
+  "missing session",
+  "completed",
+  "failed",
+  "cancelled",
+  "Claude Cloud completed",
+] as const)(
   "a native child Stop only settles a confirmed %s outcome and preserves its owner and sibling",
   (providerState) =>
     Effect.gen(function* () {
@@ -985,13 +991,18 @@ it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)
       const before = yield* orchestrator.getThreadProjection(threadId);
       const run = before.runs[0]!;
       const now = yield* DateTime.now;
+      // Claude Cloud runs the same agent, so its native children stop the same way.
+      const driver =
+        providerState === "Claude Cloud completed"
+          ? ProviderDriverKind.make("claudeCloud")
+          : CLAUDE_PROVIDER;
       const subagent = {
         ...before.subagents[0]!,
         origin: "provider_native" as const,
-        driver: CLAUDE_PROVIDER,
-        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        driver,
+        providerInstanceId: ProviderInstanceId.make(driver),
         nativeTaskRef: {
-          driver: CLAUDE_PROVIDER,
+          driver,
           nativeId: "claude-task",
           strength: "strong" as const,
         },
@@ -1060,8 +1071,8 @@ it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)
         occurredAt: now,
         payload: {
           ...providerThread,
-          driver: CLAUDE_PROVIDER,
-          providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+          driver,
+          providerInstanceId: ProviderInstanceId.make(driver),
           providerSessionId: ProviderSessionId.make("session:native-child-stop"),
         },
       });
@@ -1096,9 +1107,13 @@ it.effect.each(["missing session", "completed", "failed", "cancelled"] as const)
       const eventStore = yield* EventStore.EventStoreV2;
       const afterSequence = yield* eventStore.latestSequence({ threadId });
       const confirmedStatus =
-        providerState === "completed" || providerState === "failed" || providerState === "cancelled"
-          ? providerState
-          : null;
+        providerState === "Claude Cloud completed"
+          ? "completed"
+          : providerState === "completed" ||
+              providerState === "failed" ||
+              providerState === "cancelled"
+            ? providerState
+            : null;
       const confirmedOutcome =
         confirmedStatus === null
           ? undefined

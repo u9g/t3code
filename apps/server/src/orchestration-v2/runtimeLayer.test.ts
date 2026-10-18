@@ -71,6 +71,7 @@ import { PullRequestProviderError } from "@t3tools/source-control-core/server/Pu
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as ResourceCleanupService from "./ResourceCleanupService.ts";
 import * as RuntimeLayer from "./runtimeLayer.ts";
 import { shellStreamItemFromThreadShell } from "./ShellStream.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -1665,6 +1666,129 @@ it.layer(layerLegacyImportTest)("OrchestrationV2 legacy import", (it) => {
       });
       const projectionAfterRetry = yield* threadManagement.getThreadProjection(failureThreadId);
       assert.isNotNull(projectionAfterRetry.thread.archivedAt);
+    }),
+  );
+});
+
+const providerFileCleanupAttempts: Array<string> = [];
+const threadCleanups: Array<string> = [];
+const layerFailingProviderFileCleanupTest = layerTest.pipe(
+  Layer.provide(
+    Layer.succeed(ResourceCleanupService.ResourceCleanupService, {
+      cleanupTerminals: (threadId) =>
+        Effect.sync(() => void threadCleanups.push(`terminal:${threadId}`)),
+      cleanupPreviews: (threadId) =>
+        Effect.sync(() => void threadCleanups.push(`preview:${threadId}`)),
+      cleanupAttachments: (attachmentIds) =>
+        Effect.sync(
+          () => void threadCleanups.push(...attachmentIds.map((id) => `attachment:${id}`)),
+        ),
+      cleanupProviderFiles: (threadId) =>
+        Effect.sync(() => void providerFileCleanupAttempts.push(threadId)).pipe(
+          Effect.andThen(
+            Effect.fail(
+              new ResourceCleanupService.ResourceCleanupError({
+                operation: "provider-files",
+                threadId,
+                cause: "A player has the video open.",
+              }),
+            ),
+          ),
+        ),
+    }),
+  ),
+);
+
+it.layer(layerFailingProviderFileCleanupTest)("OrchestrationV2LayerLive deletion cleanup", (it) => {
+  it.effect("deletes a thread whose downloaded files can't be removed", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const eventSink = yield* EventSink.EventSinkV2;
+      const outbox = yield* EffectOutbox.EffectOutboxV2;
+      const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
+      const threadId = ThreadId.make("runtime-layer-provider-files-thread");
+      const attachmentId = "runtime-layer-provider-files-attachment";
+      const projectId = ProjectId.make("runtime-layer-provider-files-project");
+      yield* seedProject({
+        projectId,
+        title: "Provider files project",
+        workspaceRoot: "/workspace/provider-files",
+        defaultModelSelection: null,
+        createdAt: "2026-09-07T00:00:00.000Z",
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("runtime-layer-provider-files-create"),
+        threadId,
+        projectId,
+        title: "Provider files thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const now = yield* DateTime.now;
+      yield* eventSink.write({
+        commandId: CommandId.make("runtime-layer-provider-files-message"),
+        events: [
+          {
+            id: EventId.make("runtime-layer-provider-files-message"),
+            type: "message.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              createdBy: "user",
+              creationSource: "web",
+              id: MessageId.make("runtime-layer-provider-files-message"),
+              threadId,
+              runId: null,
+              nodeId: null,
+              role: "user",
+              text: "A screenshot.",
+              attachments: [
+                {
+                  type: "image",
+                  id: attachmentId,
+                  name: "screenshot.png",
+                  mimeType: "image/png",
+                  sizeBytes: 128,
+                },
+              ],
+              streaming: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+        ],
+      });
+      const deleteCommandId = CommandId.make("runtime-layer-provider-files-delete");
+
+      yield* orchestrator.dispatch({ type: "thread.delete", commandId: deleteCommandId, threadId });
+      yield* worker.drain();
+      // A thread's effects run in order, so a retried file cleanup must not hold the others.
+      assert.deepEqual(threadCleanups.toSorted(), [
+        `attachment:${attachmentId}`,
+        `preview:${threadId}`,
+        `terminal:${threadId}`,
+      ]);
+      assert.lengthOf(providerFileCleanupAttempts, 1);
+      for (let attempt = 1; attempt < 5; attempt++) {
+        yield* TestClock.adjust("30 seconds");
+        yield* worker.drain();
+      }
+
+      assert.isNotNull((yield* orchestrator.getThreadProjection(threadId)).thread.deletedAt);
+      assert.lengthOf(providerFileCleanupAttempts, 5);
+      const effects = yield* outbox.listByCommandId(deleteCommandId);
+      assert.deepEqual(effects.map((effect) => [effect.request.type, effect.status]).toSorted(), [
+        ["attachment.cleanup", "succeeded"],
+        ["preview.cleanup", "succeeded"],
+        ["provider-files.cleanup", "failed"],
+        ["terminal.cleanup", "succeeded"],
+      ]);
     }),
   );
 });

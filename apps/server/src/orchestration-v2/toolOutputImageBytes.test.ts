@@ -120,6 +120,16 @@ describe("stripUnservedToolOutputImageBytes", () => {
     ]);
   });
 
+  it("keeps the image a cloud Read returns as bare tool_result content", () => {
+    const image = {
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: PNG_BASE64 },
+    };
+    const item = toolItem([image], "Read");
+
+    expect(stripUnservedToolOutputImageBytes(item)).toBe(item);
+  });
+
   it("strips only the images past the last one an asset can serve", () => {
     const images = Array.from({ length: MAX_TOOL_OUTPUT_IMAGES + 2 }, () => ({
       type: "image",

@@ -833,6 +833,7 @@ it.effect.each([
   "within-limit",
   "runtime-raised",
   "interaction-raised",
+  "claude-cloud",
 ] as const)("stops a persisted workflow with state %s", (state) =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:workflow-stop");
@@ -840,8 +841,11 @@ it.effect.each([
     const runId = RunId.make("run:workflow-stop");
     const providerThreadId = ProviderThreadId.make("provider-thread:workflow-stop");
     const providerSessionId = ProviderSessionId.make("provider-session:workflow-stop");
-    const driver = ProviderDriverKind.make("claudeAgent");
-    const instanceId = ProviderInstanceId.make("claudeAgent");
+    // Claude Cloud runs the same agent, so its workflows stop the same way.
+    const driver = ProviderDriverKind.make(
+      state === "claude-cloud" ? "claudeCloud" : "claudeAgent",
+    );
+    const instanceId = ProviderInstanceId.make(driver);
     const now = yield* DateTime.now;
     let targetModes: Pick<OrchestrationV2ThreadShell, "runtimeMode" | "interactionMode"> = {
       runtimeMode: "approval-required",
@@ -1000,7 +1004,7 @@ it.effect.each([
                 return result;
               })
             : yield* stop;
-      if (state === "running" || state === "within-limit") {
+      if (state === "running" || state === "within-limit" || state === "claude-cloud") {
         expect(result).toMatchObject({ _tag: "Success" });
         expect(calls).toEqual([{ taskId: "native-workflow-id", providerThread }]);
         expect(task.status).toBe("running");

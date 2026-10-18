@@ -1,5 +1,6 @@
 import {
   AntigravitySettings,
+  ClaudeCloudSettings,
   ClaudeSettings,
   CodexSettings,
   ProviderDriverKind,
@@ -22,6 +23,11 @@ export const providerClients = makeProviderClientRegistry([
     driverKind: ProviderDriverKind.make("claudeAgent"),
     label: "Claude",
     settingsSchema: ClaudeSettings,
+  },
+  {
+    driverKind: ProviderDriverKind.make("claudeCloud"),
+    label: "Claude Cloud",
+    settingsSchema: ClaudeCloudSettings,
   },
   cursorClient,
   grokClient,

@@ -492,6 +492,17 @@ export const layerExecutor: Layer.Layer<
                   }),
               ),
             );
+          case "provider-files.cleanup":
+            return resourceCleanup.cleanupProviderFiles(effect.threadId).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationEffectExecutionError({
+                    effectId: effect.id,
+                    effectType: effect.request.type,
+                    cause,
+                  }),
+              ),
+            );
           case "thread-title.generate":
             return threadTitleRegeneration
               .execute({

@@ -3,20 +3,31 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { resolveAttachmentRelativePath } from "../attachmentPaths.ts";
 import { parseAttachmentFileExtension, resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import { removeClaudeCloudThreadFiles } from "../provider/claudeCloud/ClaudeCloudFiles.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 
 export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupError>()(
   "ResourceCleanupError",
   {
-    operation: Schema.Literals(["terminal", "preview", "device", "attachment", "scheduled-tasks"]),
+    operation: Schema.Literals([
+      "terminal",
+      "preview",
+      "device",
+      "attachment",
+      "scheduled-tasks",
+      "provider-files",
+    ]),
     threadId: Schema.optional(Schema.String),
     attachmentId: Schema.optional(Schema.String),
     cause: Schema.Defect(),
@@ -32,6 +43,11 @@ export class ResourceCleanupService extends Context.Reference<{
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
   ) => Effect.Effect<void, ResourceCleanupError>;
+  /**
+   * Removes what providers keep for the thread: the files they downloaded, such as
+   * Claude Cloud's sent files, and the MCP servers it was started with.
+   */
+  readonly cleanupProviderFiles: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
 }>("t3/orchestration-v2/ResourceCleanupService", {
   defaultValue: () => ({
     cleanupScheduledTasks: () => Effect.void,
@@ -39,6 +55,7 @@ export class ResourceCleanupService extends Context.Reference<{
     cleanupPreviews: () => Effect.void,
     cleanupDevices: () => Effect.void,
     cleanupAttachments: () => Effect.void,
+    cleanupProviderFiles: () => Effect.void,
   }),
 }) {}
 
@@ -51,6 +68,10 @@ export const layer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
     const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+    const threadMcpServers = yield* ThreadMcpServers.ThreadMcpServers;
+    const providerFilesContext = yield* Effect.context<
+      FileSystem.FileSystem | Path.Path | SqlClient.SqlClient | ServerConfig.ServerConfig
+    >();
     return {
       cleanupScheduledTasks: Effect.fn("ResourceCleanupService.cleanupScheduledTasks")(function (
         threadId: ThreadId,
@@ -130,6 +151,17 @@ export const layer = Layer.effect(
                 );
           },
           { discard: true, concurrency: 4 },
+        );
+      }),
+      cleanupProviderFiles: Effect.fn("ResourceCleanupService.cleanupProviderFiles")(function (
+        threadId: string,
+      ) {
+        return removeClaudeCloudThreadFiles(threadId).pipe(
+          Effect.provideContext(providerFilesContext),
+          Effect.andThen(threadMcpServers.remove(ThreadId.make(threadId))),
+          Effect.mapError(
+            (cause) => new ResourceCleanupError({ operation: "provider-files", threadId, cause }),
+          ),
         );
       }),
     };

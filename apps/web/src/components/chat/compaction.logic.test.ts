@@ -1,7 +1,10 @@
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
-import { hasDismissedResumeCompaction } from "@t3tools/client-runtime/state/context-window";
+import {
+  hasDismissedResumeCompaction,
+  shouldOfferResumeCompaction,
+} from "@t3tools/client-runtime/state/context-window";
 import { hasAvailableCompactionProvider } from "./compaction.logic";
 
 function claudeProvider(input: {
@@ -70,6 +73,19 @@ describe("hasAvailableCompactionProvider", () => {
         driverKind: ProviderDriverKind.make("claudeAgent"),
         instanceId: originalInstanceId,
         lockedInstanceId: originalInstanceId,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("shouldOfferResumeCompaction", () => {
+  it("offers it for Claude Cloud sessions, which share Claude's prompt cache", () => {
+    expect(
+      shouldOfferResumeCompaction({
+        provider: "claudeCloud",
+        usedTokens: 200_000,
+        updatedAt: "2026-08-24T10:50:00.000Z",
+        now: "2026-08-24T12:00:00.000Z",
       }),
     ).toBe(true);
   });

@@ -850,6 +850,29 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("server settings"
     }).pipe(Effect.provide(layerServerSettings())),
   );
 
+  it.effect("falls back from a Claude Cloud selection, which cannot generate text", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService;
+      const instanceId = ProviderInstanceId.make("claudeCloud");
+
+      const next = yield* serverSettings.updateSettings({
+        providerInstances: {
+          [instanceId]: {
+            driver: ProviderDriverKind.make("claudeCloud"),
+            enabled: true,
+            config: {},
+          },
+        },
+        textGenerationModelSelection: { instanceId, model: "claude-haiku-5-5" },
+      });
+
+      assert.deepEqual(next.textGenerationModelSelection, {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+      });
+    }).pipe(Effect.provide(layerServerSettings())),
+  );
+
   it.effect(
     "preserves the source control writer selection when its provider instance is disabled",
     () =>

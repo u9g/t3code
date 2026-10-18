@@ -29,6 +29,7 @@ import {
 const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
   [ProviderDriverKind.make("codex")]: OpenAI,
   [ProviderDriverKind.make("claudeAgent")]: ClaudeAI,
+  [ProviderDriverKind.make("claudeCloud")]: ClaudeAI,
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
   // Text generators, by the service they reach (see textGeneratorBrand).
   [ProviderDriverKind.make("openai")]: OpenAI,
@@ -40,6 +41,7 @@ const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>> = {
 const PROVIDER_TEXT_COLOR_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [ProviderDriverKind.make("codex")]: "text-black dark:text-white",
   [ProviderDriverKind.make("claudeAgent")]: "text-[#d97757]",
+  [ProviderDriverKind.make("claudeCloud")]: "text-[#d97757]",
   [ProviderDriverKind.make("antigravity")]: "text-[#5b87bf]",
   [ProviderDriverKind.make("openai")]: "text-black dark:text-white",
   [ProviderDriverKind.make("anthropic")]: "text-black dark:text-white",

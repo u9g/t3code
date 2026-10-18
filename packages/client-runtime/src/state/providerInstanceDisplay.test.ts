@@ -10,6 +10,8 @@ import {
 
 const codex = ProviderDriverKind.make("codex");
 const acpRegistry = ProviderDriverKind.make("acpRegistry");
+const claudeAgent = ProviderDriverKind.make("claudeAgent");
+const claudeCloud = ProviderDriverKind.make("claudeCloud");
 
 describe("providerInstanceInitials", () => {
   it("treats punctuation as a word break but keeps apostrophes between letters", () => {
@@ -71,6 +73,14 @@ describe("shouldShowInstanceBadge", () => {
     const first = { driverKind: codex, accentColor: undefined, enabled: true };
     const second = { driverKind: codex, accentColor: undefined, enabled: true };
     expect(shouldShowInstanceBadge(first, [first, second])).toBe(true);
+  });
+
+  it("marks Claude Cloud apart from local Claude, whose logo it shares", () => {
+    const local = { driverKind: claudeAgent, enabled: true };
+    const cloud = { driverKind: claudeCloud, enabled: true };
+    expect(shouldShowInstanceBadge(cloud, [local, cloud])).toBe(true);
+    expect(shouldShowInstanceBadge(local, [local, cloud])).toBe(false);
+    expect(shouldShowInstanceBadge(cloud, [cloud])).toBe(false);
   });
 
   it("ignores disabled siblings for enabled instances while distinguishing historical owners", () => {

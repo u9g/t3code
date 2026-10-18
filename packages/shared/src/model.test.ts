@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ProviderInstanceId, type ModelCapabilities } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ModelCapabilities,
+  type ServerProviderModel,
+} from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
@@ -7,6 +13,7 @@ import {
   buildProviderOptionSelectionsFromDescriptors,
   createModelCapabilities,
   createModelSelection,
+  defaultProviderInstanceModel,
   getProviderOptionCurrentLabel,
   getProviderOptionDescriptors,
   readCustomModelEntries,
@@ -264,5 +271,39 @@ describe("withImplicitFastModeDefault", () => {
     expect(withImplicitFastModeDefault(caps, [{ id: "fastMode", value: true }])).toEqual([
       { id: "fastMode", value: true },
     ]);
+  });
+});
+
+describe("defaultProviderInstanceModel", () => {
+  const model = (slug: string, flags: Partial<ServerProviderModel> = {}): ServerProviderModel => ({
+    slug,
+    name: slug,
+    isCustom: false,
+    capabilities: null,
+    ...flags,
+  });
+  const claude = ProviderDriverKind.make("claudeAgent");
+
+  it("prefers the built-in model marked default, then the first built-in one", () => {
+    const custom = model("custom", { isCustom: true, isDefault: true });
+    expect(
+      defaultProviderInstanceModel({
+        driverKind: claude,
+        models: [custom, model("first"), model("marked", { isDefault: true })],
+      }),
+    ).toBe("marked");
+    expect(
+      defaultProviderInstanceModel({ driverKind: claude, models: [custom, model("first")] }),
+    ).toBe("first");
+    expect(defaultProviderInstanceModel({ driverKind: claude, models: [custom] })).toBe("custom");
+  });
+
+  it("falls back to the driver's default model without a catalog", () => {
+    expect(defaultProviderInstanceModel({ driverKind: claude, models: [] })).toBe(
+      DEFAULT_MODEL_BY_PROVIDER[claude],
+    );
+    expect(
+      defaultProviderInstanceModel({ driverKind: ProviderDriverKind.make("nope"), models: [] }),
+    ).toBeUndefined();
   });
 });

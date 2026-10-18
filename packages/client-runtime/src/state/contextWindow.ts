@@ -1,4 +1,5 @@
 import {
+  isClaudeCodeDriver,
   resolveIdleCompaction,
   type ModelSelection,
   type OrchestrationV2ProviderTurn,
@@ -218,7 +219,7 @@ export function shouldOfferResumeCompaction(input: {
   readonly now: string;
 }): boolean {
   if (
-    input.provider !== "claudeAgent" ||
+    !isClaudeCodeDriver(input.provider) ||
     (input.usedTokens ?? 0) < COMPACTION_SUGGESTION_MIN_TOKENS
   ) {
     return false;

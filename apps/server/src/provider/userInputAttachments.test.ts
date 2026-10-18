@@ -18,6 +18,7 @@ import * as DocumentText from "./DocumentText.ts";
 import { extractDocumentText } from "./documentTextWorker.ts";
 import * as Cleanup from "../orchestration-v2/ResourceCleanupService.ts";
 import * as DeviceService from "../device/DeviceService.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as PreviewManager from "../preview/Manager.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
@@ -440,6 +441,7 @@ describe("question answer paths", () => {
                 Layer.mock(PreviewManager.PreviewManager)({}),
                 Layer.mock(DeviceService.DeviceService)({}),
                 Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+                SqlitePersistence.layerMemory,
               ),
             ),
           ),

@@ -28,6 +28,10 @@ to you for approval.
 Muse Code offers only **Supervised** and **Full access**. A Muse thread already set to another mode
 runs in **Supervised**.
 
+Claude Cloud offers only **Full access**. Its cloud sessions run commands and edits in their own
+sandbox without asking. Requests the cloud session raises itself, such as publishing an artifact,
+MCP tools that require approval, or actions matched by `ask` permission rules, are approved too.
+
 Grok offers no **Auto-accept edits**. A Grok thread already set to it runs in **Supervised**. Grok
 file-change approvals offer **Allow all edits this session**. Its command approvals have no
 session-wide choice, because Grok would remember that command for the whole project.

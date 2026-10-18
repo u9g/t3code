@@ -127,6 +127,20 @@ Provider updates do not restart running chats. An existing session can keep
 using the previous CLI until it ends. If discovery fails, check the provider
 status and refresh it again.
 
+## Take desktop updates from a fork
+
+The desktop app checks the GitHub releases it was built for. To follow a fork's
+releases instead, set `T3CODE_DESKTOP_UPDATE_REPOSITORY` to that repository as
+`owner/repo`, such as `T3CODE_DESKTOP_UPDATE_REPOSITORY=acme/t3code`, in the
+environment the desktop app starts from, then restart the app. Release links
+next to an update open the same repository. A value in any other form is
+ignored, and updates keep coming from the built-in repository.
+
+The fork must publish releases for the track in **Settings → General → Update
+track**, signed the same way as the app you have installed. A signed app
+refuses updates that are unsigned or signed by someone else, so to move from an
+official build to an unsigned fork, install the fork's release by hand once.
+
 ## Mobile updates
 
 To update an environment from your phone, open **Settings → Environments** and

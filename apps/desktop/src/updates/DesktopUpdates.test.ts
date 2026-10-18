@@ -746,6 +746,118 @@ describe("DesktopUpdates", () => {
   );
 });
 
+describe("T3CODE_DESKTOP_UPDATE_REPOSITORY", () => {
+  const nightlyAppUpdateYml = [
+    "owner: pingdotgg",
+    "repo: t3code",
+    "provider: github",
+    "releaseType: prerelease",
+    "channel: nightly",
+    "updaterCacheDirName: t3code-updater",
+  ].join("\n");
+
+  const configureWith = (options: {
+    readonly env: Record<string, string | undefined>;
+    readonly appUpdateYml?: string;
+  }) => {
+    const harness = makeHarness({ appUpdateYml: nightlyAppUpdateYml, ...options });
+    const warnings: Array<{ message: unknown; annotations: Record<string, unknown> }> = [];
+    const logger = Logger.make(({ fiber, logLevel, message }) => {
+      if (logLevel === "Warn") {
+        warnings.push({
+          message,
+          annotations: { ...fiber.getRef(References.CurrentLogAnnotations) },
+        });
+      }
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        return { state: yield* updates.getState, feedUrls: harness.feedUrls(), warnings };
+      }),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          TestClock.layer(),
+          harness.layer,
+          Logger.layer([logger], { mergeWithExisting: false }),
+        ),
+      ),
+    );
+  };
+
+  it.effect("points the updater at the repository, keeping the built-in release type", () =>
+    Effect.gen(function* () {
+      const { state, feedUrls, warnings } = yield* configureWith({
+        env: {
+          T3CODE_DESKTOP_MOCK_UPDATES: undefined,
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: " acme/t3code-fork ",
+        },
+      });
+
+      assert.deepEqual(feedUrls, [
+        { provider: "github", owner: "acme", repo: "t3code-fork", releaseType: "prerelease" },
+      ]);
+      assert.equal(state.status, "idle");
+      assert.equal(state.updateRepository, "acme/t3code-fork");
+      assert.deepEqual(warnings, []);
+
+      const stable = yield* configureWith({
+        env: {
+          T3CODE_DESKTOP_MOCK_UPDATES: undefined,
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: "acme/t3code-fork",
+        },
+        appUpdateYml: "owner: pingdotgg\nrepo: t3code\nprovider: github\n",
+      });
+      assert.deepEqual(stable.feedUrls, [
+        { provider: "github", owner: "acme", repo: "t3code-fork", releaseType: "release" },
+      ]);
+    }),
+  );
+
+  it.effect("ignores an invalid repository with a warning and keeps the built-in feed", () =>
+    Effect.gen(function* () {
+      const { state, feedUrls, warnings } = yield* configureWith({
+        env: {
+          T3CODE_DESKTOP_MOCK_UPDATES: undefined,
+          T3CODE_DESKTOP_UPDATE_REPOSITORY: "acme/t3code-fork/releases",
+        },
+      });
+
+      assert.deepEqual(feedUrls, []);
+      assert.equal(state.status, "idle");
+      assert.equal(state.updateRepository, "pingdotgg/t3code");
+      assert.equal(warnings.length, 1);
+      assert.include(String(warnings[0]?.message), "T3CODE_DESKTOP_UPDATE_REPOSITORY");
+      assert.equal(warnings[0]?.annotations.value, "acme/t3code-fork/releases");
+    }),
+  );
+
+  it.effect("leaves mock updates in charge of the feed", () =>
+    Effect.gen(function* () {
+      const { state, feedUrls } = yield* configureWith({
+        env: { T3CODE_DESKTOP_UPDATE_REPOSITORY: "acme/t3code-fork" },
+      });
+
+      assert.deepEqual(feedUrls, [{ provider: "generic", url: "http://localhost:4141" }]);
+      assert.isUndefined(state.updateRepository);
+    }),
+  );
+
+  it.effect("uses the built-in feed when unset", () =>
+    Effect.gen(function* () {
+      const { state, feedUrls } = yield* configureWith({
+        env: { T3CODE_DESKTOP_MOCK_UPDATES: undefined },
+      });
+
+      assert.deepEqual(feedUrls, []);
+      assert.equal(state.status, "idle");
+      assert.equal(state.updateRepository, "pingdotgg/t3code");
+    }),
+  );
+});
+
 describe("describeUpdateErrorCause", () => {
   it("removes URLs, credentials, response bodies, and headers from summaries", () => {
     const messages = [

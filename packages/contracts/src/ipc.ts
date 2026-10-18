@@ -282,6 +282,8 @@ export interface DesktopUpdateState {
   errorContext: "check" | "download" | "install" | null;
   canRetry: boolean;
   notAppliedVersion?: string;
+  /** GitHub `owner/repo` the desktop app takes updates and their release notes from. */
+  updateRepository?: string;
 }
 
 export interface DesktopUpdateReleaseNote {
@@ -314,6 +316,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
   canRetry: Schema.Boolean,
   notAppliedVersion: Schema.optionalKey(Schema.String),
+  updateRepository: Schema.optionalKey(Schema.String),
 });
 
 export const DesktopCliCommandStateSchema = Schema.Struct({

@@ -4098,7 +4098,9 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
       stageDistDir,
       appExecutableName: `${resolveDesktopProductName(appVersion)}.exe`,
       targetArch: options.arch,
-      appVersion,
+      // The WSL runtime is a CLI archive of the bundled server's version, which
+      // a fork's desktop build may version apart from the app itself.
+      appVersion: serverPackageJson.version,
       expectWslRuntime: bundlesWslRuntime({
         platform: options.platform,
         runtimeArchivePath: options.wslRuntime,

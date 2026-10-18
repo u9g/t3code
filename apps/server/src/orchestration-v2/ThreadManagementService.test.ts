@@ -4,6 +4,7 @@ import {
   EnvironmentId,
   MessageId,
   type OrchestrationV2Command,
+  NodeId,
   type OrchestrationV2Run,
   type OrchestrationV2ProviderThread,
   ProviderThreadId,
@@ -556,6 +557,79 @@ it.effect.each(["live", "no-session", "unsupported-runtime"] as const)(
         expect(calls).toEqual([]);
       }
     }),
+);
+
+it.effect("stops a Claude Cloud workflow through its session like a local Claude one", () =>
+  Effect.gen(function* () {
+    // Claude Cloud runs the same agent, so its workflows stop the same way.
+    const threadId = ThreadId.make("thread:workflow-stop");
+    const subagentId = NodeId.make("node:workflow-stop");
+    const runId = RunId.make("run:workflow-stop");
+    const providerThreadId = ProviderThreadId.make("provider-thread:workflow-stop");
+    const providerSessionId = ProviderSessionId.make("provider-session:workflow-stop");
+    const driver = ProviderDriverKind.make("claudeCloud");
+    const instanceId = ProviderInstanceId.make("claudeCloud");
+    const providerThread = {
+      id: providerThreadId,
+      driver,
+      providerInstanceId: instanceId,
+      providerSessionId,
+      appThreadId: threadId,
+    } as unknown as OrchestrationV2ProviderThread;
+    const calls: Array<{ taskId: string; providerThread: OrchestrationV2ProviderThread }> = [];
+    const runtime = {
+      driver,
+      providerSessionId,
+      instanceId,
+      stopTask: (input: (typeof calls)[number]) =>
+        Effect.sync(() => {
+          calls.push(input);
+        }),
+    } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+    const layerTest = ThreadManagementService.layer.pipe(
+      Layer.provide(
+        Layer.mock(Orchestrator.OrchestratorV2)({
+          getThreadRecords: () =>
+            Effect.succeed({
+              thread: { id: threadId, deletedAt: null },
+              subagents: [
+                {
+                  id: subagentId,
+                  threadId,
+                  runId,
+                  origin: "provider_native",
+                  driver,
+                  providerInstanceId: instanceId,
+                  providerThreadId: null,
+                  nativeTaskRef: { driver, nativeId: "native-workflow-id", strength: "strong" },
+                  workflow: { phases: [], agents: [] },
+                  status: "running",
+                },
+              ],
+              runs: [{ id: runId, providerThreadId }],
+              providerThreads: [providerThread],
+            } as unknown as OrchestrationV2ThreadProjection),
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+          get: (id) => {
+            expect(id).toBe(providerSessionId);
+            return Effect.succeedSome(runtime);
+          },
+        }),
+      ),
+      Layer.provide(ServerSettings.layerTest()),
+      Layer.provide(layerReceiptsTest),
+    );
+
+    yield* Effect.gen(function* () {
+      const service = yield* ThreadManagementService.ThreadManagementService;
+      yield* service.stopWorkflow({ threadId, subagentId });
+    }).pipe(Effect.provide(layerTest));
+
+    expect(calls).toEqual([{ taskId: "native-workflow-id", providerThread }]);
+  }),
 );
 
 it.effect.each([

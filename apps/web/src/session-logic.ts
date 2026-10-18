@@ -480,7 +480,8 @@ function projectedWorkEntry(row: OrchestrationV2ProjectedTurnItem): WorkLogEntry
       return {
         ...common,
         label: item.message,
-        sourceActivityKind: "runtime.warning",
+        // Notices without a tone predate tones, when every notice was a warning.
+        ...(item.tone === "info" ? {} : { sourceActivityKind: "runtime.warning" }),
       };
     case "error": {
       const presentation = providerErrorPresentation(item);

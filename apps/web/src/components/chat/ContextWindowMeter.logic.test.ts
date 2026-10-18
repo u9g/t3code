@@ -5,6 +5,7 @@ import {
   hasAvailableCompactionProvider,
   hasDismissedResumeCompaction,
   resolveContextWindowModelDisplayName,
+  shouldOfferResumeCompaction,
   shouldReserveContextWindowMeter,
 } from "./ContextWindowMeter.logic";
 
@@ -100,6 +101,19 @@ describe("resolveContextWindowModelDisplayName", () => {
         modelOptionsByInstance,
       ),
     ).toBe("GPT-5.6 Sol");
+  });
+});
+
+describe("shouldOfferResumeCompaction", () => {
+  it("offers it for Claude Cloud sessions, which share Claude's prompt cache", () => {
+    expect(
+      shouldOfferResumeCompaction({
+        provider: "claudeCloud",
+        usedTokens: 200_000,
+        updatedAt: "2026-08-24T10:50:00.000Z",
+        now: "2026-08-24T12:00:00.000Z",
+      }),
+    ).toBe(true);
   });
 });
 

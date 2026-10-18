@@ -452,13 +452,18 @@ function migrateLegacyProviderSettings(
   };
 }
 
-const ACP_REGISTRY_DRIVER = ProviderDriverKind.make("acpRegistry");
+// These drivers reject every application text-generation operation, so a saved
+// selection on one of them must fall back like a disabled one.
+const NON_TEXT_GENERATION_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set(
+  ["acpRegistry", "claudeCloud"].map((driver) => ProviderDriverKind.make(driver)),
+);
 
 function selectionSupportsTextGeneration(
   settings: ServerSettings,
   selection: ModelSelection,
 ): boolean {
-  return settings.providerInstances[selection.instanceId]?.driver !== ACP_REGISTRY_DRIVER;
+  const driver = settings.providerInstances[selection.instanceId]?.driver;
+  return driver === undefined || !NON_TEXT_GENERATION_DRIVERS.has(driver);
 }
 
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {

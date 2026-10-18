@@ -1,4 +1,3 @@
-import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -31,6 +30,7 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -338,6 +338,61 @@ it.effect("a retried launch replays after the project loses its default model", 
   }),
 );
 
+it.effect("a launch on a provider alone starts with the model the composer picks for it", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const { projectId, modelSelection, dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "full-access",
+      providers: [
+        {
+          instanceId: ProviderInstanceId.make("claudeCloud"),
+          driver: "claudeCloud",
+          models: [
+            { slug: "my-custom-model", isCustom: true },
+            { slug: "claude-opus-5-5", isCustom: false },
+            { slug: "claude-fable-5-1", isCustom: false },
+          ],
+        },
+        { instanceId: ProviderInstanceId.make("empty"), driver: "unknownDriver", models: [] },
+      ] as unknown as readonly ServerProvider[],
+      launched,
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    const launch = (input: {
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly modelSelection?: ModelSelection;
+    }) =>
+      toolkit.handle("t3_thread_launch", { title: "Fix", projectId, ...input }).pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.provide(dependencies),
+        Effect.map((results) => results.at(-1)?.result),
+      );
+
+    // The first built-in model, as no model is marked default.
+    yield* launch({ providerInstanceId: ProviderInstanceId.make("claudeCloud") });
+    // The project's default is on this instance, so it is kept as it is.
+    yield* launch({ providerInstanceId: modelSelection.instanceId });
+    expect(launched.map((entry) => entry.modelSelection)).toEqual([
+      { instanceId: "claudeCloud", model: "claude-opus-5-5" },
+      modelSelection,
+    ]);
+
+    for (const refused of [
+      { providerInstanceId: ProviderInstanceId.make("claudeCloud"), modelSelection },
+      { providerInstanceId: ProviderInstanceId.make("missing") },
+      { providerInstanceId: ProviderInstanceId.make("empty") },
+    ]) {
+      expect(yield* launch(refused)).toMatchObject({ code: "invalid_request" });
+    }
+    expect(launched).toHaveLength(2);
+  }),
+);
+
 it.effect("a launch binds only an existing checkout that is one of the project's worktrees", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -538,6 +593,7 @@ it.effect("a launch with MCP servers starts only on a provider that gives them t
     const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
     const providers = [
       { instanceId: ProviderInstanceId.make("claudeAgent"), driver: "claudeAgent", models: [] },
+      { instanceId: ProviderInstanceId.make("claudeCloud"), driver: "claudeCloud", models: [] },
       { instanceId: ProviderInstanceId.make("empty"), driver: "unknownDriver", models: [] },
     ] as unknown as ReadonlyArray<ServerProvider>;
     const { projectId, dependencies } = clientLaunchHarness({
@@ -567,7 +623,7 @@ it.effect("a launch with MCP servers starts only on a provider that gives them t
           Effect.map((results) => results.at(-1)?.result),
         );
 
-    yield* launch({ instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" });
+    yield* launch({ instanceId: ProviderInstanceId.make("claudeCloud"), model: "claude-opus-5-5" });
     expect(launched.map((entry) => entry.mcpServers)).toEqual([mcpServers]);
 
     expect(
@@ -575,7 +631,7 @@ it.effect("a launch with MCP servers starts only on a provider that gives them t
     ).toMatchObject({
       code: "invalid_request",
       message:
-        "This thread has MCP servers of its own, which unknownDriver cannot use. Run it on Claude.",
+        "This thread has MCP servers of its own, which unknownDriver cannot use. Run it on Claude or Claude Cloud.",
     });
     expect(
       yield* launch({ instanceId: ProviderInstanceId.make("missing"), model: "model" }),
@@ -598,7 +654,7 @@ it.effect("a launch with MCP servers starts only on a provider that gives them t
       .handle("t3_thread_launch", {
         title: "Fix",
         projectId,
-        modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "m" },
+        modelSelection: { instanceId: ProviderInstanceId.make("claudeCloud"), model: "m" },
         mcpServers,
       })
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(limited.dependencies));

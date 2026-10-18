@@ -29,6 +29,7 @@ import { materializeReplayTranscriptRuntimeInstructions } from "./ReplayRuntimeI
 const DRIVERS_WITH_REPLAY_FIXTURE_FILES = new Set([
   "acpRegistry",
   "claudeAgent",
+  "claudeCloud",
   "codex",
   "cursor",
   "fx",

@@ -29,6 +29,7 @@ import {
   resolveLatestMergeBackRun,
 } from "@t3tools/client-runtime/state/thread-workflows";
 import {
+  isClaudeCodeDriver,
   isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
   NodeId,
@@ -807,7 +808,7 @@ export function ThreadRelationshipsPanel(props: {
       agent &&
       (agent.origin === "app_owned" ||
         (agent.origin === "provider_native" &&
-          agent.driver === "claudeAgent" &&
+          isClaudeCodeDriver(agent.driver) &&
           agent.runId != null &&
           agent.nativeTaskRef?.strength === "strong" &&
           agent.nativeTaskRef.nativeId !== null &&
@@ -835,7 +836,7 @@ export function ThreadRelationshipsPanel(props: {
       canOperateWorkflow &&
       workflowGroup?.workflow.status === "running" &&
       agent?.origin === "provider_native" &&
-      providerDriver === "claudeAgent";
+      isClaudeCodeDriver(providerDriver);
     const trailingVisibilityClass = (workflowGroup ? canStopWorkflow : canStop)
       ? "group-hover:opacity-0 group-focus-within:opacity-0 pointer-coarse:opacity-0 [@media(hover:none)]:opacity-0"
       : "";

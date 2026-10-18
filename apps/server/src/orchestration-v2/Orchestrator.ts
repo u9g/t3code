@@ -27,6 +27,7 @@ import {
   type ChatAttachment,
   CommandId,
   type GuestMessageId,
+  isClaudeCodeDriver,
   isCompactionCommandMessage,
   isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
@@ -13567,7 +13568,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       subagent === undefined ||
       subagent.runId !== command.runId ||
       subagent.origin !== "provider_native" ||
-      subagent.driver !== "claudeAgent" ||
+      !isClaudeCodeDriver(subagent.driver) ||
       subagent.nativeTaskRef?.strength !== "strong" ||
       subagent.nativeTaskRef.nativeId === null
     ) {

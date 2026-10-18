@@ -84,6 +84,7 @@ it.effect(
           port: 3_773,
         }),
       });
+      let launchArgs: Readonly<Record<string, unknown>> | undefined;
       using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
         Effect.succeed({
           call: (tool, args) => {
@@ -91,6 +92,7 @@ it.effect(
               case "t3_project_list":
                 return Effect.succeed({ structuredContent: { projects, nextCursor: null } });
               case "t3_thread_launch":
+                launchArgs = args;
                 return Effect.succeed({
                   structuredContent: { threadId, projectId: args.projectId, runId: null },
                 });
@@ -117,6 +119,7 @@ it.effect(
           "start",
           identifier,
           "Inspect this project",
+          ...(identifier === "intended-project" ? ["--provider", "claudeCloud"] : []),
           "--json",
           "--base-dir",
           baseDir,
@@ -124,6 +127,11 @@ it.effect(
           Effect.provideService(HostProcess.HomeDirectory, home),
           Effect.provideService(HostProcess.WorkingDirectory, cwd),
         );
+        assert.strictEqual(
+          launchArgs?.providerInstanceId,
+          identifier === "intended-project" ? "claudeCloud" : undefined,
+        );
+        assert.strictEqual(launchArgs?.modelSelection, undefined);
         assert.strictEqual(
           (yield* TestConsole.logLines).at(-1),
           JSON.stringify({ threadId, projectId: expectedProjectId, runId: null }),
@@ -379,6 +387,40 @@ it.effect("--wait reports its run's result when a later run is the one waiting",
 
 it.effect("start sends each --option as a typed model option", () =>
   Effect.gen(function* () {
+    for (const provider of [Option.none<string>(), Option.some("codex")]) {
+      for (const model of [Option.none<string>(), Option.some("gpt-6.1-sol")]) {
+        for (const option of [[], ["fastMode=true"]]) {
+          const result = yield* launchModelSelection({ provider, model, option }).pipe(
+            Effect.result,
+          );
+          if (Option.isNone(provider) && Option.isSome(model)) {
+            assert.strictEqual(result._tag, "Failure");
+            if (result._tag === "Failure")
+              assert.strictEqual(result.failure.message, "--model needs --provider.");
+          } else if (option.length > 0 && (Option.isNone(provider) || Option.isNone(model))) {
+            assert.strictEqual(result._tag, "Failure");
+            if (result._tag === "Failure")
+              assert.strictEqual(result.failure.message, "--option needs --provider and --model.");
+          } else {
+            assert.strictEqual(result._tag, "Success");
+            if (result._tag === "Success") {
+              assert.deepStrictEqual(
+                result.success,
+                Option.isSome(provider) && Option.isSome(model)
+                  ? {
+                      instanceId: provider.value,
+                      model: model.value,
+                      ...(option.length === 0
+                        ? {}
+                        : { options: [{ id: "fastMode", value: true }] }),
+                    }
+                  : undefined,
+              );
+            }
+          }
+        }
+      }
+    }
     const selection = yield* launchModelSelection({
       provider: Option.some("codex"),
       model: Option.some("gpt-6.1-sol"),

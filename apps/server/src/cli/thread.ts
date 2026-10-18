@@ -797,8 +797,8 @@ export const launchModelSelection = Effect.fn("cli.thread.launchModelSelection")
   readonly model: Option.Option<string>;
   readonly option: ReadonlyArray<string>;
 }) {
-  if (Option.isSome(input.provider) !== Option.isSome(input.model)) {
-    return yield* new ThreadUsageError({ detail: "--provider and --model go together." });
+  if (Option.isNone(input.provider) && Option.isSome(input.model)) {
+    return yield* new ThreadUsageError({ detail: "--model needs --provider." });
   }
   if (Option.isNone(input.provider) || Option.isNone(input.model)) {
     if (input.option.length > 0) {
@@ -995,11 +995,13 @@ const threadStartCommand = Command.make("start", {
     Flag.withDefault(false),
   ),
   provider: Flag.String("provider").pipe(
-    Flag.withDescription("Provider instance id. Pass with --model."),
+    Flag.withDescription(
+      "Provider instance id. Defaults to the project's default provider; without --model, runs the model the composer picks for it.",
+    ),
     Flag.optional,
   ),
   model: Flag.String("model").pipe(
-    Flag.withDescription("Model slug. Defaults to the project's default model."),
+    Flag.withDescription("Model slug. Defaults to the project's default model. Needs --provider."),
     Flag.optional,
   ),
   option: Flag.String("option").pipe(
@@ -1063,7 +1065,11 @@ const threadStartCommand = Command.make("start", {
               message,
               ...output,
               ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-              ...(modelSelection === undefined ? {} : { modelSelection }),
+              ...(modelSelection === undefined
+                ? Option.isNone(flags.provider)
+                  ? {}
+                  : { providerInstanceId: flags.provider.value }
+                : { modelSelection }),
               ...(mcpServers === undefined ? {} : { mcpServers }),
             },
             ThreadLaunchResult,

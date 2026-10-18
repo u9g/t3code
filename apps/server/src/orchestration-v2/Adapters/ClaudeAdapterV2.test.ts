@@ -8,6 +8,7 @@ import * as ClaudeSdk from "@anthropic-ai/claude-agent-sdk";
 import { beforeEach, vi } from "vite-plus/test";
 
 import type {
+  PermissionResult,
   Query as ClaudeQuery,
   SDKMessage,
   SDKResultMessage,
@@ -69,6 +70,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { Tool } from "effect/ai";
 import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeCompaction";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { toolOutputImages } from "@t3tools/shared/toolOutput";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
@@ -2139,7 +2141,12 @@ describe("ClaudeAdapterV2 background wake turns", () => {
 
   const makeWakeHarnessWithOptions = (options?: {
     readonly close?: (sdkMessages: Queue.Queue<SDKMessage>) => Effect.Effect<void>;
-    readonly interrupt?: Effect.Effect<void>;
+    readonly interrupt?: Effect.Effect<
+      ClaudeAdapterV2.ClaudeQueryInterruptReceipt | void,
+      ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError
+    >;
+    // Runs before open returns, as a reattach's initialize does.
+    readonly onOpen?: (options: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions) => void;
     readonly setPermissionMode?: ClaudeAdapterV2.ClaudeAgentSdkQuerySession["setPermissionMode"];
     readonly stopTask?: (
       taskId: string,
@@ -2154,6 +2161,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     readonly freshQueueOnReopen?: boolean;
     readonly forkSession?: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape["forkSession"];
     readonly allocateSessionId?: Effect.Effect<string>;
+    readonly beforeReopen?: Effect.Effect<void>;
+    readonly startupNotices?: ReadonlyArray<string>;
+    readonly transport?: ClaudeAdapterV2.ClaudeAdapterV2Transport;
+    readonly fetchSentFile?: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape["fetchSentFile"];
   }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -2212,6 +2223,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         path: yield* Path.Path,
         crypto: yield* Crypto.Crypto,
         idAllocator,
+        ...(options?.transport === undefined ? {} : { transport: options.transport }),
         continuationRequests: {
           offer: (request) =>
             Effect.sync(() => {
@@ -2228,6 +2240,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           open: (input) =>
             Effect.gen(function* () {
               openedOptions = input.options;
+              options?.onOpen?.(input.options);
               const processMessages =
                 options?.freshQueueOnReopen === true && processQueues.length > 0
                   ? yield* Queue.unbounded<SDKMessage>()
@@ -2249,6 +2262,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 ),
               );
               if (options?.freshQueueOnReopen === true && processQueues.length > 0) {
+                if (options.beforeReopen !== undefined) yield* options.beforeReopen;
                 processQueues.push(processMessages);
                 return {
                   messages,
@@ -2293,11 +2307,15 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 stopTask: options?.stopTask ?? (() => Effect.void),
                 interrupt: options?.interrupt ?? Effect.void,
                 close: options?.close?.(sdkMessages) ?? Effect.void,
+                ...(options?.startupNotices === undefined
+                  ? {}
+                  : { startupNotices: options.startupNotices }),
               };
             }),
           forkSession: options?.forkSession ?? (() => Effect.die("unused forkSession")),
           subagentLaunchToolUseId: () => Effect.succeed(options?.subagentLaunchToolUseId ?? null),
           assertComplete: Effect.void,
+          ...(options?.fetchSentFile === undefined ? {} : { fetchSentFile: options.fetchSentFile }),
         },
       });
       const threadId = ThreadId.make("thread-claude-wake");
@@ -2350,6 +2368,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         );
       return {
         attachmentsDir,
+        adapter,
         runtime,
         providerThread,
         threadId,
@@ -5286,6 +5305,304 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       ),
   );
 
+  const runOneToolTurn = Effect.fnUntraced(function* (input: {
+    readonly harness: Effect.Success<ReturnType<typeof makeWakeHarnessWithOptions>>;
+    readonly tool: { readonly id: string; readonly name: string; readonly input: unknown };
+    readonly content: unknown;
+    readonly toolUseResult: unknown;
+    readonly isError?: boolean;
+    readonly nonExecutionKind?: string;
+  }) {
+    const { harness } = input;
+    yield* harness.runtime.startTurn(
+      makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now: yield* DateTime.now,
+        attemptId: RunAttemptId.make(`attempt-${input.tool.id}`),
+        text: "Show me",
+        attachments: [],
+      }),
+    );
+    yield* Queue.offerAll(harness.sdkMessages, [
+      claudeSdkFrame({
+        type: "assistant",
+        uuid: "00000000-0000-4000-8000-0000000006d1",
+        session_id: WAKE_NATIVE_SESSION,
+        parent_tool_use_id: null,
+        message: {
+          id: `msg_${input.tool.id}`,
+          model: "claude-sonnet-4-6",
+          type: "message",
+          role: "assistant",
+          content: [{ type: "tool_use", ...input.tool }],
+          stop_reason: "tool_use",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      }),
+      claudeSdkFrame({
+        type: "user",
+        uuid: "00000000-0000-4000-8000-0000000006d2",
+        session_id: WAKE_NATIVE_SESSION,
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: input.tool.id,
+              content: input.content,
+              ...(input.isError === undefined ? {} : { is_error: input.isError }),
+            },
+          ],
+        },
+        tool_use_result: input.toolUseResult,
+        ...(input.nonExecutionKind === undefined
+          ? {}
+          : {
+              tool_result_meta: [{ id: input.tool.id, non_execution_kind: input.nonExecutionKind }],
+            }),
+      }),
+      makeResultFrame({ uuid: "00000000-0000-4000-8000-0000000006d3", result: "Done" }),
+    ]);
+    yield* Queue.take(harness.terminalReceipts);
+    return harness.events.flatMap((event) =>
+      event.type === "turn_item.updated" && event.turnItem.status === "completed"
+        ? [event.turnItem]
+        : [],
+    );
+  });
+
+  it.effect.each([
+    { transport: "local" as const, viewedImagePath: "/tmp/scratchpad/frame.png", images: 0 },
+    { transport: "remote" as const, viewedImagePath: undefined, images: 1 },
+  ])("serves a $transport read's image the way its client can load it", (expected) =>
+    Effect.gen(function* () {
+      const image = { type: "base64", media_type: "image/png", data: "iVBORw0KGgoAAAANSUhEUg==" };
+      const items = yield* runOneToolTurn({
+        harness: yield* makeWakeHarnessWithOptions({ transport: expected.transport }),
+        tool: { id: "read-frame", name: "Read", input: { file_path: "/tmp/scratchpad/frame.png" } },
+        content: [{ type: "image", source: image }],
+        // The cloud empties the structured copy; only the content keeps the image.
+        toolUseResult: { type: "image", file: { base64: "", type: "image/png" } },
+      });
+      const read = items.find((item) => item.nativeItemRef?.nativeId === "read-frame");
+      assert.equal(read?.type, "dynamic_tool");
+      if (read?.type !== "dynamic_tool") return;
+      assert.equal(read.viewedImagePath, expected.viewedImagePath);
+      assert.deepEqual(
+        toolOutputImages(read.output),
+        expected.images === 0 ? [] : [{ mimeType: "image/png", data: image.data }],
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+      ),
+    ),
+  );
+
+  const sendFilesTool = {
+    id: "send-files",
+    name: "SendUserFile",
+    input: { files: ["/tmp/out/clip.mp4", "/tmp/out/notes.zip"], caption: "How /r works" },
+  };
+  const sendFilesResult = {
+    content: "2 files delivered to user.",
+    toolUseResult: {
+      attachments: [
+        {
+          file_uuid: "file-clip",
+          isImage: false,
+          media_type: "video/mp4",
+          path: "/tmp/out/clip.mp4",
+        },
+        {
+          file_uuid: "file-notes",
+          isImage: false,
+          media_type: "application/zip",
+          path: "/tmp/out/notes.zip",
+        },
+      ],
+      caption: "How /r works",
+      display: "render",
+    },
+  };
+
+  it.effect("shows the files a remote session sends in a message after the tool row", () =>
+    Effect.gen(function* () {
+      const requested: Array<ClaudeAdapterV2.ClaudeAgentSdkSentFileInput> = [];
+      const harness = yield* makeWakeHarnessWithOptions({
+        transport: "remote",
+        fetchSentFile: (input) =>
+          Effect.suspend(() => {
+            requested.push(input);
+            return input.fileUuid === "file-clip"
+              ? Effect.succeed("C:\\Users\\Jo Smith\\.t3\\userdata\\claude-cloud-files\\clip.mp4")
+              : Effect.fail(
+                  new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+                    method: "fetchSentFile",
+                    cause: "download failed",
+                    reason: "request_failed",
+                  }),
+                );
+          }),
+      });
+      const items = yield* runOneToolTurn({ harness, tool: sendFilesTool, ...sendFilesResult });
+
+      const tool = items.find((item) => item.nativeItemRef?.nativeId === "send-files");
+      const sentMessages = items.filter(
+        (item) => item.nativeItemRef?.nativeId === "send-files:sent-files",
+      );
+      assert.lengthOf(sentMessages, 1);
+      const sent = sentMessages[0];
+      assert.equal(sent?.type, "assistant_message");
+      if (sent?.type !== "assistant_message" || tool === undefined) return;
+      assert.equal(
+        sent.text,
+        [
+          "How /r works",
+          "![clip.mp4](C:/Users/Jo%20Smith/.t3/userdata/claude-cloud-files/clip.mp4)",
+          "T3 Code could not download notes.zip from the Claude Code cloud session.",
+        ].join("\n\n"),
+      );
+      assert.isAbove(sent.ordinal, tool.ordinal);
+      assert.deepEqual(
+        requested.map(({ threadId, fileUuid, path }) => ({ threadId, fileUuid, path })),
+        [
+          { threadId: harness.threadId, fileUuid: "file-clip", path: "/tmp/out/clip.mp4" },
+          { threadId: harness.threadId, fileUuid: "file-notes", path: "/tmp/out/notes.zip" },
+        ],
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+      ),
+    ),
+  );
+
+  // Only a call that ran to completion delivered files; local Claude has no
+  // cloud to download them from, so it keeps upstream's tool row alone.
+  it.effect.each([
+    { case: "a failed remote call", transport: "remote", isError: true, status: "failed" },
+    {
+      case: "a cancelled remote call",
+      transport: "remote",
+      nonExecutionKind: "cancelled",
+      status: "cancelled",
+    },
+    { case: "a local call", transport: "local", status: "completed" },
+  ] as const)("sends no files for $case", (expected) =>
+    Effect.gen(function* () {
+      const requested: Array<ClaudeAdapterV2.ClaudeAgentSdkSentFileInput> = [];
+      const harness = yield* makeWakeHarnessWithOptions({
+        transport: expected.transport,
+        fetchSentFile: (input) =>
+          Effect.sync(() => {
+            requested.push(input);
+            return `/tmp/t3-sent/${input.fileUuid}`;
+          }),
+      });
+      yield* runOneToolTurn({
+        harness,
+        tool: sendFilesTool,
+        ...sendFilesResult,
+        ...("isError" in expected ? { isError: expected.isError } : {}),
+        ...("nonExecutionKind" in expected ? { nonExecutionKind: expected.nonExecutionKind } : {}),
+      });
+
+      const items = harness.events.flatMap((event) =>
+        event.type === "turn_item.updated" ? [event.turnItem] : [],
+      );
+      assert.equal(
+        items.findLast((item) => item.nativeItemRef?.nativeId === "send-files")?.status,
+        expected.status,
+      );
+      assert.isUndefined(
+        items.find((item) => item.nativeItemRef?.nativeId === "send-files:sent-files"),
+      );
+      assert.deepEqual(requested, []);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+      ),
+    ),
+  );
+
+  // Messages from before T3 saved sent files name them only by their container path.
+  it.effect("saves a sent file when asked for its container path", () =>
+    Effect.gen(function* () {
+      const requested: Array<ClaudeAdapterV2.ClaudeAgentSdkSentFileInput> = [];
+      const harness = yield* makeWakeHarnessWithOptions({
+        transport: "remote",
+        fetchSentFile: (input) =>
+          Effect.suspend(() => {
+            requested.push(input);
+            return input.fileUuid === "file-notes"
+              ? Effect.succeed(`D:\\t3\\claude-cloud-files\\${input.fileUuid}`)
+              : Effect.fail(
+                  new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+                    method: "fetchSentFile",
+                    cause: "download failed",
+                    reason: "request_failed",
+                  }),
+                );
+          }),
+      });
+      const saveSentFile = harness.adapter.saveSentFile;
+      if (saveSentFile === undefined) {
+        return assert.fail("A remote runner that fetches sent files must save them.");
+      }
+      const save = (toolName: string, path: string) =>
+        saveSentFile({
+          threadId: harness.threadId,
+          toolName,
+          output: sendFilesResult.toolUseResult,
+          path,
+        });
+
+      assert.equal(
+        yield* save("SendUserFile", "/tmp/out/notes.zip"),
+        "D:\\t3\\claude-cloud-files\\file-notes",
+      );
+      assert.isNull(yield* save("SendUserFile", "/tmp/out/clip.mp4"));
+      assert.isNull(yield* save("SendUserFile", "/tmp/out/other.mp4"));
+      assert.isNull(yield* save("Bash", "/tmp/out/notes.zip"));
+      assert.deepEqual(
+        requested.map(({ fileUuid, path }) => ({ fileUuid, path })),
+        [
+          { fileUuid: "file-notes", path: "/tmp/out/notes.zip" },
+          { fileUuid: "file-clip", path: "/tmp/out/clip.mp4" },
+        ],
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+      ),
+    ),
+  );
+
+  it.effect("has no sent files to save without a runner that fetches them", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeWakeHarnessWithOptions({ transport: "remote" });
+      assert.isUndefined(harness.adapter.saveSentFile);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+      ),
+    ),
+  );
+
   it.effect("preserves typed Claude plans and todos through generic tool completion", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -6253,6 +6570,1143 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         { type: "provider_thread.updated" }
       > => event.type === "provider_thread.updated",
     );
+
+  it.effect("denies a tool prompt raised with no active turn on a local session", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarness;
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-idle-prompt-local"),
+            text: "Plan the change.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(turnOneResult);
+        yield* Queue.take(harness.terminalReceipts);
+
+        const result = yield* Effect.promise(() =>
+          harness.getOpenedOptions()!.canUseTool!(
+            "Bash",
+            { command: "ls" },
+            {
+              signal: new AbortController().signal,
+              toolUseID: "idle-prompt",
+              requestId: "idle-prompt-request",
+            },
+          ),
+        );
+        assert.deepEqual(result, {
+          behavior: "deny",
+          message: "Claude V2 adapter has no active turn for this tool request.",
+          toolUseID: "idle-prompt",
+        });
+        assert.isFalse(harness.events.some((event) => event.type === "runtime_request.updated"));
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  const remoteToolResultFrame = (toolUseId: string, uuid: string) =>
+    claudeSdkFrame({
+      type: "user",
+      message: {
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: toolUseId, content: "Done." }],
+      },
+      parent_tool_use_id: null,
+      uuid,
+      session_id: WAKE_NATIVE_SESSION,
+    });
+
+  it.effect("leaves a remote prompt raised with no active turn open until it ends elsewhere", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const harness = yield* makeWakeHarnessWithOptions({ transport: "remote" });
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-idle-prompt-remote"),
+            text: "Plan the change.",
+            attachments: [],
+          }),
+        );
+        yield* harness.offerAndWait(turnOneResult);
+        yield* Queue.take(harness.terminalReceipts);
+
+        const canUseTool = harness.getOpenedOptions()!.canUseTool!;
+        let answeredSettled = false;
+        const answered = canUseTool(
+          "Bash",
+          { command: "ls" },
+          {
+            signal: new AbortController().signal,
+            toolUseID: "idle-prompt",
+            requestId: "idle-prompt-request",
+          },
+        ).finally(() => {
+          answeredSettled = true;
+        });
+        const cancel = new AbortController();
+        const cancelled = canUseTool(
+          "Bash",
+          { command: "make clean" },
+          { signal: cancel.signal, toolUseID: "idle-prompt-2", requestId: "idle-prompt-request-2" },
+        );
+        yield* yieldTicks(50);
+        assert.isFalse(answeredSettled);
+
+        // Answered on claude.ai: the cloud sends the other clients no cancel,
+        // only the tool's result.
+        yield* harness.offerAndWait(
+          remoteToolResultFrame("idle-prompt", "00000000-0000-4000-8000-000000000c51"),
+        );
+        assert.isNull(yield* Effect.promise(() => answered));
+        cancel.abort();
+        assert.isNull(yield* Effect.promise(() => cancelled));
+        assert.isFalse(harness.events.some((event) => event.type === "runtime_request.updated"));
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect(
+    "raises a question a remote query redelivers while opening in the turn it opened for",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const question = "Which database?";
+          const questions = [
+            {
+              header: "Database",
+              question,
+              options: [
+                { label: "Postgres", description: "Use Postgres." },
+                { label: "SQLite", description: "Use SQLite." },
+              ],
+              multiSelect: false,
+            },
+          ];
+          let redelivered: Promise<PermissionResult | null> | undefined;
+          const harness = yield* makeWakeHarnessWithOptions({
+            transport: "remote",
+            // A reattach's initialize hands back the question the cloud still
+            // waits on before the query is returned.
+            onOpen: (options) => {
+              redelivered ??= options.canUseTool!(
+                "AskUserQuestion",
+                { questions },
+                {
+                  signal: new AbortController().signal,
+                  toolUseID: "toolu-open-question",
+                  requestId: "request-open-question",
+                },
+              );
+            },
+          });
+          const idAllocator = yield* IdAllocator.IdAllocatorV2;
+          const attemptId = RunAttemptId.make("attempt-remote-redelivered-question");
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId,
+              text: "Carry on.",
+              attachments: [],
+            }),
+          );
+          yield* harness.until(() =>
+            harness.events.some((event) => event.type === "runtime_request.updated"),
+          );
+          const request = harness.events.find((event) => event.type === "runtime_request.updated");
+          assert.equal(request?.type, "runtime_request.updated");
+          if (request?.type !== "runtime_request.updated") return;
+          assert.equal(request.runtimeRequest.kind, "user_input");
+          assert.equal(
+            request.runtimeRequest.providerTurnId,
+            idAllocator.derive.providerTurn({
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeTurnId: `turn:${attemptId}`,
+            }),
+          );
+          yield* harness.runtime.respondToRuntimeRequest({
+            requestId: request.runtimeRequest.id,
+            answers: { [question]: "Postgres" },
+          });
+          assert.deepEqual(yield* Effect.promise(() => redelivered!), {
+            behavior: "allow",
+            updatedInput: { questions, answers: { [question]: "Postgres" } },
+            toolUseID: "toolu-open-question",
+          });
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  // Local full access runs in bypass, which forwards only the asks it keeps. The cloud
+  // refuses bypass, so it forwards prompts bypass would have skipped.
+  it.effect.each([
+    { transport: "local", asks: true },
+    { transport: "remote", asks: false },
+  ] as const)(
+    "under full access, a $transport session's tool prompt asks a person: $asks",
+    ({ transport, asks }) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarnessWithOptions({ transport });
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`attempt-full-access-prompt-${transport}`),
+              text: "Schedule the nightly run.",
+              attachments: [],
+            }),
+          );
+          const decision = yield* Effect.promise(() =>
+            harness.getOpenedOptions()!.canUseTool!(
+              "Artifact",
+              { file_path: "report.html" },
+              {
+                signal: new AbortController().signal,
+                toolUseID: "toolu-artifact",
+                requestId: "request-artifact",
+              },
+            ),
+          ).pipe(Effect.forkScoped);
+          const first = yield* Effect.raceFirst(
+            Queue.take(harness.runtimeRequestReceipts).pipe(
+              Effect.map((event) => ({ type: "request", event }) as const),
+            ),
+            Fiber.join(decision).pipe(
+              Effect.map((result) => ({ type: "decision", result }) as const),
+            ),
+          );
+          if (asks) {
+            assert.equal(first.type, "request");
+            if (first.type !== "request") return;
+            yield* harness.runtime.respondToRuntimeRequest({
+              requestId: first.event.runtimeRequest.id,
+              decision: "accept",
+            });
+          } else {
+            assert.equal(first.type, "decision");
+            assert.isFalse(
+              harness.events.some((event) => event.type === "runtime_request.updated"),
+            );
+          }
+          assert.deepInclude(yield* Fiber.join(decision), {
+            behavior: "allow",
+            updatedInput: { file_path: "report.html" },
+            toolUseID: "toolu-artifact",
+          });
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  it.effect.each(["local", "remote"] as const)(
+    "carries a prompt another client sent into the continuation it starts on a %s session",
+    (transport) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarnessWithOptions({ transport });
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make(`attempt-client-prompt-${transport}`),
+              text: "Fix the build.",
+              attachments: [],
+            }),
+          );
+          yield* harness.offerAndWait(turnOneResult);
+          yield* Queue.take(harness.terminalReceipts);
+
+          // A prompt typed on claude.ai, as the cloud relays it: before the
+          // turn's init, stamped with the client it came from.
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              type: "user",
+              message: {
+                role: "user",
+                content: [{ type: "text", text: "Also fix the README." }],
+              },
+              parent_tool_use_id: null,
+              uuid: "00000000-0000-4000-8000-000000000c61",
+              session_id: WAKE_NATIVE_SESSION,
+              client_platform: "web_claude_ai",
+            }),
+          );
+          yield* harness.offerAndWait(wakeTurnInit);
+
+          assert.lengthOf(harness.continuationRequests, 1);
+          const [request] = harness.continuationRequests;
+          if (transport === "local") {
+            assert.isNull(request?.detail);
+            assert.isUndefined(request?.notification);
+            return;
+          }
+          assert.equal(request?.detail, "Also fix the README.");
+          assert.deepEqual(request?.notification, {
+            source: { kind: "system" },
+            outcome: "updated",
+            summary: "Message sent from claude.ai",
+            detail: "Also fix the README.",
+          });
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  it.effect(
+    "replaces a remote session's query without refusing or dropping its background work",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const harness = yield* makeWakeHarnessWithOptions({
+            transport: "remote",
+            freshQueueOnReopen: true,
+          });
+          assert.isUndefined(harness.runtime.backgroundTasksEndWithProcess);
+          const now = yield* DateTime.now;
+          const turn = (ordinal: number, modelSelection: ModelSelection) =>
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now,
+              attemptId: RunAttemptId.make(`attempt-remote-background:${ordinal}`),
+              text: `Request ${ordinal}`,
+              attachments: [],
+              providerTurnOrdinal: ordinal,
+              modelSelection,
+            });
+          yield* harness.runtime.startTurn(turn(1, CLAUDE_TEST_MODEL_SELECTION));
+          const originalOptions = harness.getOpenedOptions();
+          yield* harness.offerAndWait(wakeTaskStarted);
+          yield* harness.offerAndWait(turnOneResult);
+          yield* Queue.take(harness.terminalReceipts);
+          assert.isTrue(
+            yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread),
+          );
+
+          // Thinking is a launch flag, so this selection needs a new query. A local
+          // session refuses it while the shell runs; the cloud keeps the shell alive.
+          yield* harness.runtime.startTurn(turn(2, CLAUDE_TEST_RESTART_MODEL_SELECTION));
+          assert.notStrictEqual(harness.getOpenedOptions(), originalOptions);
+          assert.isTrue(
+            yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread),
+          );
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  it.effect("replacing a remote session's query leaves its subagents running", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const TOOL_USE_ID = "toolu-remote-replaced";
+        const BASH = "toolu-remote-replaced-bash";
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          freshQueueOnReopen: true,
+          close: (sdkMessages) => Queue.shutdown(sdkMessages),
+          // A cloud open makes network calls, so the old stream has ended by the
+          // time the new query exists.
+          beforeReopen: yieldTicks(50),
+        });
+        const now = yield* DateTime.now;
+        const bashStatuses = () =>
+          harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" && event.turnItem.nativeItemRef?.nativeId === BASH
+              ? [`${event.turnItem.type}:${event.turnItem.status}`]
+              : [],
+          );
+        const turn = (ordinal: number, modelSelection: ModelSelection) =>
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-remote-replaced:${ordinal}`),
+            text: `Request ${ordinal}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+            modelSelection,
+          });
+        yield* harness.runtime.startTurn(turn(1, CLAUDE_TEST_MODEL_SELECTION));
+        for (const frame of [
+          makeSubagentTaskStartedFrame({
+            taskId: "task-remote-replaced",
+            toolUseId: TOOL_USE_ID,
+            uuid: "00000000-0000-4000-8000-000000000c01",
+          }),
+          ...makeSubagentAssistantFrames({
+            parentToolUseId: TOOL_USE_ID,
+            uuid: "00000000-0000-4000-8000-000000000c02",
+            bashToolUseId: BASH,
+          }),
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000c03",
+            result: "Auditing in the background.",
+          }),
+        ]) {
+          yield* Queue.offer(harness.sdkMessages, frame);
+        }
+        yield* harness.awaitTerminal(1);
+        assert.deepEqual(bashStatuses(), ["command_execution:running"]);
+
+        yield* harness.runtime.startTurn(turn(2, CLAUDE_TEST_RESTART_MODEL_SELECTION));
+        assert.lengthOf(harness.processQueues, 2);
+        assert.deepEqual(bashStatuses(), ["command_execution:running"]);
+        assert.isFalse(
+          harness.events.some(
+            (event) => event.type === "subagent.updated" && event.subagent.status === "failed",
+          ),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("shows a remote query's startup notices once, in the first turn that uses it", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const notices = [
+          "Running in a Claude Code cloud session: https://claude.ai/code/session_01Notice",
+          "Uncommitted changes stay on this machine; the cloud session works from GitHub.",
+        ];
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          startupNotices: notices,
+        });
+        const now = yield* DateTime.now;
+        const turn = (ordinal: number) =>
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-remote-notices:${ordinal}`),
+            text: `Request ${ordinal}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+          });
+        const systemNotices = () =>
+          harness.events.flatMap((event) =>
+            event.type === "turn_item.updated" && event.turnItem.type === "system_notice"
+              ? [event.turnItem]
+              : [],
+          );
+
+        yield* harness.runtime.startTurn(turn(1));
+        yield* harness.offerAndWait(turnOneResult);
+        const firstTerminal = yield* Queue.take(harness.terminalReceipts);
+        yield* harness.runtime.startTurn(turn(2));
+        yield* harness.offerAndWait(
+          makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000c11", result: "Done." }),
+        );
+        yield* Queue.take(harness.terminalReceipts);
+
+        assert.lengthOf(harness.processQueues, 1);
+        assert.deepEqual(
+          systemNotices().map((item) => [
+            item.providerTurnId,
+            item.status,
+            item.message,
+            item.type === "system_notice" ? item.tone : undefined,
+          ]),
+          notices.map((notice) => [firstTerminal.providerTurnId, "completed", notice, "info"]),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("interrupts a remote turn without closing its query", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        const interruptSent = yield* Deferred.make<void>();
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          interrupt: Deferred.succeed(interruptSent, undefined).pipe(Effect.asVoid),
+        });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const now = yield* DateTime.now;
+        const turn = (ordinal: number) =>
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-remote-interrupt:${ordinal}`),
+            text: `Request ${ordinal}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+          });
+        const providerTurnId = idAllocator.derive.providerTurn({
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeTurnId: "turn:attempt-remote-interrupt:1",
+        });
+
+        yield* harness.runtime.startTurn(turn(1));
+        const interrupt = yield* harness.runtime
+          .interruptTurn({ providerThread: harness.providerThread, providerTurnId })
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(interruptSent);
+        // What the cloud worker sends once it stopped the turn.
+        yield* harness.offerAndWait(
+          makeResultFrame({
+            uuid: "00000000-0000-4000-8000-000000000c21",
+            result: "",
+            subtype: "error_during_execution",
+            isError: true,
+            errors: ["[ede_diagnostic] aborted"],
+            terminalReason: "aborted_streaming",
+          }),
+        );
+        yield* Fiber.join(interrupt);
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+
+        assert.equal(closes, 0);
+        assert.deepEqual(
+          [terminal.providerTurnId, terminal.status],
+          [providerTurnId, "interrupted"],
+        );
+        yield* harness.runtime.startTurn(turn(2));
+        assert.lengthOf(harness.processQueues, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect.each([
+    { stopped: true, status: "interrupted" },
+    { stopped: false, status: "failed" },
+  ] as const)(
+    "ends a remote command the cloud rejected as $status when Stop was pressed: $stopped",
+    ({ stopped, status }) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const interruptSent = yield* Deferred.make<void>();
+          const harness = yield* makeWakeHarnessWithOptions({
+            transport: "remote",
+            interrupt: Deferred.succeed(interruptSent, undefined).pipe(Effect.asVoid),
+          });
+          const idAllocator = yield* IdAllocator.IdAllocatorV2;
+          const toolUseId = "toolu_01CutOff";
+          yield* harness.runtime.startTurn(
+            makeClaudeTestTurnInput({
+              threadId: harness.threadId,
+              providerThread: harness.providerThread,
+              now: yield* DateTime.now,
+              attemptId: RunAttemptId.make("attempt-remote-cut-off"),
+              text: "Run the slow command.",
+              attachments: [],
+            }),
+          );
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              type: "assistant",
+              message: {
+                model: "claude-sonnet-4-6",
+                id: "msg_cut_off",
+                type: "message",
+                role: "assistant",
+                content: [
+                  { type: "tool_use", id: toolUseId, name: "Bash", input: { command: "sleep 60" } },
+                ],
+              },
+              parent_tool_use_id: null,
+              uuid: "00000000-0000-4000-8000-000000000c41",
+              session_id: WAKE_NATIVE_SESSION,
+            }),
+          );
+          const interrupt = stopped
+            ? yield* harness.runtime
+                .interruptTurn({
+                  providerThread: harness.providerThread,
+                  providerTurnId: idAllocator.derive.providerTurn({
+                    driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+                    nativeTurnId: "turn:attempt-remote-cut-off",
+                  }),
+                })
+                .pipe(Effect.forkScoped)
+            : undefined;
+          if (stopped) yield* Deferred.await(interruptSent);
+          // What the cloud sends for the command, whether its interrupt cut it
+          // off or the user rejected it on claude.ai.
+          yield* harness.offerAndWait(
+            claudeSdkFrame({
+              type: "user",
+              message: {
+                role: "user",
+                content: [
+                  {
+                    type: "tool_result",
+                    tool_use_id: toolUseId,
+                    is_error: true,
+                    content: "The user doesn't want to proceed with this tool use.",
+                  },
+                ],
+              },
+              tool_result_meta: [{ id: toolUseId, non_execution_kind: "user-rejected" }],
+              parent_tool_use_id: null,
+              uuid: "00000000-0000-4000-8000-000000000c42",
+              session_id: WAKE_NATIVE_SESSION,
+            }),
+          );
+          yield* harness.offerAndWait(
+            makeResultFrame({
+              uuid: "00000000-0000-4000-8000-000000000c43",
+              result: "",
+              subtype: "error_during_execution",
+              isError: true,
+              errors: ["[ede_diagnostic] aborted"],
+              terminalReason: "aborted_tools",
+            }),
+          );
+          if (interrupt !== undefined) yield* Fiber.join(interrupt);
+          yield* Queue.take(harness.terminalReceipts);
+
+          const command = harness.events.findLast(
+            (event) =>
+              event.type === "turn_item.updated" &&
+              event.turnItem.nativeItemRef?.nativeId === toolUseId,
+          );
+          const item =
+            command?.type === "turn_item.updated" && command.turnItem.type === "command_execution"
+              ? command.turnItem
+              : undefined;
+          assert.equal(item?.status, status);
+          // Local Claude shows a command cut off by Stop without output, and
+          // without the rejection the cloud reports for it.
+          assert.deepEqual(
+            [item?.output, item?.toolNonExecutionKind],
+            stopped
+              ? [undefined, undefined]
+              : ["The user doesn't want to proceed with this tool use.", "user-rejected"],
+          );
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          ),
+        ),
+      ),
+  );
+
+  const abortedRemoteResult = (uuid: string, promptUuid: string) =>
+    claudeSdkFrame({
+      ...makeResultFrame({
+        uuid,
+        result: "",
+        subtype: "error_during_execution",
+        isError: true,
+        errors: ["[ede_diagnostic] aborted"],
+        terminalReason: "aborted_streaming",
+      }),
+      user_message_uuids: [promptUuid],
+    });
+
+  it.effect("interrupts a remote turn twice before closing a query whose turn never ends", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        let interrupts = 0;
+        const interruptCalls = yield* Queue.unbounded<void>();
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: (sdkMessages) =>
+            Effect.sync(() => {
+              closes++;
+            }).pipe(Effect.andThen(Queue.shutdown(sdkMessages))),
+          interrupt: Effect.sync(() => {
+            interrupts++;
+          }).pipe(Effect.andThen(Queue.offer(interruptCalls, undefined)), Effect.asVoid),
+        });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attemptId = RunAttemptId.make("attempt-remote-interrupt-unanswered");
+        const providerTurnId = idAllocator.derive.providerTurn({
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeTurnId: `turn:${attemptId}`,
+        });
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId,
+            text: "Count to a million.",
+            attachments: [],
+          }),
+        );
+        const interrupt = yield* harness.runtime
+          .interruptTurn({ providerThread: harness.providerThread, providerTurnId })
+          .pipe(Effect.forkScoped);
+        yield* Queue.take(interruptCalls);
+        assert.equal(interrupts, 1);
+        yield* TestClock.adjust("10 seconds");
+        yield* Queue.take(interruptCalls);
+        assert.equal(interrupts, 2);
+        assert.equal(closes, 0);
+        yield* TestClock.adjust("10 seconds");
+        yield* Fiber.join(interrupt);
+
+        assert.equal(closes, 1);
+        assert.equal((yield* Queue.take(harness.terminalReceipts)).status, "interrupted");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("ends a remote turn at once when the interrupt cancels its queued prompt", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        let cancelled: ReadonlyArray<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          interrupt: Effect.sync(() => ({ stillQueued: [], cancelled })),
+        });
+        const now = yield* DateTime.now;
+        const turn = (ordinal: number) =>
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now,
+            attemptId: RunAttemptId.make(`attempt-remote-interrupt-cancelled:${ordinal}`),
+            text: `Request ${ordinal}`,
+            attachments: [],
+            providerTurnOrdinal: ordinal,
+          });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const providerTurnId = idAllocator.derive.providerTurn({
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeTurnId: "turn:attempt-remote-interrupt-cancelled:1",
+        });
+
+        yield* harness.runtime.startTurn(turn(1));
+        cancelled = [harness.promptUuid(0)];
+        yield* harness.runtime.interruptTurn({
+          providerThread: harness.providerThread,
+          providerTurnId,
+        });
+
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        assert.deepEqual(
+          [terminal.providerTurnId, terminal.status],
+          [providerTurnId, "interrupted"],
+        );
+        assert.equal(closes, 0);
+        yield* harness.runtime.startTurn(turn(2));
+        assert.lengthOf(harness.processQueues, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("interrupts a queued remote prompt again once its turn starts", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        let interrupts = 0;
+        const interruptCalls = yield* Queue.unbounded<void>();
+        let queued: ReadonlyArray<string> = [];
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          // The first interrupt aborts the turn ahead of the prompt, which waits.
+          interrupt: Effect.sync(() => {
+            interrupts++;
+            return { stillQueued: interrupts === 1 ? queued : [], cancelled: [] };
+          }).pipe(Effect.tap(() => Queue.offer(interruptCalls, undefined))),
+        });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attemptId = RunAttemptId.make("attempt-remote-interrupt-queued");
+        const providerTurnId = idAllocator.derive.providerTurn({
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeTurnId: `turn:${attemptId}`,
+        });
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId,
+            text: "Refactor the parser.",
+            attachments: [],
+          }),
+        );
+        const promptUuid = harness.promptUuid(0);
+        queued = [promptUuid];
+        const interrupt = yield* harness.runtime
+          .interruptTurn({ providerThread: harness.providerThread, providerTurnId })
+          .pipe(Effect.forkScoped);
+        yield* Queue.take(interruptCalls);
+        assert.equal(interrupts, 1);
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            ...wakeTurnInit,
+            uuid: "00000000-0000-4000-8000-000000000c71",
+            user_message_uuids: [promptUuid],
+          }),
+        );
+        yield* Queue.take(interruptCalls);
+        assert.equal(interrupts, 2);
+        yield* harness.offerAndWait(
+          abortedRemoteResult("00000000-0000-4000-8000-000000000c72", promptUuid),
+        );
+        yield* Fiber.join(interrupt);
+
+        const terminal = yield* Queue.take(harness.terminalReceipts);
+        assert.deepEqual(
+          [terminal.providerTurnId, terminal.status],
+          [providerTurnId, "interrupted"],
+        );
+        assert.equal(closes, 0);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("keeps a remote turn running when its interrupt request fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          interrupt: Effect.fail(
+            new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+              method: "interrupt",
+              cause: "The session did not answer.",
+            }),
+          ),
+        });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attemptId = RunAttemptId.make("attempt-remote-interrupt-failed");
+        const providerTurnId = idAllocator.derive.providerTurn({
+          driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+          nativeTurnId: `turn:${attemptId}`,
+        });
+
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId,
+            text: "Count to ten.",
+            attachments: [],
+          }),
+        );
+        const exit = yield* harness.runtime
+          .interruptTurn({ providerThread: harness.providerThread, providerTurnId })
+          .pipe(Effect.exit);
+        assert.isTrue(Exit.isFailure(exit));
+        assert.equal(closes, 0);
+        assert.lengthOf(harness.terminalEvents(), 0);
+
+        yield* harness.offerAndWait(
+          makeResultFrame({ uuid: "00000000-0000-4000-8000-000000000c81", result: "Counted." }),
+        );
+        assert.equal((yield* Queue.take(harness.terminalReceipts)).status, "completed");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  const startRemoteBackgroundWork = Effect.fnUntraced(function* (
+    harness: Effect.Success<ReturnType<typeof makeWakeHarnessWithOptions>>,
+    label: string,
+  ) {
+    yield* harness.runtime.startTurn(
+      makeClaudeTestTurnInput({
+        threadId: harness.threadId,
+        providerThread: harness.providerThread,
+        now: yield* DateTime.now,
+        attemptId: RunAttemptId.make(`attempt-remote-stop:${label}`),
+        text: "Run the build in the background.",
+        attachments: [],
+      }),
+    );
+    yield* harness.offerAndWait(wakeTaskStarted);
+    yield* harness.offerAndWait(turnOneResult);
+    const terminal = yield* Queue.take(harness.terminalReceipts);
+    assert.isTrue(
+      yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread),
+    );
+    return terminal.providerTurnId;
+  });
+
+  it.effect("stops a settled remote turn's background work and stays attached", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        const stopped: Array<string> = [];
+        const stopRequested = yield* Deferred.make<void>();
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          stopTask: (taskId) =>
+            Effect.sync(() => {
+              stopped.push(taskId);
+            }).pipe(Effect.andThen(Deferred.succeed(stopRequested, undefined)), Effect.asVoid),
+        });
+        const providerTurnId = yield* startRemoteBackgroundWork(harness, "reported");
+
+        const stop = yield* harness.runtime
+          .interruptTurn({
+            providerThread: harness.providerThread,
+            providerTurnId,
+            requestRuntimeRestart: true,
+          })
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(stopRequested);
+        assert.deepEqual(stopped, [WAKE_TASK_ID]);
+        assert.isUndefined(stop.pollUnsafe());
+        // What the cloud reports once it killed the task.
+        yield* harness.offerAndWait(
+          claudeSdkFrame({
+            ...wakeNotification,
+            status: "stopped",
+            uuid: "00000000-0000-4000-8000-000000000c91",
+          }),
+        );
+        yield* Fiber.join(stop);
+
+        assert.equal(closes, 0);
+        assert.isFalse(
+          yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread),
+        );
+        yield* harness.runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("attempt-remote-stop:after"),
+            text: "Next.",
+            attachments: [],
+            providerTurnOrdinal: 2,
+          }),
+        );
+        assert.lengthOf(harness.processQueues, 1);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("clears a remote Stop's roster when the cloud accepts it but reports nothing", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        const stopped: Array<string> = [];
+        const stopRequested = yield* Deferred.make<void>();
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          stopTask: (taskId) =>
+            Effect.sync(() => {
+              stopped.push(taskId);
+            }).pipe(Effect.andThen(Deferred.succeed(stopRequested, undefined)), Effect.asVoid),
+        });
+        const providerTurnId = yield* startRemoteBackgroundWork(harness, "unreported");
+
+        const stop = yield* harness.runtime
+          .interruptTurn({
+            providerThread: harness.providerThread,
+            providerTurnId,
+            requestRuntimeRestart: true,
+          })
+          .pipe(Effect.forkScoped);
+        yield* Deferred.await(stopRequested);
+        while (stop.pollUnsafe() === undefined) {
+          yield* TestClock.adjust("10 seconds");
+        }
+        yield* Fiber.join(stop);
+
+        assert.equal(closes, 0);
+        assert.isFalse(
+          yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reports a remote Stop that cannot reach the cloud's background work", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          stopTask: () =>
+            Effect.fail(
+              new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+                method: "stopTask",
+                cause: "The session did not answer.",
+              }),
+            ),
+        });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        // Before any query is attached, nothing can reach the cloud.
+        const unattached = yield* harness.runtime
+          .interruptTurn({
+            providerThread: harness.providerThread,
+            providerTurnId: idAllocator.derive.providerTurn({
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeTurnId: "turn:attempt-remote-stop:earlier-process",
+            }),
+            requestRuntimeRestart: true,
+          })
+          .pipe(Effect.exit);
+        assert.isTrue(Exit.isFailure(unattached));
+
+        const providerTurnId = yield* startRemoteBackgroundWork(harness, "refused");
+        const refused = yield* harness.runtime
+          .interruptTurn({
+            providerThread: harness.providerThread,
+            providerTurnId,
+            requestRuntimeRestart: true,
+          })
+          .pipe(Effect.exit);
+        assert.isTrue(Exit.isFailure(refused));
+        assert.equal(closes, 0);
+        assert.isTrue(
+          yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("lets abandoned-turn recovery continue past cloud work it cannot stop", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let closes = 0;
+        const harness = yield* makeWakeHarnessWithOptions({
+          transport: "remote",
+          close: () =>
+            Effect.sync(() => {
+              closes++;
+            }),
+          stopTask: () =>
+            Effect.fail(
+              new ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerError({
+                method: "stopTask",
+                cause: "The session did not answer.",
+              }),
+            ),
+        });
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        yield* harness.runtime.interruptTurn({
+          providerThread: harness.providerThread,
+          providerTurnId: idAllocator.derive.providerTurn({
+            driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+            nativeTurnId: "turn:attempt-remote-recovery:abandoned",
+          }),
+          requestRuntimeRestart: true,
+          recoversAbandonedTurn: true,
+        });
+
+        const providerTurnId = yield* startRemoteBackgroundWork(harness, "recovery-refused");
+        yield* harness.runtime.interruptTurn({
+          providerThread: harness.providerThread,
+          providerTurnId,
+          requestRuntimeRestart: true,
+          recoversAbandonedTurn: true,
+        });
+        assert.equal(closes, 0);
+        assert.isTrue(
+          yield* harness.runtime.hasPendingBackgroundWorkForThread!(harness.providerThread),
+        );
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
 
   it.effect(
     "uses task_started as an incremental roster fallback and clears on empty snapshot",
@@ -7948,7 +9402,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
             close: (sdkMessages) =>
               Deferred.await(closeGate).pipe(Effect.andThen(Queue.shutdown(sdkMessages))),
             stopTask: () => Effect.void,
-            interrupt: Deferred.succeed(interruptStarted, undefined),
+            interrupt: Deferred.succeed(interruptStarted, undefined).pipe(Effect.asVoid),
           });
           const idAllocator = yield* IdAllocator.IdAllocatorV2;
           const now = yield* DateTime.now;

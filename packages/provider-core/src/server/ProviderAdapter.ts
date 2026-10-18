@@ -419,6 +419,8 @@ export interface ProviderAdapterV2EnsureThreadInput {
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly providerSessionId?: ProviderSessionId;
   readonly existingProviderThread?: OrchestrationV2ProviderThread;
+  /** The text of the user message whose turn needs the thread. */
+  readonly messageText?: string;
 }
 
 export interface ProviderAdapterV2TurnInput {
@@ -450,6 +452,12 @@ export interface ProviderAdapterV2InterruptInput {
   readonly providerThread: OrchestrationV2ProviderThread;
   readonly providerTurnId: ProviderTurnId;
   readonly requestRuntimeRestart?: boolean;
+  /**
+   * Set when the server stops a turn its failed run left running before it continues the
+   * thread, rather than for a user's Stop. Work the provider cannot be reached to stop
+   * should not fail the turn that follows.
+   */
+  readonly recoversAbandonedTurn?: boolean;
 }
 
 export interface ProviderAdapterV2RuntimeRequestResponseInput {
@@ -659,5 +667,16 @@ export class ProviderAdapterV2 extends Context.Service<
     readonly openSession: (
       input: ProviderAdapterV2OpenSessionInput,
     ) => Effect.Effect<ProviderAdapterV2SessionRuntime, ProviderAdapterV2Error, Scope.Scope>;
+    /**
+     * Saves on this machine a file that a session running elsewhere sent the user, and returns
+     * its path. `output` is what the tool call that sent files returned; null means that call
+     * did not send `path`, or the file could not be saved. Only remote adapters implement it.
+     */
+    readonly saveSentFile?: (input: {
+      readonly threadId: ThreadId;
+      readonly toolName: string;
+      readonly output: unknown;
+      readonly path: string;
+    }) => Effect.Effect<string | null>;
   }
 >()("@t3tools/provider-core/server/ProviderAdapter/ProviderAdapterV2") {}

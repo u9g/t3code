@@ -425,6 +425,28 @@ describe("buildThreadFeed", () => {
     ).toBe(true);
   });
 
+  it("marks an info notice as information rather than a warning", () => {
+    const message = "Running in a Claude Code cloud session.";
+    const notice = (tone: "info" | "warning") => {
+      const feed = buildThreadFeed([
+        projected(
+          {
+            ...base(`item-${tone}-notice`, "2026-06-20T00:00:02.000Z", 1),
+            type: "system_notice" as const,
+            message,
+            tone,
+          },
+          0,
+        ),
+      ]);
+      return deriveThreadFeedPresentation(feed, null, new Set()).flatMap((entry) =>
+        entry.type === "activity-group" ? entry.activities : [],
+      )[0];
+    };
+    expect(notice("info")).toMatchObject({ summary: message, icon: "info", status: null });
+    expect(notice("warning")).toMatchObject({ summary: message, icon: "warning" });
+  });
+
   it("preserves authoritative V2 order instead of sorting reconstructed collections", () => {
     const rows = [
       projected(userMessage("2026-06-20T00:00:03.000Z"), 0),

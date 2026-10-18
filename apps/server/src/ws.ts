@@ -1319,6 +1319,33 @@ export const layerWsRpc = (
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const storageCleanup = yield* StorageCleanup.StorageCleanup;
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
+      // A file a remote session sent the user is on that session's machine, so its path is
+      // missing here. The thread's adapter saves the file here when one of the thread's tool
+      // calls sent that path.
+      const savedRemoteSentFile = Effect.fn("ws.assets.savedRemoteSentFile")(
+        function* (resource: { readonly threadId: ThreadId; readonly path: string }) {
+          const records = yield* threadManagement.getThreadRecords(
+            resource.threadId,
+            ["turnItems"],
+            { turnItemTypes: ["dynamic_tool"] },
+          );
+          const instance = yield* providerInstances.getInstance(records.thread.providerInstanceId);
+          const saveSentFile = instance?.orchestrationAdapter.saveSentFile;
+          if (saveSentFile === undefined) return null;
+          for (const item of records.turnItems.toReversed()) {
+            if (item.type !== "dynamic_tool" || item.toolName === null) continue;
+            const saved = yield* saveSentFile({
+              threadId: resource.threadId,
+              toolName: item.toolName,
+              output: item.output,
+              path: resource.path,
+            });
+            if (saved !== null) return saved;
+          }
+          return null;
+        },
+        Effect.orElseSucceed(() => null),
+      );
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
@@ -2770,14 +2797,30 @@ export const layerWsRpc = (
           Effect.fnUntraced(function* (input) {
             const path = yield* Path.Path;
             if (
+              input.resource._tag === "media-file" &&
+              path.isAbsolute(input.resource.path) &&
+              // A network path is served only from the thread's project, looked up below.
+              !isNetworkPath(input.resource.path)
+            ) {
+              const resource = input.resource;
+              return yield* issueAssetUrl({ resource }).pipe(
+                Effect.catchTags({
+                  AssetWorkspaceAssetNotFoundError: (notFound) =>
+                    savedRemoteSentFile(resource).pipe(
+                      Effect.flatMap((localPath) =>
+                        localPath === null
+                          ? Effect.fail(notFound)
+                          : issueAssetUrl({ resource: { ...resource, path: localPath } }),
+                      ),
+                    ),
+                }),
+              );
+            }
+            if (
               input.resource._tag === "attachment" ||
               input.resource._tag === "native-app-icon" ||
               input.resource._tag === "tool-output-image" ||
-              input.resource._tag === SOURCE_CONTROL_MEDIA_ASSET ||
-              // A network path is served only from the thread's project, looked up below.
-              (input.resource._tag === "media-file" &&
-                path.isAbsolute(input.resource.path) &&
-                !isNetworkPath(input.resource.path))
+              input.resource._tag === SOURCE_CONTROL_MEDIA_ASSET
             ) {
               return yield* issueAssetUrl({ resource: input.resource });
             }

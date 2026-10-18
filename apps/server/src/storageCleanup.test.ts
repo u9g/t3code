@@ -23,20 +23,25 @@ import * as StorageCleanup from "./storageCleanup.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as GitManager from "./git/GitManager.ts";
 import * as Settings from "./serverSettings.ts";
+import * as EventSink from "./orchestration-v2/EventSink.ts";
+import * as EventStore from "./orchestration-v2/EventStore.ts";
 import * as ProjectionStore from "./orchestration-v2/ProjectionStore.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { ServerActivation } from "./serverActivation.ts";
 import { describe, expect, it } from "@effect/vitest";
 import {
+  EventId,
   ProjectId,
   ProviderInstanceId,
   RunId,
   RuntimeRequestId,
   ThreadId,
+  type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
@@ -239,6 +244,8 @@ const cleanupFixture = (
     worktreeAfterDays: 8,
     worktreeOnDelete: true,
   },
+  /** A real database instead of the canned query results. */
+  database?: SqlClient.SqlClient,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -340,37 +347,41 @@ const cleanupFixture = (
       Effect.provideService(Orchestrator.OrchestratorV2, {
         streamDomainEvents: Stream.suspend(() => events),
       } as unknown as Orchestrator.OrchestratorV2["Service"]),
-      Effect.provideService(SqlClient.SqlClient, ((strings: TemplateStringsArray) =>
-        Effect.sync(() =>
-          openSessionCwd !== null && strings.join("").includes("projection_provider_sessions")
-            ? [
-                {
-                  payload_json: JSON.stringify({
-                    id: "session-1",
-                    driver: "codex",
-                    providerInstanceId: "codex",
-                    status: "ready",
-                    cwd: openSessionCwd,
-                    model: null,
-                    capabilities: CodexProviderCapabilitiesV2,
-                    createdAt: "2026-06-01T12:00:00.000Z",
-                    updatedAt: "2026-06-01T12:00:00.000Z",
-                    lastError: null,
-                  }),
-                },
-              ]
-            : strings.join("").includes("deleted_at IS NOT NULL")
-              ? deletedThreads.map((thread) => ({
-                  payload_json: JSON.stringify(thread),
-                  workspaceRoot: repo,
-                }))
-              : strings.join("").includes('AS "worktreePath"')
+      Effect.provideService(
+        SqlClient.SqlClient,
+        database ??
+          (((strings: TemplateStringsArray) =>
+            Effect.sync(() =>
+              openSessionCwd !== null && strings.join("").includes("projection_provider_sessions")
                 ? [
-                    ...threads.flatMap((thread) => thread.worktreePath ?? []),
-                    ...storedWorktreePaths,
-                  ].map((worktreePath) => ({ worktreePath }))
-                : [],
-        )) as unknown as SqlClient.SqlClient),
+                    {
+                      payload_json: JSON.stringify({
+                        id: "session-1",
+                        driver: "codex",
+                        providerInstanceId: "codex",
+                        status: "ready",
+                        cwd: openSessionCwd,
+                        model: null,
+                        capabilities: CodexProviderCapabilitiesV2,
+                        createdAt: "2026-06-01T12:00:00.000Z",
+                        updatedAt: "2026-06-01T12:00:00.000Z",
+                        lastError: null,
+                      }),
+                    },
+                  ]
+                : strings.join("").includes("deleted_at IS NOT NULL")
+                  ? deletedThreads.map((thread) => ({
+                      payload_json: JSON.stringify(thread),
+                      workspaceRoot: repo,
+                    }))
+                  : strings.join("").includes('AS "worktreePath"')
+                    ? [
+                        ...threads.flatMap((thread) => thread.worktreePath ?? []),
+                        ...storedWorktreePaths,
+                      ].map((worktreePath) => ({ worktreePath }))
+                    : [],
+            )) as unknown as SqlClient.SqlClient),
+      ),
       Effect.provideService(GitManager.GitManager, {
         invalidateStatus: () => Effect.void,
       } as unknown as GitManager.GitManager["Service"]),
@@ -945,6 +956,91 @@ describe("deleted thread worktrees", () => {
       });
       expect(yield* fixture.fs.exists(fixture.worktree)).toBe(true);
     }).pipe(Effect.provide(cleanupTestLayer), Effect.scoped),
+  );
+
+  const layerDatabase = EventSink.layer.pipe(
+    Layer.provideMerge(Layer.merge(EventStore.layer, ProjectionStore.layer)),
+    Layer.provideMerge(SqlitePersistence.layerMemory),
+  );
+
+  it.live.each([
+    ["removes", "provider-files.cleanup", "removed"],
+    ["keeps", "terminal.cleanup", "kept"],
+  ] as const)("%s the worktree of a thread whose %s failed", ([, effectType, outcome]) =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const eventSink = yield* EventSink.EventSinkV2;
+        const fixture = yield* cleanupFixture(undefined, sql);
+        fixture.setThreads([]);
+        const threadId = ThreadId.make("thread-deleted");
+        const projectId = ProjectId.make("project-1");
+        const providerInstanceId = ProviderInstanceId.make("codex");
+        const createdAt = at(-DAY_MS);
+        yield* sql`
+          INSERT INTO projection_projects (
+            project_id, title, workspace_root, default_model_selection_json,
+            scripts_json, created_at, updated_at, deleted_at
+          ) VALUES (
+            ${projectId}, 'Project', ${fixture.repo}, NULL,
+            '[]', ${DateTime.formatIso(createdAt)}, ${DateTime.formatIso(createdAt)}, NULL
+          )
+        `;
+        const thread: OrchestrationV2AppThread = {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId,
+          title: "Deleted",
+          providerInstanceId,
+          modelSelection: { instanceId: providerInstanceId, model: "gpt-5.4" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: "feature",
+          worktreePath: fixture.worktree,
+          activeProviderThreadId: null,
+          lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+          forkedFrom: null,
+          createdAt,
+          updatedAt: createdAt,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        };
+        const base = { threadId, providerInstanceId, occurredAt: createdAt };
+        yield* eventSink.write({
+          events: [
+            { ...base, id: EventId.make("created"), type: "thread.created", payload: thread },
+            {
+              ...base,
+              id: EventId.make("deleted"),
+              type: "thread.deleted",
+              payload: { ...thread, deletedAt: createdAt },
+            },
+          ],
+        });
+        const failedAt = DateTime.formatIso(createdAt);
+        yield* sql`
+          INSERT INTO orchestration_v2_effect_outbox (
+            effect_id, command_id, thread_id, effect_type, payload_json, status,
+            attempt_count, available_at, created_at, updated_at, completed_at
+          ) VALUES (
+            ${`effect:delete:${effectType}`}, 'command:delete', ${threadId}, ${effectType},
+            ${JSON.stringify({ type: effectType })}, 'failed', 5,
+            ${failedAt}, ${failedAt}, ${failedAt}, ${failedAt}
+          )
+        `;
+
+        const report = yield* fixture.service.runNow;
+
+        expect(report.entries.filter((entry) => entry.threadId === threadId)).toMatchObject([
+          { outcome },
+        ]);
+        expect(yield* fixture.fs.exists(fixture.worktree)).toBe(outcome === "kept");
+      }).pipe(Effect.provide(layerDatabase)),
+    ),
   );
 });
 

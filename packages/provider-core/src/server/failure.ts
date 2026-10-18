@@ -95,6 +95,14 @@ function curatedCauseMessages(cause: unknown): {
         case "CursorModelUnavailableError":
         case "ThreadMcpServersUnsupportedError":
           return { known: stringField(cause, "message"), category: categoryMessage() };
+        case "ClaudeAgentSdkQueryRunnerError":
+          // Only the Claude Cloud runner classifies its failures, and its
+          // message is fixed per reason. Local SDK and CLI failures have no
+          // reason and stay behind the generic message.
+          if (stringField(cause, "reason") !== undefined) {
+            return { known: stringField(cause, "message"), category: categoryMessage() };
+          }
+          break;
         case "ContextHandoffDeliveryUncertainError":
           return {
             known:
@@ -134,7 +142,7 @@ export function knownProviderFailureMessage(cause: unknown): string | undefined 
   return curatedCauseMessages(cause).known;
 }
 
-function stringField(value: unknown, key: "message" | "code"): string | undefined {
+function stringField(value: unknown, key: "message" | "code" | "reason"): string | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   try {
     const candidate = (value as Record<string, unknown>)[key];

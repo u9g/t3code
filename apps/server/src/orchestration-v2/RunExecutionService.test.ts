@@ -1008,7 +1008,7 @@ describe("thread MCP servers", () => {
       const started = yield* Deferred.make<ProviderAdapter.ProviderAdapterV2TurnInput>();
       yield* startWithServers({
         key: "thread-mcp-claude",
-        driver: ProviderDriverKind.make("claudeAgent"),
+        driver: ProviderDriverKind.make("claudeCloud"),
         startTurn: (input) => Deferred.succeed(started, input),
         writes: yield* Ref.make<ReadonlyArray<OrchestrationV2DomainEvent>>([]),
       });

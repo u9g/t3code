@@ -72,6 +72,7 @@ import { assertPiCompactionOutput } from "./pi_compaction/output.ts";
 import { providerThreadResumeInput } from "./provider_thread_resume/input.ts";
 import { assertPiProviderThreadResumeOutput } from "./provider_thread_resume/pi_output.ts";
 import { assertMultiTurnClaudeOutput } from "./multi_turn/claude_output.ts";
+import { assertMultiTurnClaudeCloudOutput } from "./multi_turn/claude_cloud_output.ts";
 import { assertMultiTurnOutput } from "./multi_turn/codex_output.ts";
 import { assertPiMultiTurnOutput } from "./multi_turn/pi_output.ts";
 import { multiTurnInput } from "./multi_turn/input.ts";
@@ -116,6 +117,7 @@ import {
 import { assertOpenCodePlanQuestionsOutput } from "./plan_questions/opencode_output.ts";
 import { planQuestionsInput } from "./plan_questions/input.ts";
 import { assertProposedPlanOutput } from "./proposed_plan/codex_output.ts";
+import { assertProposedPlanClaudeCloudOutput } from "./proposed_plan/claude_cloud_output.ts";
 import { assertProposedPlanCursorOutput } from "./proposed_plan/cursor_output.ts";
 import { proposedPlanInput } from "./proposed_plan/input.ts";
 import { assertQueuedCancelledWhileActiveOutput } from "./queued_cancelled_while_active/codex_output.ts";
@@ -123,6 +125,7 @@ import { queuedCancelledWhileActiveInput } from "./queued_cancelled_while_active
 import { assertQueuedTurnOutput } from "./queued_turn/codex_output.ts";
 import { queuedTurnInput } from "./queued_turn/input.ts";
 import { assertSimpleClaudeOutput } from "./simple/claude_output.ts";
+import { assertSimpleClaudeCloudOutput } from "./simple/claude_cloud_output.ts";
 import { assertSkillInvocationCursorOutput } from "./skill_invocation/cursor_output.ts";
 import { skillInvocationInput } from "./skill_invocation/input.ts";
 import { assertSimpleOutput } from "./simple/codex_output.ts";
@@ -186,22 +189,26 @@ import { assertToolCallWorkspaceNeverClaudeOutput } from "./tool_call_workspace_
 import { assertToolCallWorkspaceNeverOutput } from "./tool_call_workspace_never/codex_output.ts";
 import { toolCallWorkspaceNeverInput } from "./tool_call_workspace_never/input.ts";
 import { assertTurnInterruptClaudeOutput } from "./turn_interrupt/claude_output.ts";
+import { assertTurnInterruptClaudeCloudOutput } from "./turn_interrupt/claude_cloud_output.ts";
 import { assertCommandOutputStreamingOutput } from "./command_output_streaming/output.ts";
 import { commandOutputStreamingInput } from "./command_output_streaming/input.ts";
 import { assertTurnInterruptOutput } from "./turn_interrupt/codex_output.ts";
 import { turnInterruptInput } from "./turn_interrupt/input.ts";
 import { assertTurnInterruptMidToolClaudeOutput } from "./turn_interrupt_mid_tool/claude_output.ts";
+import { assertTurnInterruptMidToolClaudeCloudOutput } from "./turn_interrupt_mid_tool/claude_cloud_output.ts";
 import { assertTurnInterruptMidToolCodexOutput } from "./turn_interrupt_mid_tool/codex_output.ts";
 import { assertTurnInterruptMidToolCursorOutput } from "./turn_interrupt_mid_tool/cursor_output.ts";
 import { turnInterruptMidToolInput } from "./turn_interrupt_mid_tool/input.ts";
 import { assertTurnInterruptMidToolPiOutput } from "./turn_interrupt_mid_tool/pi_output.ts";
 import { assertTurnInterruptRestartClaudeOutput } from "./turn_interrupt_restart/claude_output.ts";
+import { assertTurnInterruptRestartClaudeCloudOutput } from "./turn_interrupt_restart/claude_cloud_output.ts";
 import { turnInterruptRestartInput } from "./turn_interrupt_restart/input.ts";
 import { assertClaudeWebSearchOutput } from "./web_search/claude_output.ts";
 import { assertWebSearchOutput } from "./web_search/codex_output.ts";
 import { webSearchInput } from "./web_search/input.ts";
 import {
   ACP_REGISTRY_MODEL_SELECTION,
+  CLAUDE_CLOUD_MODEL_SELECTION,
   CLAUDE_MODEL_SELECTION,
   CODEX_MODEL_SELECTION,
   CURSOR_MODEL_SELECTION,
@@ -625,6 +632,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         transcriptFile: new URL("./simple/claude_transcript.ndjson", import.meta.url),
         modelSelection: CLAUDE_MODEL_SELECTION,
         assertOutput: assertSimpleClaudeOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("claudeCloud"),
+        transcriptFile: new URL("./simple/claude_cloud_transcript.ndjson", import.meta.url),
+        modelSelection: CLAUDE_CLOUD_MODEL_SELECTION,
+        assertOutput: assertSimpleClaudeCloudOutput,
       },
       {
         driver: ProviderDriverKind.make("cursor"),
@@ -1207,6 +1220,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         assertOutput: assertMultiTurnClaudeOutput,
       },
       {
+        driver: ProviderDriverKind.make("claudeCloud"),
+        transcriptFile: new URL("./multi_turn/claude_cloud_transcript.ndjson", import.meta.url),
+        modelSelection: CLAUDE_CLOUD_MODEL_SELECTION,
+        assertOutput: assertMultiTurnClaudeCloudOutput,
+      },
+      {
         driver: ProviderDriverKind.make("cursor"),
         transcriptFile: new URL("./multi_turn/cursor_transcript.ndjson", import.meta.url),
         modelSelection: CURSOR_MODEL_SELECTION,
@@ -1472,6 +1491,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         runtimePolicyOverride: READ_ONLY_NEVER_POLICY,
         assertOutput: assertProposedPlanCursorOutput,
       },
+      {
+        driver: ProviderDriverKind.make("claudeCloud"),
+        transcriptFile: new URL("./proposed_plan/claude_cloud_transcript.ndjson", import.meta.url),
+        modelSelection: CLAUDE_CLOUD_MODEL_SELECTION,
+        assertOutput: assertProposedPlanClaudeCloudOutput,
+      },
     ],
   },
   {
@@ -1533,6 +1558,12 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
         assertOutput: assertTurnInterruptClaudeOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("claudeCloud"),
+        transcriptFile: new URL("./turn_interrupt/claude_cloud_transcript.ndjson", import.meta.url),
+        modelSelection: CLAUDE_CLOUD_MODEL_SELECTION,
+        assertOutput: assertTurnInterruptClaudeCloudOutput,
       },
       {
         driver: ProviderDriverKind.make("grok"),
@@ -1613,6 +1644,15 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         assertOutput: assertTurnInterruptMidToolClaudeOutput,
       },
       {
+        driver: ProviderDriverKind.make("claudeCloud"),
+        transcriptFile: new URL(
+          "./turn_interrupt_mid_tool/claude_cloud_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: CLAUDE_CLOUD_MODEL_SELECTION,
+        assertOutput: assertTurnInterruptMidToolClaudeCloudOutput,
+      },
+      {
         driver: ProviderDriverKind.make("cursor"),
         transcriptFile: new URL(
           "./turn_interrupt_mid_tool/cursor_transcript.ndjson",
@@ -1643,6 +1683,15 @@ export const ORCHESTRATOR_REPLAY_FIXTURES: ReadonlyArray<OrchestratorReplayFixtu
         modelSelection: CLAUDE_MODEL_SELECTION,
         runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
         assertOutput: assertTurnInterruptRestartClaudeOutput,
+      },
+      {
+        driver: ProviderDriverKind.make("claudeCloud"),
+        transcriptFile: new URL(
+          "./turn_interrupt_restart/claude_cloud_transcript.ndjson",
+          import.meta.url,
+        ),
+        modelSelection: CLAUDE_CLOUD_MODEL_SELECTION,
+        assertOutput: assertTurnInterruptRestartClaudeCloudOutput,
       },
     ],
   },

@@ -301,6 +301,7 @@ it.effect("queues provider and resource cleanup and preserves an earlier deletio
         { type: "preview.cleanup" },
         { type: "attachment.cleanup", attachmentIds: ["shared_file"] },
         { type: "thread-content.purge" },
+        { type: "provider-files.cleanup" },
       ],
     );
   }).pipe(Effect.provide(IdAllocator.layer)),

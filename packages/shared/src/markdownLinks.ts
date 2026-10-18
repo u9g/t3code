@@ -834,6 +834,26 @@ export function isWindowsDrivePathHref(href: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(safeDecodeURIComponent(href));
 }
 
+/**
+ * Writes an absolute file path as a Markdown link or image destination that the web and native
+ * parsers both hand back intact: `/` separators, and percent-encoding for the spaces, parentheses,
+ * `#`, `?`, and `%` a bare destination cannot hold. Readers decode it with
+ * `safeDecodeURIComponent`.
+ */
+export function markdownFilePathDestination(path: string): string {
+  return path
+    .split(/[\\/]/)
+    .map((segment, index) =>
+      index === 0 && /^[A-Za-z]:$/.test(segment)
+        ? segment
+        : encodeURIComponent(segment).replace(
+            /[!'()*]/g,
+            (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+          ),
+    )
+    .join("/");
+}
+
 // Bare prose paths need a filesystem root or a position, so `/api/users.json` stays a route,
 // and a file-shaped last segment.
 export function absoluteFilePathMatches(text: string): Array<{ index: number; path: string }> {

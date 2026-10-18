@@ -1,4 +1,5 @@
 import {
+  isClaudeCodeDriver,
   type ModelCapabilities,
   ProviderDriverKind,
   type ProviderOptionDescriptor,
@@ -46,6 +47,23 @@ const EFFORT_CHOICES = [
   { id: "xhigh", label: msg("Extra High", { $context: "reasoning level" }) },
 ] as const;
 
+const CLAUDE_DESCRIPTOR_PRESETS: ReadonlyArray<DescriptorPreset> = [
+  {
+    id: "effort",
+    label: msg("Reasoning", { $context: "model option name" }),
+    type: "select",
+    choices: [
+      { id: "low", label: msg("Low", { $context: "reasoning level" }) },
+      { id: "medium", label: msg("Medium", { $context: "reasoning level" }) },
+      { id: "high", label: msg("High", { $context: "reasoning level" }), isDefault: true },
+      { id: "xhigh", label: msg("Extra High", { $context: "reasoning level" }) },
+      { id: "max", label: msg("Max", { $context: "reasoning level" }) },
+    ],
+  },
+  { id: "fastMode", label: msg("Fast Mode", { $context: "model option name" }), type: "boolean" },
+  { id: "thinking", label: msg("Thinking", { $context: "model option name" }), type: "boolean" },
+];
+
 export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
   Record<ProviderDriverKind, ReadonlyArray<DescriptorPreset>>
 > = {
@@ -66,22 +84,8 @@ export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
       ],
     },
   ],
-  [ProviderDriverKind.make("claudeAgent")]: [
-    {
-      id: "effort",
-      label: msg("Reasoning", { $context: "model option name" }),
-      type: "select",
-      choices: [
-        { id: "low", label: msg("Low", { $context: "reasoning level" }) },
-        { id: "medium", label: msg("Medium", { $context: "reasoning level" }) },
-        { id: "high", label: msg("High", { $context: "reasoning level" }), isDefault: true },
-        { id: "xhigh", label: msg("Extra High", { $context: "reasoning level" }) },
-        { id: "max", label: msg("Max", { $context: "reasoning level" }) },
-      ],
-    },
-    { id: "fastMode", label: msg("Fast Mode", { $context: "model option name" }), type: "boolean" },
-    { id: "thinking", label: msg("Thinking", { $context: "model option name" }), type: "boolean" },
-  ],
+  [ProviderDriverKind.make("claudeAgent")]: CLAUDE_DESCRIPTOR_PRESETS,
+  [ProviderDriverKind.make("claudeCloud")]: CLAUDE_DESCRIPTOR_PRESETS,
   [ProviderDriverKind.make("cursor")]: [
     {
       id: "reasoning",
@@ -213,7 +217,7 @@ export function descriptorsFromCapabilities(
   driverKind: ProviderDriverKind | null,
 ): EditorDescriptor[] {
   return (capabilities?.optionDescriptors ?? [])
-    .filter((descriptor) => driverKind !== "claudeAgent" || descriptor.id !== "contextWindow")
+    .filter((descriptor) => !isClaudeCodeDriver(driverKind) || descriptor.id !== "contextWindow")
     .map(descriptorToEditor);
 }
 

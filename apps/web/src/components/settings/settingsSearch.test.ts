@@ -61,6 +61,7 @@ describe("searchSettings", () => {
     expect(searchSettings("network", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
     expect(searchSettings("sharing", ITEMS).map((item) => item.id)).toEqual(["network-access"]);
     expect(searchSettings("claude", ITEMS).map((item) => item.id)).toEqual(["providers"]);
+    expect(searchSettings("Claude Cloud")[0]?.id).toBe("providers");
     expect(searchSettings("long lines", ITEMS).map((item) => item.id)).toEqual(["word-wrap"]);
     const spanish = (message: string) => (message === "Word wrap" ? "Ajuste de línea" : message);
     expect(searchSettings("ajuste", ITEMS, spanish).map((item) => item.id)).toEqual(["word-wrap"]);

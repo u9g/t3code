@@ -12,6 +12,7 @@ import type {
 import {
   type ChatAttachment,
   CommandId,
+  isClaudeCodeDriver,
   isDelegatedAppThread,
   isListedThreadLineage,
   isOrchestrationV2WorkActive,
@@ -1658,7 +1659,7 @@ const make = Effect.gen(function* () {
       ) {
         return yield* new OrchestrationV2StopWorkflowError({ ...input, reason: "not-running" });
       }
-      if (task.origin !== "provider_native" || task.driver !== "claudeAgent") {
+      if (task.origin !== "provider_native" || !isClaudeCodeDriver(task.driver)) {
         return yield* new OrchestrationV2StopWorkflowError({ ...input, reason: "unsupported" });
       }
       const providerThreadId =

@@ -334,8 +334,8 @@ export const layer: Layer.Layer<ProjectionMaintenanceV2, never, SqlClient.SqlCli
           SELECT 1 FROM orchestration_v2_effect_outbox AS effect
           WHERE effect.thread_id = thread.thread_id
             AND effect.status IN ('pending', 'running')
-            -- Title generation has its own lane and needs nothing the purge removes.
-            AND effect.effect_type NOT IN ('thread-content.purge', 'thread-title.generate')
+            -- Title generation and provider file cleanup need nothing the purge removes.
+            AND effect.effect_type NOT IN ('thread-content.purge', 'thread-title.generate', 'provider-files.cleanup')
         )
         -- A live parent settles its delegated task from this child's runs.
         AND NOT EXISTS (

@@ -34,6 +34,7 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
+import { defaultProviderInstanceModel } from "@t3tools/shared/model";
 import {
   resolveProjectFileBackedSetting,
   resolveProjectSettings,
@@ -200,6 +201,35 @@ const launchCommandId = Effect.fn("mcp.launchCommandId")(function* (
   return CommandId.make(`mcp:launch:${Hex.encode(digest)}`);
 });
 
+/**
+ * The selection a launch on `instanceId` starts with: the one it would inherit
+ * when that is on the same instance, options included, otherwise the instance's
+ * default model, as the composer picks it.
+ */
+const providerDefaultModelSelection = Effect.fn("mcp.providerDefaultModelSelection")(function* (
+  instanceId: ProviderInstanceId,
+  inherited: ModelSelection | undefined,
+) {
+  if (inherited?.instanceId === instanceId) return inherited;
+  const providers = yield* ProviderRegistry.ProviderRegistry.pipe(
+    Effect.flatMap((registry) => registry.getProviders),
+  );
+  const provider = providers.find((candidate) => candidate.instanceId === instanceId);
+  const model =
+    provider === undefined
+      ? undefined
+      : defaultProviderInstanceModel({ driverKind: provider.driver, models: provider.models });
+  if (model === undefined)
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message:
+        provider === undefined
+          ? `Provider instance ${instanceId} is not registered. orchestrator_capabilities lists providers.`
+          : `Provider instance ${instanceId} has no model to start with. Pass modelSelection.`,
+    });
+  return { instanceId, model } satisfies ModelSelection;
+});
+
 /** Fails before anything is created, rather than starting an agent without the servers. */
 const assertTakesThreadMcpServers = Effect.fn("mcp.assertTakesThreadMcpServers")(function* (
   instanceId: ProviderInstanceId,
@@ -297,6 +327,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             code: "invalid_request",
             message:
               "scratch:true picks its own project and folder; omit projectId and workspaceStrategy.",
+          });
+        if (input.modelSelection !== undefined && input.providerInstanceId !== undefined)
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "Pass modelSelection or providerInstanceId, not both.",
           });
         const projectId =
           input.scratch === true
@@ -476,7 +511,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               }).selection
             : null) ??
           undefined;
-        if (modelSelection === undefined)
+        const selectedModel =
+          input.providerInstanceId === undefined || replaying
+            ? modelSelection
+            : yield* providerDefaultModelSelection(input.providerInstanceId, modelSelection);
+        if (selectedModel === undefined)
           return yield* new OrchestratorMcpFailure({
             code: "invalid_request",
             message:
@@ -488,7 +527,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             context,
             "Giving a thread MCP servers needs a full-access calling thread or client.",
           );
-          yield* assertTakesThreadMcpServers(modelSelection.instanceId);
+          yield* assertTakesThreadMcpServers(selectedModel.instanceId);
         }
         let startedRuntimeMode =
           projectDefaults !== undefined && input.runtimeMode === undefined
@@ -499,9 +538,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         if (!replaying) {
           const providers = yield* (yield* ProviderRegistry.ProviderRegistry).getProviders;
           startedRuntimeMode = yield* resolveRuntimeMode(startedRuntimeMode, input.runtimeMode, {
-            modelSelection,
+            modelSelection: selectedModel,
             supportedRuntimeModes: providers.find(
-              (provider) => provider.instanceId === modelSelection.instanceId,
+              (provider) => provider.instanceId === selectedModel.instanceId,
             )?.supportedRuntimeModes,
           });
         }
@@ -512,7 +551,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           title: input.title,
           ...(input.generateTitle === undefined ? {} : { generateTitle: input.generateTitle }),
           ...(input.generateTitle === true ? {} : { titleRenamed: true }),
-          modelSelection,
+          modelSelection: selectedModel,
           runtimeMode: startedRuntimeMode,
           interactionMode,
           workspaceStrategy: strategy ?? { type: "root" },

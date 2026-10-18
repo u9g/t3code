@@ -1089,6 +1089,7 @@ export const layer: Layer.Layer<
               providerThread,
               providerTurnId: abandonedTurn.id,
               requestRuntimeRestart: true,
+              recoversAbandonedTurn: true,
             }),
           );
           if (recovered._tag === "Failure") {
@@ -1971,6 +1972,7 @@ export const layer: Layer.Layer<
               runtimePolicy: resolvedRuntimePolicy,
               providerSessionId,
               existingProviderThread: providerThread,
+              messageText: message.text,
             }),
           );
         }
@@ -2184,6 +2186,7 @@ export const layer: Layer.Layer<
             ...(opensFreshSession && resumed._tag === "Failure"
               ? {}
               : { forceNewNativeThread: true }),
+            messageText: message.text,
           }),
         );
         if (replacement === undefined) return undefined;

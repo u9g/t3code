@@ -563,19 +563,22 @@ function migrateLegacyProviderSettings(
 
 type DriverAllowed = (driver: ProviderDriverKind) => boolean;
 const anyDriver: DriverAllowed = () => true;
+const CLAUDE_CLOUD_DRIVER = ProviderDriverKind.make("claudeCloud");
 
 function resolveTextGenerationProvider(
   settings: ServerSettings,
   isDriverAllowed: DriverAllowed = anyDriver,
 ): ServerSettings {
   const selection = settings.textGenerationModelSelection;
+  const canGenerateText: DriverAllowed = (driver) =>
+    driver !== CLAUDE_CLOUD_DRIVER && isDriverAllowed(driver);
   return isModelSelectionProviderEnabled(settings, selection) &&
-    isDriverAllowed(
+    canGenerateText(
       settings.providerInstances[selection.instanceId]?.driver ??
         ProviderDriverKind.make(selection.instanceId),
     )
     ? settings
-    : fallbackTextGenerationProvider(settings, isDriverAllowed);
+    : fallbackTextGenerationProvider(settings, canGenerateText);
 }
 
 function fallbackTextGenerationProvider(

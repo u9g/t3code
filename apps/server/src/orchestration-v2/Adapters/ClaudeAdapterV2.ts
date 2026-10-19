@@ -8740,10 +8740,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             } satisfies PermissionResult;
           }
 
-          // The cloud approves sandboxed tools by its own rules and asks only
-          // when those rules want a person (ask rules, MCP tools without an
-          // allow policy), so no T3 mode may answer for that person.
-          const needsApproval = transport === "remote" || requiresClaudeApproval(context);
+          // The cloud refuses bypassPermissions, so under full access its own
+          // prompts (ask rules, MCP tools without an allow policy) land here and
+          // are answered the way bypass would have.
+          const needsApproval = requiresClaudeApproval(context);
           const nativeRequestId = callbackOptions.toolUseID;
           const nativeToolInput = claudeNativeToolInputFromRecord(toolInput);
           const heldForEcho = context.heldRootFrames.length > 0;

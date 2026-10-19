@@ -5919,43 +5919,23 @@ describe("ClaudeAdapterV2 background wake turns", () => {
               attachments: [],
             }),
           );
-          const prompt = Effect.promise(() =>
+          const result = yield* Effect.promise(() =>
             harness.getOpenedOptions()!.canUseTool!(
-              "mcp__claude-code-remote__create_trigger",
-              { name: "nightly" },
+              "Artifact",
+              { file_path: "report.html" },
               {
                 signal: new AbortController().signal,
-                toolUseID: "toolu-create-trigger",
-                requestId: "request-create-trigger",
+                toolUseID: "toolu-artifact",
+                requestId: "request-artifact",
               },
             ),
           );
-          if (transport === "local") {
-            assert.deepEqual(yield* prompt, {
-              behavior: "allow",
-              updatedInput: { name: "nightly" },
-              toolUseID: "toolu-create-trigger",
-            });
-            assert.isFalse(
-              harness.events.some((event) => event.type === "runtime_request.updated"),
-            );
-            return;
-          }
-          // The cloud asks only when its own rules want a person.
-          const pending = yield* prompt.pipe(Effect.forkScoped);
-          yield* awaitUntil(
-            () => harness.events.some((event) => event.type === "runtime_request.updated"),
-            "the approval request",
-          );
-          const request = harness.events.find((event) => event.type === "runtime_request.updated");
-          if (request?.type !== "runtime_request.updated") return;
-          assert.notEqual(request.runtimeRequest.kind, "user_input");
-          assert.isUndefined(pending.pollUnsafe());
-          yield* harness.runtime.respondToRuntimeRequest({
-            requestId: request.runtimeRequest.id,
-            decision: "accept",
+          assert.deepEqual(result, {
+            behavior: "allow",
+            updatedInput: { file_path: "report.html" },
+            toolUseID: "toolu-artifact",
           });
-          assert.equal((yield* Fiber.join(pending))?.behavior, "allow");
+          assert.isFalse(harness.events.some((event) => event.type === "runtime_request.updated"));
         }).pipe(
           Effect.provide(
             Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),

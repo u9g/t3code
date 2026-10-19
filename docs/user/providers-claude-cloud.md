@@ -68,11 +68,11 @@ checkout. Fetch that branch from GitHub once Claude has pushed it.
   `claude/…` branch, and cannot use T3 Code's thread-reading tool to fetch
   history the handoff left out.
 - Only **Full access** is offered: the cloud session runs commands and edits in
-  its own sandbox without asking. When the cloud itself wants a person to decide,
-  such as for an MCP tool that requires approval or an action matched by an `ask`
-  permission rule in the repository's Claude settings, the request appears in the
-  thread for you to approve or deny. Plan mode works, and Claude still asks its
-  questions in the thread.
+  its own sandbox without asking. Requests the cloud would otherwise raise, such
+  as publishing an artifact, an MCP tool that requires approval, or an action
+  matched by an `ask` permission rule in the repository's Claude settings, are
+  approved too. Plan mode works, and Claude still asks its questions in the
+  thread.
 - Images are sent as images. Text files are included in the message, up to
   256 KB of text per message; other files are not sent.
 - Files Claude creates stay in the cloud session. A file Claude sends you

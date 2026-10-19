@@ -20,9 +20,8 @@ const CLAUDE_CLOUD_PRESENTATION = {
   reportsContextWindow: true,
   supportsConversationRollback: false,
   // The cloud refuses bypassPermissions, and its default mode runs tools in the
-  // session's sandbox without asking. It asks only when its own rules want a
-  // person, and those prompts reach the thread in any mode, so a stricter T3
-  // mode would change nothing.
+  // session's sandbox without asking. The prompts it does raise reach the
+  // adapter's permission callback, which full access answers itself.
   supportedRuntimeModes: ["full-access"],
 } as const;
 

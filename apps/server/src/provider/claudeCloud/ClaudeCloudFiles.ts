@@ -41,6 +41,13 @@ export const claudeCloudThreadFolder = (threadId: string): string | null => {
 export const claudeCloudPartialFileName = (fileUuid: string) =>
   `${fileUuid.toLowerCase()}${PARTIAL_FILE_SUFFIX}`;
 
+/**
+ * Where, in its thread's folder, a thread without a project keeps the
+ * repository Claude chose for it. Sent files are a folder deeper and partials
+ * end in ".part", so neither can have this name.
+ */
+export const CLAUDE_CLOUD_REPOSITORY_CHOICE_FILE_NAME = "repository.json";
+
 // A fork shows its source's history from the source's own rows, sent files
 // included, so a deleted thread's files stay while a live thread was forked from
 // it, directly or through other forks.

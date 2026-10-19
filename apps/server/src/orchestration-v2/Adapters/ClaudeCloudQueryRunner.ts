@@ -23,6 +23,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Result from "effect/Result";
@@ -45,10 +46,15 @@ import {
   resolveClaudeCloudEnvironment,
 } from "../../provider/claudeCloud/ClaudeCloudEnvironment.ts";
 import {
+  CLAUDE_CLOUD_REPOSITORY_CHOICE_FILE_NAME,
   claudeCloudPartialFileName,
   claudeCloudThreadFolder,
 } from "../../provider/claudeCloud/ClaudeCloudFiles.ts";
 import { resolveClaudeCloudRepository } from "../../provider/claudeCloud/ClaudeCloudRepository.ts";
+import {
+  type ChooseClaudeCloudRepository,
+  ClaudeCloudRepositoryChoice,
+} from "../../provider/claudeCloud/ClaudeCloudRepositoryChoice.ts";
 import type * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   ClaudeAgentSdkQueryRunner,
@@ -128,6 +134,9 @@ const FILE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const BROWSER_SDK = { query: browserQuery, getCcrEvent, getSseLastSequenceNum };
 
 const isClaudeAgentSdkQueryRunnerError = Schema.is(ClaudeAgentSdkQueryRunnerError);
+const RepositoryChoiceJson = Schema.fromJsonString(ClaudeCloudRepositoryChoice);
+const decodeRepositoryChoice = Schema.decodeUnknownEffect(RepositoryChoiceJson);
+const encodeRepositoryChoice = Schema.encodeEffect(RepositoryChoiceJson);
 
 type ClaudeFlagSettings = Parameters<Query["applyFlagSettings"]>[0];
 
@@ -139,6 +148,15 @@ export interface ClaudeCloudQueryRunnerOptions {
   readonly configDir: string;
   /** Where files the sessions send the user are saved, one folder per thread. */
   readonly filesDir: string;
+  /**
+   * A thread under "No project" runs in a folder in `scratchRoot` that is not a
+   * git repository, so Claude on this machine chooses its repository from the
+   * thread's first message.
+   */
+  readonly withoutProject?: {
+    readonly scratchRoot: string;
+    readonly chooseRepository: ChooseClaudeCloudRepository;
+  };
   /** The browser Agent SDK. Tests replace it. */
   readonly sdk?: {
     readonly query: typeof browserQuery;
@@ -349,10 +367,126 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
   const context = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | VcsProcess.VcsProcess
   >();
-  const { api } = options;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const { api, withoutProject } = options;
   const sdk = options.sdk ?? BROWSER_SDK;
   // By `cse_` id; an entry lives from creation until the open that uses it.
   const createdSessions = new Map<string, CreatedSession>();
+
+  const isScratchFolder = (scratchRoot: string, cwd: string) => {
+    const relative = path.relative(scratchRoot, cwd);
+    return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  };
+
+  /**
+   * The repository of a thread under "No project". Claude on this machine
+   * chooses it from the thread's first message, and the choice is kept beside
+   * the thread's downloads, so a later session for the thread, such as one
+   * replacing a session archived on claude.ai, starts from the same place.
+   */
+  const chosenRepository = Effect.fn("ClaudeCloudQueryRunner.chosenRepository")(function* (
+    chooseRepository: ChooseClaudeCloudRepository,
+    input: ClaudeAgentSdkSessionAllocateInput,
+    cwd: string,
+    model: { readonly model: string; readonly effortLevel: EffortLevel | undefined },
+  ) {
+    const threadFolder = claudeCloudThreadFolder(input.threadId);
+    const choiceFile =
+      threadFolder === null
+        ? null
+        : path.join(options.filesDir, threadFolder, CLAUDE_CLOUD_REPOSITORY_CHOICE_FILE_NAME);
+    const saved =
+      choiceFile === null
+        ? Option.none<ClaudeCloudRepositoryChoice>()
+        : yield* fileSystem
+            .readFileString(choiceFile)
+            .pipe(Effect.flatMap(decodeRepositoryChoice), Effect.option);
+    const startingPoint = (choice: ClaudeCloudRepositoryChoice) =>
+      `\`${choice.repository}\`${choice.branch === null ? "" : ` at \`${choice.branch}\``}`;
+    if (Option.isSome(saved)) {
+      return {
+        choice: saved.value,
+        notice: `This thread has no project, so its cloud session starts from ${startingPoint(saved.value)}, which Claude chose when the thread began.`,
+      };
+    }
+    const messageText = input.messageText?.trim() ?? "";
+    if (messageText === "") {
+      return yield* new ClaudeAgentSdkQueryRunnerError({
+        method: "chooseRepository",
+        cause: "The thread has no message to choose a repository from.",
+        reason: "repository_not_chosen",
+      });
+    }
+    const choice = yield* chooseRepository({ cwd, messageText, ...model }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ClaudeAgentSdkQueryRunnerError({
+            method: "chooseRepository",
+            cause,
+            reason:
+              cause.reason === "not_chosen" ? "repository_not_chosen" : "repository_choice_failed",
+          }),
+      ),
+    );
+    if (choiceFile !== null) {
+      // Without it, a replacement session asks Claude again, from its own message.
+      yield* fileSystem.makeDirectory(path.dirname(choiceFile), { recursive: true }).pipe(
+        Effect.andThen(encodeRepositoryChoice(choice)),
+        Effect.flatMap((json) => fileSystem.writeFileString(choiceFile, json)),
+        Effect.catch((error) =>
+          Effect.logWarning("Claude Cloud could not save the repository chosen for a thread.", {
+            errorTag: error._tag === "PlatformError" ? error.reason._tag : error._tag,
+          }),
+        ),
+      );
+    }
+    return {
+      choice,
+      notice: `This thread has no project, so Claude on this machine chose ${startingPoint(choice)}${choice.reason === "" ? "." : `: ${choice.reason}`}`,
+    };
+  });
+
+  const sessionSource = Effect.fn("ClaudeCloudQueryRunner.sessionSource")(function* (
+    input: ClaudeAgentSdkSessionAllocateInput,
+    cwd: string,
+    model: { readonly model: string; readonly effortLevel: EffortLevel | undefined },
+  ) {
+    const resolved = yield* Effect.result(
+      resolveClaudeCloudRepository(cwd).pipe(Effect.provideContext(context)),
+    );
+    if (Result.isSuccess(resolved)) {
+      return {
+        repoUrl: resolved.success.repoUrl,
+        revision: resolved.success.revision,
+        notices: resolved.success.notices.map((notice) => notice.message),
+      };
+    }
+    const cause = resolved.failure;
+    if (
+      withoutProject !== undefined &&
+      cause._tag === "ClaudeCloudRepositoryError" &&
+      cause.reason === "not_a_repository" &&
+      isScratchFolder(withoutProject.scratchRoot, cwd)
+    ) {
+      const { choice, notice } = yield* chosenRepository(
+        withoutProject.chooseRepository,
+        input,
+        cwd,
+        model,
+      );
+      return {
+        repoUrl: `https://github.com/${choice.repository}`,
+        revision: choice.branch,
+        notices: [notice],
+      };
+    }
+    return yield* new ClaudeAgentSdkQueryRunnerError({
+      method: "resolveRepository",
+      cause,
+      reason: cause._tag === "ClaudeCloudRepositoryError" ? cause.reason : "repository_unreadable",
+    });
+  });
 
   const allocateSessionId = Effect.fn("ClaudeCloudQueryRunner.allocateSessionId")(function* (
     input: ClaudeAgentSdkSessionAllocateInput,
@@ -365,18 +499,8 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
         reason: "no_project_folder",
       });
     }
-    const repository = yield* resolveClaudeCloudRepository(cwd).pipe(
-      Effect.provideContext(context),
-      Effect.mapError(
-        (cause) =>
-          new ClaudeAgentSdkQueryRunnerError({
-            method: "resolveRepository",
-            cause,
-            reason:
-              cause._tag === "ClaudeCloudRepositoryError" ? cause.reason : "repository_unreadable",
-          }),
-      ),
-    );
+    // Before the repository, which Claude may take minutes to choose for a
+    // thread without a project.
     const environmentId = yield* resolveClaudeCloudEnvironment({
       environmentId: options.environmentId,
       configDir: options.configDir,
@@ -384,6 +508,10 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
     }).pipe(Effect.provideContext(context), Effect.mapError(cloudError("resolveEnvironment")));
     const selection = compileClaudeModelSelection(input.modelSelection);
     const effortLevel = isCloudEffortLevel(selection.effort) ? selection.effort : undefined;
+    const repository = yield* sessionSource(input, cwd, {
+      model: selection.apiModelId,
+      effortLevel,
+    });
     const permissionMode = cloudPermissionMode(
       claudeRuntimeQueryPolicyForRuntimePolicy(input.runtimePolicy).permissionMode,
     );
@@ -404,7 +532,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
     createdSessions.set(session.id, {
       startupNotices: [
         `Running in a Claude Code cloud session: ${session.webUrl}`,
-        ...repository.notices.map((notice) => notice.message),
+        ...repository.notices,
       ],
       model: selection.apiModelId,
       effortLevel,

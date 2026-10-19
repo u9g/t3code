@@ -646,6 +646,7 @@ export const layer: Layer.Layer<
               runtimePolicy: resolvedRuntimePolicy,
               providerSessionId,
               existingProviderThread: providerThread,
+              messageText: message.text,
             }),
           );
         }
@@ -695,6 +696,7 @@ export const layer: Layer.Layer<
             // session instead of retrying the resume that just failed, while
             // still adopting this row's identity.
             existingProviderThread: { ...providerThread, nativeThreadRef: null },
+            messageText: message.text,
           }),
         );
         if (replacement === undefined) return undefined;

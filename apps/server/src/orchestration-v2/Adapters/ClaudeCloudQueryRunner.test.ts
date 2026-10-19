@@ -41,6 +41,12 @@ import {
 import { ClaudeCloudCredentialsError } from "../../provider/claudeCloud/ClaudeCloudCredentials.ts";
 import { claudeCloudPartialFileName } from "../../provider/claudeCloud/ClaudeCloudFiles.ts";
 import { makeFakeGitHubRemote } from "../../provider/claudeCloud/ClaudeCloudRepository.testkit.ts";
+import {
+  type ChooseClaudeCloudRepository,
+  type ClaudeCloudRepositoryChoice,
+  ClaudeCloudRepositoryChoiceError,
+  type ClaudeCloudRepositoryChoiceRequest,
+} from "../../provider/claudeCloud/ClaudeCloudRepositoryChoice.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import * as ClaudeCloudQueryRunner from "./ClaudeCloudQueryRunner.ts";
@@ -336,6 +342,7 @@ const makeRunner = (input: {
   readonly environmentId?: string;
   readonly nativeLog?: Array<unknown>;
   readonly filesDir?: string;
+  readonly withoutProject?: ClaudeCloudQueryRunner.ClaudeCloudQueryRunnerOptions["withoutProject"];
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -352,6 +359,7 @@ const makeRunner = (input: {
       configDir,
       filesDir,
       sdk: input.sdk,
+      ...(input.withoutProject === undefined ? {} : { withoutProject: input.withoutProject }),
     }).pipe(
       Effect.provideService(ProviderEventLoggers.ProviderEventLoggers, {
         native:
@@ -416,6 +424,39 @@ const allocateInput = (cwd: string | null, title?: string) => ({
     cwd,
   }),
 });
+
+/**
+ * A "No project" scratch folder, which is not a git repository, and a stand-in
+ * for the Claude on this machine that chooses its repository.
+ */
+const makeScratchThread = (
+  answer: Effect.Effect<
+    ClaudeCloudRepositoryChoice,
+    ClaudeCloudRepositoryChoiceError
+  > = Effect.succeed({
+    repository: "u9g/pnpm",
+    branch: "projects-graph-overrides",
+    reason: "The pull request's head branch is on the u9g fork.",
+  }),
+) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const scratchRoot = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-claude-cloud-scratch-",
+    });
+    const cwd = path.join(scratchRoot, "2026-10-19-rebase-pnpm-14673");
+    yield* fileSystem.makeDirectory(cwd);
+    const requests: Array<ClaudeCloudRepositoryChoiceRequest> = [];
+    const chooseRepository: ChooseClaudeCloudRepository = (request) =>
+      Effect.suspend(() => {
+        requests.push(request);
+        return answer;
+      });
+    return { cwd, requests, withoutProject: { scratchRoot, chooseRepository } };
+  });
+
+const REBASE_MESSAGE = "rebase https://github.com/pnpm/pnpm/pull/14673";
 
 // The cloud runner creates each session for its thread, through allocateSessionIdFor.
 const allocate = (
@@ -551,6 +592,165 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
         assert.lengthOf(fake.created, 0);
       }),
     );
+
+    describe("for a thread under No project", () => {
+      it.effect("starts the session where Claude on this machine chose from the message", () =>
+        Effect.gen(function* () {
+          const scratch = yield* makeScratchThread();
+          const fake = makeFakeApi();
+          const runner = yield* makeRunner({
+            api: fake.api,
+            sdk: makeFakeSdk().sdk,
+            withoutProject: scratch.withoutProject,
+          });
+
+          yield* allocate(runner, {
+            ...allocateInput(scratch.cwd, "Rebase pnpm#14673"),
+            messageText: ` ${REBASE_MESSAGE}\n`,
+          });
+
+          assert.deepEqual(scratch.requests, [
+            {
+              cwd: scratch.cwd,
+              messageText: REBASE_MESSAGE,
+              model: "claude-opus-5-5",
+              effortLevel: "xhigh",
+            },
+          ]);
+          assert.deepInclude(fake.created[0], {
+            source: {
+              repoUrl: "https://github.com/u9g/pnpm",
+              revision: "projects-graph-overrides",
+            },
+            outcomeBranch: "claude/rebase-pnpm-14673",
+          });
+          const session = yield* runner.open(openInput({ resume: false }));
+          assert.deepEqual(session.startupNotices, [
+            `Running in a Claude Code cloud session: ${WEB_URL}`,
+            "This thread has no project, so Claude on this machine chose `u9g/pnpm` at `projects-graph-overrides`: The pull request's head branch is on the u9g fork.",
+          ]);
+          yield* session.close;
+        }),
+      );
+
+      it.effect("starts a later session for the thread from the same choice", () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const scratch = yield* makeScratchThread(
+            Effect.succeed({ repository: "pnpm/pnpm", branch: null, reason: "" }),
+          );
+          const filesDir = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-claude-cloud-files-",
+          });
+          const fake = makeFakeApi();
+          const runner = yield* makeRunner({
+            api: fake.api,
+            sdk: makeFakeSdk().sdk,
+            filesDir,
+            withoutProject: scratch.withoutProject,
+          });
+          yield* allocate(runner, { ...allocateInput(scratch.cwd), messageText: REBASE_MESSAGE });
+
+          // As when a session archived on claude.ai is replaced, after a restart.
+          const restarted = yield* makeRunner({
+            api: fake.api,
+            sdk: makeFakeSdk().sdk,
+            filesDir,
+            withoutProject: scratch.withoutProject,
+          });
+          yield* allocate(restarted, {
+            ...allocateInput(scratch.cwd),
+            messageText: "now fix the failing test",
+          });
+
+          assert.lengthOf(scratch.requests, 1);
+          assert.deepEqual(
+            fake.created.map((created) => created.source),
+            [
+              { repoUrl: "https://github.com/pnpm/pnpm", revision: null },
+              { repoUrl: "https://github.com/pnpm/pnpm", revision: null },
+            ],
+          );
+          const session = yield* restarted.open(openInput({ resume: false }));
+          assert.include(
+            session.startupNotices ?? [],
+            "This thread has no project, so its cloud session starts from `pnpm/pnpm`, which Claude chose when the thread began.",
+          );
+          yield* session.close;
+        }),
+      );
+
+      it.effect("asks for the repository when Claude cannot tell or cannot run", () =>
+        Effect.gen(function* () {
+          const reasonFor = (
+            answer: Effect.Effect<ClaudeCloudRepositoryChoice, ClaudeCloudRepositoryChoiceError>,
+            // null: the thread is started without a message.
+            messageText: string | null = REBASE_MESSAGE,
+          ) =>
+            Effect.gen(function* () {
+              const scratch = yield* makeScratchThread(answer);
+              const fake = makeFakeApi();
+              const runner = yield* makeRunner({
+                api: fake.api,
+                sdk: makeFakeSdk().sdk,
+                withoutProject: scratch.withoutProject,
+              });
+              const error = yield* allocate(runner, {
+                ...allocateInput(scratch.cwd),
+                ...(messageText === null ? {} : { messageText }),
+              }).pipe(Effect.flip);
+              assert.lengthOf(fake.created, 0);
+              return { reason: error.reason, asked: scratch.requests.length };
+            });
+
+          assert.deepEqual(
+            yield* reasonFor(
+              Effect.fail(
+                new ClaudeCloudRepositoryChoiceError({ reason: "not_chosen", detail: "Unclear." }),
+              ),
+            ),
+            { reason: "repository_not_chosen", asked: 1 },
+          );
+          assert.deepEqual(
+            yield* reasonFor(
+              Effect.fail(
+                new ClaudeCloudRepositoryChoiceError({ reason: "failed", detail: "Not logged in" }),
+              ),
+            ),
+            { reason: "repository_choice_failed", asked: 1 },
+          );
+          assert.deepEqual(yield* reasonFor(Effect.die("unused"), null), {
+            reason: "repository_not_chosen",
+            asked: 0,
+          });
+        }),
+      );
+
+      it.effect("leaves a project's folder that is not a repository to the usual error", () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const scratch = yield* makeScratchThread();
+          const projectFolder = yield* fileSystem.makeTempDirectoryScoped({
+            prefix: "t3-claude-cloud-plain-",
+          });
+          const fake = makeFakeApi();
+          const runner = yield* makeRunner({
+            api: fake.api,
+            sdk: makeFakeSdk().sdk,
+            withoutProject: scratch.withoutProject,
+          });
+
+          const error = yield* allocate(runner, {
+            ...allocateInput(projectFolder),
+            messageText: REBASE_MESSAGE,
+          }).pipe(Effect.flip);
+
+          assert.equal(error.reason, "not_a_repository");
+          assert.lengthOf(scratch.requests, 0);
+          assert.lengthOf(fake.created, 0);
+        }),
+      );
+    });
   });
 
   describe("open", () => {

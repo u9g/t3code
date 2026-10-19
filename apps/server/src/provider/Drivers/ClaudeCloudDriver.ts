@@ -50,6 +50,7 @@ import * as ClaudeCloudApi from "../claudeCloud/ClaudeCloudApi.ts";
 import * as ClaudeCloudCredentials from "../claudeCloud/ClaudeCloudCredentials.ts";
 import { claudeCloudFilesDir } from "../claudeCloud/ClaudeCloudFiles.ts";
 import { makeRefreshingClaudeCloudLogin } from "../claudeCloud/ClaudeCloudLoginRefresh.ts";
+import { makeClaudeCloudRepositoryChooser } from "../claudeCloud/ClaudeCloudRepositoryChoice.ts";
 import {
   checkClaudeCloudProviderStatus,
   makePendingClaudeCloudProvider,
@@ -141,7 +142,7 @@ export const ClaudeCloudDriver: ProviderDriver<ClaudeCloudSettings, ClaudeCloudD
       const crypto = yield* Crypto.Crypto;
       const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-      const { attachmentsDir } = yield* ServerConfig.ServerConfig;
+      const { attachmentsDir, baseDir } = yield* ServerConfig.ServerConfig;
       const catalogService = yield* ModelCatalog.ModelCatalog;
       // Cloud sessions run Claude's own models, so the Claude catalog describes them.
       const modelCatalog = catalogService
@@ -171,12 +172,18 @@ export const ClaudeCloudDriver: ProviderDriver<ClaudeCloudSettings, ClaudeCloudD
         environment: claudeEnvironment,
       });
       const api = yield* ClaudeCloudApi.make({ login, version: packageJson.version });
+      const chooseRepository = yield* makeClaudeCloudRepositoryChooser({
+        binaryPath: effectiveConfig.binaryPath,
+        environment: claudeEnvironment,
+      });
 
       const queryRunner = yield* makeClaudeCloudQueryRunner({
         api,
         environmentId: effectiveConfig.environmentId || undefined,
         configDir: loginLocation.configDir,
         filesDir: yield* claudeCloudFilesDir,
+        // Where ManagedProjectFolders makes the folders of "No project" threads.
+        withoutProject: { scratchRoot: path.resolve(baseDir, "scratch"), chooseRepository },
       }).pipe(Effect.provide(VcsProcess.layer));
 
       // The adapter reads Claude settings; only the custom models and the

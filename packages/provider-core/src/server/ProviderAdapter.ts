@@ -404,6 +404,8 @@ export interface ProviderAdapterV2EnsureThreadInput {
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly providerSessionId?: ProviderSessionId;
   readonly existingProviderThread?: OrchestrationV2ProviderThread;
+  /** The text of the user message whose turn needs the thread. */
+  readonly messageText?: string;
 }
 
 export interface ProviderAdapterV2TurnInput {

@@ -492,6 +492,10 @@ const CLAUDE_CLOUD_FAILURES = {
     "Claude Cloud works on GitHub repositories, and this project's git remote is not on github.com. Push the project to GitHub first.",
   repository_unreadable:
     "Claude Cloud could not read this project's git repository. Check that git works in the project's folder.",
+  repository_not_chosen:
+    "This thread has no project, and Claude could not tell which GitHub repository it is for. Name the repository (owner/name or a github.com link) in your message, or start the thread from a project.",
+  repository_choice_failed:
+    "This thread has no project, and Claude on this machine could not choose a GitHub repository for it. Check that `claude` runs here, or start the thread from a project.",
   no_environment:
     "Claude Cloud found no cloud environment to run in. Create one at https://claude.ai/code, or choose one in this provider's settings.",
   login_missing: "Claude Cloud needs a Claude login. Sign in with `claude auth login`.",
@@ -630,7 +634,7 @@ export class ClaudeAgentSdkQueryRunner extends Context.Service<
 // What a remote session is for, which `allocateSessionIdFor` creates it from.
 export type ClaudeAgentSdkSessionAllocateInput = Pick<
   ProviderAdapter.ProviderAdapterV2EnsureThreadInput,
-  "threadId" | "title" | "modelSelection" | "runtimePolicy"
+  "threadId" | "title" | "modelSelection" | "runtimePolicy" | "messageText"
 >;
 
 export interface ClaudeAgentSdkSessionForkInput {

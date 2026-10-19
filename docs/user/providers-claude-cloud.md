@@ -16,7 +16,9 @@ does not appear in the thread itself, but Claude's work on it does.
 - A Claude subscription that includes Claude Code on the web, signed in with
   `claude auth login` on the machine that runs the T3 server. Claude Cloud uses
   that login; it does not keep a copy of its own.
-- The project's repository on GitHub, with your branch pushed.
+- The project's repository on GitHub, with your branch pushed. A thread under
+  **No project** needs none; see
+  [Threads without a project](#threads-without-a-project).
 - The Claude GitHub app installed with access to the repository. claude.ai/code
   asks you to install it the first time you use a repository there.
 
@@ -56,6 +58,24 @@ branch, the turn fails and says why. Start a new thread to try again.
 
 Claude makes its changes on a new `claude/…` branch in the cloud, not in your
 checkout. Fetch that branch from GitHub once Claude has pushed it.
+
+## Threads without a project
+
+A thread started under **No project** has no repository of its own. Before its
+cloud session starts, Claude runs on the machine with the T3 server, reads your
+first message, and chooses the GitHub repository the session starts from, and the
+branch when your message needs one. That can be a repository or pull request you
+link, or a project you name that is cloned on that machine. To work on a pull
+request, the session starts from the pull request's branch, on the fork when the
+pull request comes from one. To find a project you name, T3 Code shows Claude the
+git checkouts one or two folders inside your home folder, such as `~/code/app`,
+with their GitHub remotes. While choosing, Claude can read files on that machine
+and fetch web pages. It cannot run commands or change anything.
+
+The thread says which repository Claude chose and why. If your message does not
+point to one, the turn fails and asks you to name it. Any later session for the
+thread starts from the same repository. The choice is kept with the thread's
+downloads.
 
 ## Differences from Claude
 

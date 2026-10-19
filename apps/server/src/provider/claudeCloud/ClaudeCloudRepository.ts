@@ -73,7 +73,7 @@ export interface ClaudeCloudRepositorySource {
 }
 
 /** `owner/repo` for a github.com remote in any form git accepts, else null. */
-const parseGitHubRepository = (remoteUrl: string): string | null => {
+export const parseGitHubRepository = (remoteUrl: string): string | null => {
   const url = remoteUrl.trim();
   const scp = /^(?:[^@\s/]+@)?github\.com:\/?([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(url);
   if (scp?.[1]) return scp[1];

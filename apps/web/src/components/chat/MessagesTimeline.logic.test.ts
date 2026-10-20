@@ -33,6 +33,7 @@ import {
   liveAnswerPreview,
   deriveMessagesTimelineRowsWithState,
   extractFocusLinks,
+  splitFocusSections,
   resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
   workEntryDisplayLabel,
@@ -5184,5 +5185,32 @@ describe("extractFocusLinks", () => {
 
   it("returns nothing when no github URL is present", () => {
     expect(extractFocusLinks("Done. Tests pass.")).toEqual([]);
+  });
+});
+
+describe("splitFocusSections", () => {
+  it("splits at headings, drops the preamble, and ignores headings in code fences", () => {
+    expect(
+      splitFocusSections(
+        [
+          "Preamble.",
+          "## Summary",
+          "Did things.",
+          "",
+          "```sh",
+          "# not a heading",
+          "```",
+          "### Next steps",
+          "- more",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      { heading: "## Summary", body: "Did things.\n\n```sh\n# not a heading\n```" },
+      { heading: "### Next steps", body: "- more" },
+    ]);
+  });
+
+  it("returns nothing for text without headings", () => {
+    expect(splitFocusSections("Just a reply.\n#hashtag")).toEqual([]);
   });
 });

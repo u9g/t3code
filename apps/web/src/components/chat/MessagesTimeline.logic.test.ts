@@ -33,7 +33,7 @@ import {
   liveAnswerPreview,
   deriveMessagesTimelineRowsWithState,
   isTimelineMinimapTurnVisible,
-  extractGithubLinks,
+  extractFocusLinks,
   resolveAssistantMessageCopyState,
   resolveTimelineMinimapHitStrip,
   type MessagesTimelineRow,
@@ -5252,17 +5252,6 @@ describe("isTimelineMinimapTurnVisible", () => {
   });
 });
 
-describe("workEntryReadOutput", () => {
-  it("joins relative paths to the workspace root but keeps home paths as written", () => {
-    expect(
-      workEntryReadOutput(
-        { changedFiles: ["src/app.ts", "~/.claude/CLAUDE.md", "~\\.gitconfig"] },
-        "/workspace/t3code",
-      ),
-    ).toBe("/workspace/t3code/src/app.ts\n~/.claude/CLAUDE.md\n~/.gitconfig");
-  });
-});
-
 it("updates cached rows whose spacing or setup handoff changed without new content", () => {
   const working: MessagesTimelineRow = {
     kind: "working",
@@ -5302,10 +5291,21 @@ it("updates cached rows whose spacing or setup handoff changed without new conte
   expect(next.result).toEqual([{ ...setup, embedded: true }, settledWorking]);
 });
 
-describe("extractGithubLinks", () => {
+describe("workEntryReadOutput", () => {
+  it("joins relative paths to the workspace root but keeps home paths as written", () => {
+    expect(
+      workEntryReadOutput(
+        { changedFiles: ["src/app.ts", "~/.claude/CLAUDE.md", "~\\.gitconfig"] },
+        "/workspace/t3code",
+      ),
+    ).toBe("/workspace/t3code/src/app.ts\n~/.claude/CLAUDE.md\n~/.gitconfig");
+  });
+});
+
+describe("extractFocusLinks", () => {
   it("collects bare, markdown, and autolinked github URLs once each", () => {
     expect(
-      extractGithubLinks(
+      extractFocusLinks(
         [
           "Opened https://github.com/acme/app/pull/12.",
           "See [the issue](https://github.com/acme/app/issues/3) and <https://github.com/acme/app/pull/12>.",
@@ -5321,6 +5321,6 @@ describe("extractGithubLinks", () => {
   });
 
   it("returns nothing when no github URL is present", () => {
-    expect(extractGithubLinks("Done. Tests pass.")).toEqual([]);
+    expect(extractFocusLinks("Done. Tests pass.")).toEqual([]);
   });
 });

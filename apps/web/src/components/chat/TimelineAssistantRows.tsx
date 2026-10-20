@@ -41,7 +41,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     focusModeEnabled && !row.assistantCopyStreaming ? extractGithubLinks(text) : [];
   const focused = focusLinks.length > 0 && !focusExpanded;
   const messageText = focused
-    ? focusLinks.map((link) => `- ${link}`).join("\n")
+    ? focusLinks.join("\n")
     : text || (row.message.streaming ? "" : "(empty response)");
 
   return (
@@ -61,7 +61,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
               cwd={ctx.markdownCwd}
               threadRef={ctx.threadRef ?? undefined}
               isStreaming={Boolean(row.message.streaming)}
-              lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+              lineBreaks={focused || shouldPreserveAssistantLineBreaks(messageText)}
               skills={ctx.skills}
               headingLevelOffset={MESSAGE_HEADING_LEVEL}
               onUseArtifactTemplate={ctx.onUseArtifactTemplate}

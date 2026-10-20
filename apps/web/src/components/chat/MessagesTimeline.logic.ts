@@ -681,13 +681,22 @@ export function resolveAssistantMessageCopyState({
   };
 }
 
-const GITHUB_URL_PATTERN = /https:\/\/github\.com\/[^\s<>()[\]`"']+/giu;
+const URL_CHARS = "[^\\s<>()[\\]`\"']";
+// Alternation order matters: an .mp4 markdown link is kept whole so local video paths stay clickable.
+const FOCUS_LINK_PATTERN = new RegExp(
+  [
+    `!?\\[[^\\]]*\\]\\([^)\\s]+\\.mp4(?:[?#][^)\\s]*)?\\)`,
+    `https?:\\/\\/${URL_CHARS}+\\.mp4(?:[?#]${URL_CHARS}*)?`,
+    `https:\\/\\/github\\.com\\/${URL_CHARS}+`,
+  ].join("|"),
+  "giu",
+);
 
-/** Distinct github.com URLs in first-seen order; trailing sentence punctuation is not part of a URL. */
+/** Distinct github.com and .mp4 links in first-seen order; trailing sentence punctuation is not part of a URL. */
 export function extractFocusLinks(text: string): ReadonlyArray<string> {
   const links = new Set<string>();
-  for (const match of text.matchAll(GITHUB_URL_PATTERN)) {
-    links.add(match[0].replace(/[.,;:!?*_]+$/u, ""));
+  for (const match of text.matchAll(FOCUS_LINK_PATTERN)) {
+    links.add(match[0].endsWith(")") ? match[0] : match[0].replace(/[.,;:!?*_]+$/u, ""));
   }
   return [...links];
 }

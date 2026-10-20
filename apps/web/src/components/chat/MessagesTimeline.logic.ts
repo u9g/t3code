@@ -707,6 +707,17 @@ export function resolveAssistantMessageCopyState({
   };
 }
 
+const GITHUB_URL_PATTERN = /https:\/\/github\.com\/[^\s<>()[\]`"']+/giu;
+
+/** Distinct github.com URLs in first-seen order; trailing sentence punctuation is not part of a URL. */
+export function extractGithubLinks(text: string): ReadonlyArray<string> {
+  const links = new Set<string>();
+  for (const match of text.matchAll(GITHUB_URL_PATTERN)) {
+    links.add(match[0].replace(/[.,;:!?*_]+$/u, ""));
+  }
+  return [...links];
+}
+
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
   let nullTurnResponseIndex = 0;

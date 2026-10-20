@@ -412,6 +412,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.redesignEnabled !== DEFAULT_UNIFIED_SETTINGS.redesignEnabled
       ? ["New design"]
       : []),
+    ...(settings.focusModeEnabled !== DEFAULT_UNIFIED_SETTINGS.focusModeEnabled
+      ? ["Focus mode"]
+      : []),
     ...(settings.panelAnimationDurationMs !== DEFAULT_UNIFIED_SETTINGS.panelAnimationDurationMs
       ? ["Panel animations"]
       : []),
@@ -586,6 +589,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       chatWidth: DEFAULT_UNIFIED_SETTINGS.chatWidth,
       mathRenderingEnabled: DEFAULT_UNIFIED_SETTINGS.mathRenderingEnabled,
       redesignEnabled: DEFAULT_UNIFIED_SETTINGS.redesignEnabled,
+      focusModeEnabled: DEFAULT_UNIFIED_SETTINGS.focusModeEnabled,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,

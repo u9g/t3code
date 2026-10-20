@@ -101,7 +101,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                         tabIndex={0}
                         aria-expanded={open}
                         data-scroll-anchor-ignore
-                        className={cn("cursor-pointer", open && "underline")}
+                        className={cn("mt-[1lh] cursor-pointer", open && "underline")}
                         onClick={() => toggleSection(index)}
                         onKeyDown={(event) => {
                           if (event.key !== "Enter" && event.key !== " ") return;

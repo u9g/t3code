@@ -390,6 +390,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: [msg("latex tex katex equations formulas markdown")],
   },
   {
+    id: "focus-mode",
+    title: "Focus mode",
+    to: "/settings/appearance",
+    searchTerms: ["collapse minimize finished replies github links pull requests compact"],
+  },
+  {
     id: "panel-animations",
     title: msg("Panel animations"),
     to: "/settings/appearance",

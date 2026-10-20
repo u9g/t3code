@@ -755,6 +755,21 @@ export function splitFocusSections(text: string): ReadonlyArray<FocusSection> {
     .filter((section) => section.heading !== null || section.body.length > 0);
 }
 
+/** Assistant replies that come before the thread's latest user message. */
+export function deriveFocusPreviousReplyIds(
+  rows: ReadonlyArray<MessagesTimelineRow>,
+): ReadonlySet<string> {
+  const ids = new Set<string>();
+  let laterPrompt = false;
+  for (let index = rows.length - 1; index >= 0; index--) {
+    const row = rows[index];
+    if (row?.kind !== "message") continue;
+    if (row.message.role === "user") laterPrompt = true;
+    else if (laterPrompt && row.message.role === "assistant") ids.add(row.message.id);
+  }
+  return ids;
+}
+
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
   let nullTurnResponseIndex = 0;

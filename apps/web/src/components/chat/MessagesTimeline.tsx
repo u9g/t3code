@@ -61,6 +61,7 @@ import { type AssistantCitationRequest } from "./AssistantCitationSource";
 import { useAssistantCitationTarget } from "./useAssistantCitationTarget";
 import { resolveCitationPhase, type CitedHistory } from "./citationProcedure";
 import {
+  deriveFocusPreviousReplyIds,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapCurrentIndex,
@@ -983,6 +984,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   const sharedState: TimelineRowSharedState = {
     citationRequest: readyCitationRequest,
+    focusPreviousReplyIds: deriveFocusPreviousReplyIds(rows),
     listRef,
     timestampFormat,
     routeThreadKey,

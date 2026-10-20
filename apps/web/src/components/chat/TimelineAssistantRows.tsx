@@ -54,12 +54,16 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const [focusExpanded, setFocusExpanded] = useState(false);
   const focusLinks =
     focusModeEnabled && !row.assistantCopyStreaming ? extractFocusLinks(row.message.text) : [];
-  const focused = focusLinks.length > 0 && !focusExpanded;
+  const previousReply = focusModeEnabled && ctx.focusPreviousReplyIds.has(row.message.id);
+  const collapsible = previousReply || focusLinks.length > 0;
+  const focused = collapsible && !focusExpanded;
   const messageText = focused
-    ? focusLinks.join("\n")
+    ? previousReply
+      ? ""
+      : focusLinks.join("\n")
     : row.message.text || (row.message.streaming ? "" : "(empty response)");
   const focusSections =
-    focusModeEnabled && !row.assistantCopyStreaming && focusLinks.length === 0
+    focusModeEnabled && !row.assistantCopyStreaming && !collapsible
       ? splitFocusSections(messageText)
       : [];
   const [openSections, setOpenSections] = useState<ReadonlySet<number>>(() => new Set());
@@ -153,7 +157,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                 )}
           </AssistantCitationSource>
         </div>
-        {focusLinks.length > 0 ? (
+        {collapsible ? (
           <div className="mt-1 text-xs">
             {focusExpanded ? (
               <InlineButton

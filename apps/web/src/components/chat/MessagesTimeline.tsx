@@ -59,6 +59,7 @@ import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection
 import { type AssistantCitationRequest } from "./AssistantCitationSource";
 import { useAssistantCitationTarget, type CitationHistoryPage } from "./useAssistantCitationTarget";
 import {
+  deriveFocusPreviousReplyIds,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
   resolveTimelineMinimapCurrentIndex,
@@ -909,6 +910,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   const sharedState: TimelineRowSharedState = {
     citationRequest: readyCitationRequest,
+    focusPreviousReplyIds: deriveFocusPreviousReplyIds(rows),
     listRef,
     timestampFormat,
     routeThreadKey,

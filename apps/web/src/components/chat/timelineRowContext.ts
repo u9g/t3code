@@ -22,6 +22,7 @@ import { type HandoffTimelineRun } from "./V2LifecycleRow";
 
 export interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
+  focusPreviousReplyIds: ReadonlySet<string>;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;

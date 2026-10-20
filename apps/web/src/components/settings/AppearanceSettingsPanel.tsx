@@ -333,6 +333,27 @@ export function AppearanceSettingsPanel() {
             />
           }
         />
+        <SettingsRow
+          {...searchableSetting("focus-mode")}
+          description="Collapse replies from finished turns to the GitHub links they mention. Replies without GitHub links stay expanded."
+          resetAction={
+            settings.focusModeEnabled !== DEFAULT_UNIFIED_SETTINGS.focusModeEnabled ? (
+              <SettingResetButton
+                label="focus mode"
+                onClick={() =>
+                  updateSettings({ focusModeEnabled: DEFAULT_UNIFIED_SETTINGS.focusModeEnabled })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.focusModeEnabled}
+              onCheckedChange={(checked) => updateSettings({ focusModeEnabled: Boolean(checked) })}
+              aria-label="Focus mode"
+            />
+          }
+        />
         <AdvancedSettings
           targetIds={[
             searchableSetting("panel-animations").id,

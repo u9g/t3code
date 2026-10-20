@@ -155,15 +155,36 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
         </div>
         {focusLinks.length > 0 ? (
           <div className="mt-1 text-xs">
-            <InlineButton
-              tone="muted"
-              aria-expanded={focusExpanded}
-              data-scroll-anchor-ignore
-              onClick={() => setFocusExpanded(!focusExpanded)}
-            >
-              <MorphIcon className="size-3" icon={focusExpanded ? ChevronDown : ChevronRight} />
-              {focusExpanded ? "Collapse reply" : "Show full reply"}
-            </InlineButton>
+            {focusExpanded ? (
+              <InlineButton
+                tone="muted"
+                aria-expanded
+                data-scroll-anchor-ignore
+                onClick={() => setFocusExpanded(false)}
+              >
+                <MorphIcon className="size-3" icon={ChevronDown} />
+                Collapse reply
+              </InlineButton>
+            ) : (
+              <FocusPreviewCard
+                trigger={
+                  <InlineButton
+                    tone="muted"
+                    aria-expanded={false}
+                    data-scroll-anchor-ignore
+                    onClick={() => setFocusExpanded(true)}
+                  >
+                    <MorphIcon className="size-3" icon={ChevronRight} />
+                    Show full reply
+                  </InlineButton>
+                }
+              >
+                {renderMarkdown(
+                  row.message.text,
+                  shouldPreserveAssistantLineBreaks(row.message.text),
+                )}
+              </FocusPreviewCard>
+            )}
           </div>
         ) : null}
         {focused ? null : (

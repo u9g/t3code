@@ -79,24 +79,20 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                   const open = openSections.has(index);
                   return (
                     <div key={`${index}:${section.heading}`}>
-                      <div className="flex items-start gap-1">
-                        <div className="mt-[0.3em] shrink-0">
-                          <InlineButton
-                            tone="muted"
-                            aria-expanded={open}
-                            aria-label={open ? "Collapse section" : "Expand section"}
-                            data-scroll-anchor-ignore
-                            onClick={() => toggleSection(index)}
-                          >
-                            <MorphIcon
-                              className="size-3.5"
-                              icon={open ? ChevronDown : ChevronRight}
-                            />
-                          </InlineButton>
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          {renderMarkdown(section.heading, false)}
-                        </div>
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        aria-expanded={open}
+                        data-scroll-anchor-ignore
+                        className={cn("cursor-pointer", open && "underline")}
+                        onClick={() => toggleSection(index)}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          toggleSection(index);
+                        }}
+                      >
+                        {renderMarkdown(section.heading, false)}
                       </div>
                       {open && section.body
                         ? renderMarkdown(

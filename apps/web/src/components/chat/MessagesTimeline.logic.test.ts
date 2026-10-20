@@ -4225,6 +4225,22 @@ describe("extractFocusLinks", () => {
     ]);
   });
 
+  it("keeps .mp4 links, including markdown links to local videos, in reply order", () => {
+    expect(
+      extractFocusLinks(
+        [
+          "Recording: [demo video](/Users/me/demo.mp4).",
+          "Also at https://cdn.example.com/a/demo.mp4?sig=1, PR https://github.com/acme/app/pull/12",
+          "and https://cdn.example.com/a/demo.mp4?sig=1 again.",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "[demo video](/Users/me/demo.mp4)",
+      "https://cdn.example.com/a/demo.mp4?sig=1",
+      "https://github.com/acme/app/pull/12",
+    ]);
+  });
+
   it("returns nothing when no github URL is present", () => {
     expect(extractFocusLinks("Done. Tests pass.")).toEqual([]);
   });

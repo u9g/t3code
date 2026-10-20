@@ -335,7 +335,7 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("focus-mode")}
-          description="Collapse replies from finished turns to the GitHub links they mention. Replies without GitHub links stay expanded."
+          description="Collapse replies from finished turns to the GitHub and .mp4 links they mention. Replies without those links stay expanded."
           resetAction={
             settings.focusModeEnabled !== DEFAULT_UNIFIED_SETTINGS.focusModeEnabled ? (
               <SettingResetButton

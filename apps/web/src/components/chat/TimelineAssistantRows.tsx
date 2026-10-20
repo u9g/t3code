@@ -111,7 +111,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                         heading
                       ) : (
                         <PreviewCard>
-                          <PreviewCardTrigger render={heading} delay={350} closeDelay={120} />
+                          <PreviewCardTrigger render={heading} delay={0} closeDelay={120} />
                           <PreviewCardPopup
                             side="right"
                             collisionAvoidance={{ side: "none", align: "shift" }}

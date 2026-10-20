@@ -32,7 +32,7 @@ import {
   timelineTurnFoldRunIdsByEntryId,
   liveAnswerPreview,
   deriveMessagesTimelineRowsWithState,
-  extractGithubLinks,
+  extractFocusLinks,
   resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
   workEntryDisplayLabel,
@@ -5148,10 +5148,10 @@ describe("subagent continued by a later turn", () => {
   });
 });
 
-describe("extractGithubLinks", () => {
+describe("extractFocusLinks", () => {
   it("collects bare, markdown, and autolinked github URLs once each", () => {
     expect(
-      extractGithubLinks(
+      extractFocusLinks(
         [
           "Opened https://github.com/acme/app/pull/12.",
           "See [the issue](https://github.com/acme/app/issues/3) and <https://github.com/acme/app/pull/12>.",
@@ -5167,6 +5167,6 @@ describe("extractGithubLinks", () => {
   });
 
   it("returns nothing when no github URL is present", () => {
-    expect(extractGithubLinks("Done. Tests pass.")).toEqual([]);
+    expect(extractFocusLinks("Done. Tests pass.")).toEqual([]);
   });
 });

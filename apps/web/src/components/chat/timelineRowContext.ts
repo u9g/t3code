@@ -53,6 +53,7 @@ export interface TimelineRowSharedState {
   citationRequest: AssistantCitationTarget | null;
   /** Absent hides "Reply", as in the guest view. */
   onReplyToResponse: ((response: ResponseContextRecord) => boolean) | undefined;
+  focusPreviousReplyIds: ReadonlySet<string>;
   listRef: React.RefObject<LegendListRef | null>;
   timestampFormat: TimestampFormat;
   routeThreadKey: string;

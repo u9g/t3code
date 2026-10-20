@@ -276,7 +276,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "focus-mode",
     title: "Focus mode",
     to: "/settings/appearance",
-    searchTerms: ["collapse minimize finished replies github links pull requests compact"],
+    searchTerms: [
+      "collapse minimize finished replies github links pull requests mp4 video compact",
+    ],
   },
   {
     id: "panel-animations",

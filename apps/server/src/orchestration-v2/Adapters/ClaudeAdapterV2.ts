@@ -493,7 +493,7 @@ const CLAUDE_CLOUD_FAILURES = {
   repository_unreadable:
     "Claude Cloud could not read this project's git repository. Check that git works in the project's folder.",
   repository_not_chosen:
-    "This thread has no project, and Claude could not tell which GitHub repository it is for. Name the repository (owner/name or a github.com link) in your message, or start the thread from a project.",
+    "This thread has no project, and Claude did not name a GitHub repository for it. Name the repository (owner/name or a github.com link) in your message, or start the thread from a project.",
   repository_choice_failed:
     "This thread has no project, and Claude on this machine could not choose a GitHub repository for it. Check that `claude` runs here, or start the thread from a project.",
   no_environment:

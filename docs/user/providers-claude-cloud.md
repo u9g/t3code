@@ -62,9 +62,9 @@ checkout. Fetch that branch from GitHub once Claude has pushed it.
 ## Threads without a project
 
 A thread started under **No project** has no repository of its own. Before its
-cloud session starts, Claude runs on the machine with the T3 server, reads your
-first message, and chooses the GitHub repository the session starts from, and the
-branch when your message needs one. That can be a repository or pull request you
+cloud session starts, Claude Sonnet runs on the machine with the T3 server, reads
+your first message, and chooses the GitHub repository the session starts from, and
+the branch when your message needs one. That can be a repository or pull request you
 link, or a project you name that is cloned on that machine. To work on a pull
 request, the session starts from the pull request's branch, on the fork when the
 pull request comes from one. To find a project you name, T3 Code shows Claude the
@@ -73,7 +73,8 @@ with their GitHub remotes. While choosing, Claude can read files on that machine
 and fetch web pages. It cannot run commands or change anything.
 
 The thread says which repository Claude chose and why. If your message does not
-point to one, the turn fails and asks you to name it. Any later session for the
+point to one, Claude picks the likeliest one and says it guessed; the cloud
+session can add other repositories as it works. Any later session for the
 thread starts from the same repository. The choice is kept with the thread's
 downloads.
 

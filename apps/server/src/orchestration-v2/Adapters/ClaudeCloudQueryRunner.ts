@@ -389,7 +389,6 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
     chooseRepository: ChooseClaudeCloudRepository,
     input: ClaudeAgentSdkSessionAllocateInput,
     cwd: string,
-    model: { readonly model: string; readonly effortLevel: EffortLevel | undefined },
   ) {
     const threadFolder = claudeCloudThreadFolder(input.threadId);
     const choiceFile =
@@ -418,7 +417,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
         reason: "repository_not_chosen",
       });
     }
-    const choice = yield* chooseRepository({ cwd, messageText, ...model }).pipe(
+    const choice = yield* chooseRepository({ cwd, messageText }).pipe(
       Effect.mapError(
         (cause) =>
           new ClaudeAgentSdkQueryRunnerError({
@@ -450,7 +449,6 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
   const sessionSource = Effect.fn("ClaudeCloudQueryRunner.sessionSource")(function* (
     input: ClaudeAgentSdkSessionAllocateInput,
     cwd: string,
-    model: { readonly model: string; readonly effortLevel: EffortLevel | undefined },
   ) {
     const resolved = yield* Effect.result(
       resolveClaudeCloudRepository(cwd).pipe(Effect.provideContext(context)),
@@ -473,7 +471,6 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
         withoutProject.chooseRepository,
         input,
         cwd,
-        model,
       );
       return {
         repoUrl: `https://github.com/${choice.repository}`,
@@ -508,10 +505,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
     }).pipe(Effect.provideContext(context), Effect.mapError(cloudError("resolveEnvironment")));
     const selection = compileClaudeModelSelection(input.modelSelection);
     const effortLevel = isCloudEffortLevel(selection.effort) ? selection.effort : undefined;
-    const repository = yield* sessionSource(input, cwd, {
-      model: selection.apiModelId,
-      effortLevel,
-    });
+    const repository = yield* sessionSource(input, cwd);
     const permissionMode = cloudPermissionMode(
       claudeRuntimeQueryPolicyForRuntimePolicy(input.runtimePolicy).permissionMode,
     );

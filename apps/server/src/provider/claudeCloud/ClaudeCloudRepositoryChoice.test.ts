@@ -84,8 +84,6 @@ const resultWith = (answer: unknown) =>
 const REQUEST = {
   cwd: "/home/u/.t3/scratch/2026-10-19-rebase-pnpm-14673",
   messageText: "rebase https://github.com/pnpm/pnpm/pull/14673",
-  model: "claude-opus-5-5",
-  effortLevel: "high",
 } satisfies ClaudeCloudRepositoryChoiceRequest;
 
 const choose = (
@@ -135,8 +133,8 @@ it.layer(NodeServices.layer)("makeClaudeCloudRepositoryChooser", (it) => {
           required: ["repository", "branch", "reason"],
           additionalProperties: false,
         });
-        assert.equal(flagValue(run.args, "--model"), "claude-opus-5-5");
-        assert.equal(flagValue(run.args, "--effort"), "high");
+        assert.equal(flagValue(run.args, "--model"), "sonnet");
+        assert.notInclude(run.args, "--effort");
         assert.equal(flagValue(run.args, "--output-format"), "json");
         assert.equal(run.env?.CLAUDE_CONFIG_DIR, "/home/u/.claude-work");
         assert.equal(run.env?.ENABLE_CLAUDEAI_MCP_SERVERS, "false");
@@ -148,7 +146,7 @@ it.layer(NodeServices.layer)("makeClaudeCloudRepositoryChooser", (it) => {
         const cli = fakeCli({
           stdout: resultWith({ repository: "pnpm/pnpm", branch: null, reason: "Linked." }),
         });
-        yield* choose(cli, { ...REQUEST, effortLevel: undefined });
+        yield* choose(cli);
 
         const run = cli.runs[0]!;
         assert.include(
@@ -157,7 +155,7 @@ it.layer(NodeServices.layer)("makeClaudeCloudRepositoryChooser", (it) => {
         );
         assert.include(run.prompt, "*/*/.git/config in /home/u");
         assert.include(run.prompt, "Do not carry out the request itself.");
-        assert.notInclude(run.args, "--effort");
+        assert.include(run.prompt, "Always choose one.");
       }),
     );
 
@@ -299,17 +297,8 @@ it.layer(NodeServices.layer)("makeClaudeCloudRepositoryChooser", (it) => {
       }),
     );
 
-    it.effect("says no repository was chosen when Claude names none, or not one on GitHub", () =>
+    it.effect("says no repository was chosen when Claude names one not on GitHub", () =>
       Effect.gen(function* () {
-        const none = yield* choose(
-          fakeCli({
-            stdout: resultWith({
-              repository: null,
-              branch: null,
-              reason: "The message names no project.",
-            }),
-          }),
-        ).pipe(Effect.flip);
         const elsewhere = yield* choose(
           fakeCli({
             stdout: resultWith({
@@ -320,9 +309,8 @@ it.layer(NodeServices.layer)("makeClaudeCloudRepositoryChooser", (it) => {
           }),
         ).pipe(Effect.flip);
 
-        assert.equal(none.reason, "not_chosen");
-        assert.equal(none.detail, "The message names no project.");
         assert.equal(elsewhere.reason, "not_chosen");
+        assert.equal(elsewhere.detail, "It is on GitLab.");
       }),
     );
 

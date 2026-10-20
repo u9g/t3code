@@ -15,6 +15,9 @@ import { parseGitHubRepository } from "./ClaudeCloudRepository.ts";
 // Reading the disk and the web takes a while, and the thread's first turn waits
 // on the answer.
 const CHOICE_TIMEOUT = "3 minutes";
+// Picking a starting repository is a quick, low-stakes call whatever the
+// thread runs on: the cloud session can add other repositories itself.
+const CHOOSER_MODEL = "sonnet";
 /**
  * All Claude can do here: read this machine's files and the web. `--tools` is
  * the whole built-in tool set, so Bash, edits and subagents do not exist for
@@ -65,9 +68,6 @@ export interface ClaudeCloudRepositoryChoiceRequest {
   readonly cwd: string;
   /** The message the thread starts with. */
   readonly messageText: string;
-  /** The thread's model, as the API names it. */
-  readonly model: string;
-  readonly effortLevel: string | undefined;
 }
 
 export type ChooseClaudeCloudRepository = (
@@ -78,9 +78,8 @@ const ANSWER_JSON_SCHEMA = JSON.stringify({
   type: "object",
   properties: {
     repository: {
-      type: ["string", "null"],
-      description:
-        "The repository as owner/name on github.com, or null when nothing points to one.",
+      type: "string",
+      description: "The repository as owner/name on github.com.",
     },
     branch: {
       type: ["string", "null"],
@@ -96,7 +95,7 @@ const ANSWER_JSON_SCHEMA = JSON.stringify({
 });
 
 const Answer = Schema.Struct({
-  repository: Schema.NullOr(Schema.String),
+  repository: Schema.String,
   branch: Schema.NullOr(Schema.String),
   reason: Schema.String,
 });
@@ -119,6 +118,8 @@ const choicePrompt = (
   [
     "A Claude Code cloud session is about to start for the request below. It runs in Anthropic's cloud, on a fresh checkout of one GitHub repository. Choose that repository, and the branch to check out when the request needs a particular one. Do not carry out the request itself.",
     "",
+    "Always choose one. The session can add other repositories later, so a reasonable guess beats no answer.",
+    "",
     "You can read files on this machine and fetch web pages. You cannot run commands or change anything.",
     "",
     "How to choose:",
@@ -128,7 +129,7 @@ const choicePrompt = (
       ? `- A project named without its owner may be cloned on this machine. Find checkouts with the Glob patterns */.git/config and */*/.git/config in ${homeDirectory}, not by searching the whole disk; each .git/config holds its checkout's remotes.`
       : "- A project named without its owner may be cloned on this machine. The git checkouts near the home folder are listed below with their GitHub remotes; read their files when the names alone do not settle it.",
     "- Leave branch null to start from the repository's default branch.",
-    "- When nothing points to one repository, answer with repository null and say in reason what is missing.",
+    "- When nothing points to one repository, choose the one the request most likely concerns, and say in reason that it is a guess.",
     "- Do not read credentials, tokens or other secrets.",
     ...(checkouts.length === 0
       ? []
@@ -259,8 +260,7 @@ export const makeClaudeCloudRepositoryChooser = Effect.fn("makeClaudeCloudReposi
         "--json-schema",
         ANSWER_JSON_SCHEMA,
         "--model",
-        request.model,
-        ...(request.effortLevel === undefined ? [] : ["--effort", request.effortLevel]),
+        CHOOSER_MODEL,
         "--settings",
         CHOOSER_SETTINGS,
         "--tools",
@@ -308,8 +308,7 @@ export const makeClaudeCloudRepositoryChooser = Effect.fn("makeClaudeCloudReposi
         return yield* failed("Claude's answer did not match its schema.");
       }
       const reason = answer.value.reason.trim();
-      const repository =
-        answer.value.repository === null ? null : normalizeRepository(answer.value.repository);
+      const repository = normalizeRepository(answer.value.repository);
       if (repository === null) {
         return yield* new ClaudeCloudRepositoryChoiceError({
           reason: "not_chosen",

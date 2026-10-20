@@ -613,8 +613,6 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
             {
               cwd: scratch.cwd,
               messageText: REBASE_MESSAGE,
-              model: "claude-opus-5-5",
-              effortLevel: "xhigh",
             },
           ]);
           assert.deepInclude(fake.created[0], {

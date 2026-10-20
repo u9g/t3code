@@ -6,9 +6,12 @@ import { memo, use, useState } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { GitForkIcon, ReplyIcon } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide";
+import { MorphIcon } from "~/components/MorphIcon";
+import { useClientSettings } from "~/hooks/useSettings";
 import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
 import { responseContextRecord } from "~/lib/composerContextRecords";
-import { Button } from "../ui/button";
+import { Button, InlineButton } from "../ui/button";
 import { ProposedPlanCard } from "./ProposedPlanCard";
 import { HtmlRenderFrame } from "./HtmlRenderFrame";
 import { McpAppFrame } from "./McpAppFrame";
@@ -23,7 +26,7 @@ import {
 } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
-import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
+import { extractGithubLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
@@ -41,8 +44,14 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     row.projectedItem?.item.id,
   );
   const text = liveText ?? row.message.text;
-  const messageText =
-    text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
+  const focusModeEnabled = useClientSettings((settings) => settings.focusModeEnabled);
+  const [focusExpanded, setFocusExpanded] = useState(false);
+  const focusLinks =
+    focusModeEnabled && !row.assistantCopyStreaming ? extractGithubLinks(text) : [];
+  const focused = focusLinks.length > 0 && !focusExpanded;
+  const messageText = focused
+    ? focusLinks.map((link) => `- ${link}`).join("\n")
+    : text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
 
   return (
     <>
@@ -76,7 +85,20 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             />
           </AssistantCitationSource>
         </div>
-        {ctx.onOpenTurnDiff ? (
+        {focusLinks.length > 0 ? (
+          <div className="mt-1 text-xs">
+            <InlineButton
+              tone="muted"
+              aria-expanded={focusExpanded}
+              data-scroll-anchor-ignore
+              onClick={() => setFocusExpanded(!focusExpanded)}
+            >
+              <MorphIcon className="size-3" icon={focusExpanded ? ChevronDown : ChevronRight} />
+              {focusExpanded ? "Collapse reply" : "Show full reply"}
+            </InlineButton>
+          </div>
+        ) : null}
+        {!focused && ctx.onOpenTurnDiff ? (
           <AssistantChangedFilesSection
             turnSummary={row.assistantTurnDiffSummary}
             routeThreadKey={ctx.routeThreadKey}

@@ -32,6 +32,7 @@ import {
   timelineTurnFoldRunIdsByEntryId,
   liveAnswerPreview,
   deriveMessagesTimelineRowsWithState,
+  extractGithubLinks,
   resolveAssistantMessageCopyState,
   type MessagesTimelineRow,
   workEntryDisplayLabel,
@@ -5144,5 +5145,28 @@ describe("subagent continued by a later turn", () => {
       `turn-fold:${run2}`,
       "closing-2",
     ]);
+  });
+});
+
+describe("extractGithubLinks", () => {
+  it("collects bare, markdown, and autolinked github URLs once each", () => {
+    expect(
+      extractGithubLinks(
+        [
+          "Opened https://github.com/acme/app/pull/12.",
+          "See [the issue](https://github.com/acme/app/issues/3) and <https://github.com/acme/app/pull/12>.",
+          "**https://github.com/acme/app/blob/main/src/a.ts#L4**",
+          "Not https://gitlab.com/acme/app or http://example.com/github.com/x",
+        ].join("\n"),
+      ),
+    ).toEqual([
+      "https://github.com/acme/app/pull/12",
+      "https://github.com/acme/app/issues/3",
+      "https://github.com/acme/app/blob/main/src/a.ts#L4",
+    ]);
+  });
+
+  it("returns nothing when no github URL is present", () => {
+    expect(extractGithubLinks("Done. Tests pass.")).toEqual([]);
   });
 });

@@ -702,13 +702,16 @@ export function extractFocusLinks(text: string): ReadonlyArray<string> {
 }
 
 export interface FocusSection {
-  readonly heading: string;
+  /** Null for the text before the first heading, which is always shown. */
+  readonly heading: string | null;
   readonly body: string;
 }
 
-/** Splits markdown at ATX headings outside code fences; text before the first heading is dropped. */
+/** Splits markdown at ATX headings outside code fences; empty when the text has no headings. */
 export function splitFocusSections(text: string): ReadonlyArray<FocusSection> {
-  const sections: Array<{ heading: string; body: Array<string> }> = [];
+  const sections: Array<{ heading: string | null; body: Array<string> }> = [
+    { heading: null, body: [] },
+  ];
   let fence: string | null = null;
   for (const line of text.split("\n")) {
     const fenceMarker = /^\s*(`{3,}|~{3,})/u.exec(line)?.[1];
@@ -718,9 +721,12 @@ export function splitFocusSections(text: string): ReadonlyArray<FocusSection> {
       sections.push({ heading: line, body: [] });
       continue;
     }
-    sections.at(-1)?.body.push(line);
+    sections.at(-1)!.body.push(line);
   }
-  return sections.map(({ heading, body }) => ({ heading, body: body.join("\n").trim() }));
+  if (sections.length === 1) return [];
+  return sections
+    .map(({ heading, body }) => ({ heading, body: body.join("\n").trim() }))
+    .filter((section) => section.heading !== null || section.body.length > 0);
 }
 
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {

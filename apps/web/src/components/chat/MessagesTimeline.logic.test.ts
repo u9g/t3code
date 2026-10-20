@@ -4407,7 +4407,7 @@ describe("extractFocusLinks", () => {
 });
 
 describe("splitFocusSections", () => {
-  it("splits at headings, drops the preamble, and ignores headings in code fences", () => {
+  it("splits at headings, keeps the intro, and ignores headings in code fences", () => {
     expect(
       splitFocusSections(
         [
@@ -4423,12 +4423,14 @@ describe("splitFocusSections", () => {
         ].join("\n"),
       ),
     ).toEqual([
+      { heading: null, body: "Preamble." },
       { heading: "## Summary", body: "Did things.\n\n```sh\n# not a heading\n```" },
       { heading: "### Next steps", body: "- more" },
     ]);
   });
 
-  it("returns nothing for text without headings", () => {
+  it("omits an empty intro and returns nothing for text without headings", () => {
+    expect(splitFocusSections("## Only\nbody")).toEqual([{ heading: "## Only", body: "body" }]);
     expect(splitFocusSections("Just a reply.\n#hashtag")).toEqual([]);
   });
 });

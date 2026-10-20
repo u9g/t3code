@@ -76,6 +76,16 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
           >
             {focusSections.length > 0
               ? focusSections.map((section, index) => {
+                  if (section.heading === null) {
+                    return (
+                      <div key="intro">
+                        {renderMarkdown(
+                          section.body,
+                          shouldPreserveAssistantLineBreaks(section.body),
+                        )}
+                      </div>
+                    );
+                  }
                   const open = openSections.has(index);
                   return (
                     <div key={`${index}:${section.heading}`}>

@@ -29,6 +29,7 @@ import {
   timelineTurnFoldRunIdsByEntryId,
   deriveMessagesTimelineRowsWithState,
   extractFocusLinks,
+  deriveFocusPreviousReplyIds,
   splitFocusSections,
   shouldCollapseUserMessage,
   resolveAssistantMessageCopyState,
@@ -4432,5 +4433,21 @@ describe("splitFocusSections", () => {
   it("omits an empty intro and returns nothing for text without headings", () => {
     expect(splitFocusSections("## Only\nbody")).toEqual([{ heading: "## Only", body: "body" }]);
     expect(splitFocusSections("Just a reply.\n#hashtag")).toEqual([]);
+  });
+});
+
+describe("deriveFocusPreviousReplyIds", () => {
+  it("marks assistant replies before the latest user message", () => {
+    const message = (id: string, role: "user" | "assistant") =>
+      ({ kind: "message", id, message: { id, role } }) as unknown as MessagesTimelineRow;
+    expect(
+      deriveFocusPreviousReplyIds([
+        message("u1", "user"),
+        message("a1", "assistant"),
+        message("a2", "assistant"),
+        message("u2", "user"),
+        message("a3", "assistant"),
+      ]),
+    ).toEqual(new Set(["a1", "a2"]));
   });
 });

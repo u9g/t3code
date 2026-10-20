@@ -17,7 +17,7 @@ import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
-import { extractFocusLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
+import { splitFocusSections, extractFocusLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
@@ -36,6 +36,31 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const messageText = focused
     ? focusLinks.join("\n")
     : row.message.text || (row.message.streaming ? "" : "(empty response)");
+  const focusSections =
+    focusModeEnabled && !row.assistantCopyStreaming && focusLinks.length === 0
+      ? splitFocusSections(messageText)
+      : [];
+  const [openSections, setOpenSections] = useState<ReadonlySet<number>>(() => new Set());
+  const toggleSection = (index: number) =>
+    setOpenSections((current) => {
+      const next = new Set(current);
+      if (!next.delete(index)) next.add(index);
+      return next;
+    });
+  const renderMarkdown = (text: string, lineBreaks: boolean) => (
+    <ChatMarkdown
+      text={text}
+      cwd={ctx.markdownCwd}
+      threadRef={ctx.threadRef ?? undefined}
+      isStreaming={Boolean(row.message.streaming)}
+      lineBreaks={lineBreaks}
+      skills={ctx.skills}
+      headingLevelOffset={MESSAGE_HEADING_LEVEL}
+      onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+      onRunShellCommand={ctx.onRunShellCommand}
+      onImageExpand={ctx.onImageExpand}
+    />
+  );
 
   return (
     <>
@@ -49,18 +74,43 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             request={ctx.citationRequest}
             listRef={ctx.listRef}
           >
-            <ChatMarkdown
-              text={messageText}
-              cwd={ctx.markdownCwd}
-              threadRef={ctx.threadRef ?? undefined}
-              isStreaming={Boolean(row.message.streaming)}
-              lineBreaks={focused || shouldPreserveAssistantLineBreaks(messageText)}
-              skills={ctx.skills}
-              headingLevelOffset={MESSAGE_HEADING_LEVEL}
-              onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-              onRunShellCommand={ctx.onRunShellCommand}
-              onImageExpand={ctx.onImageExpand}
-            />
+            {focusSections.length > 0
+              ? focusSections.map((section, index) => {
+                  const open = openSections.has(index);
+                  return (
+                    <div key={`${index}:${section.heading}`}>
+                      <div className="flex items-start gap-1">
+                        <div className="mt-[0.3em] shrink-0">
+                          <InlineButton
+                            tone="muted"
+                            aria-expanded={open}
+                            aria-label={open ? "Collapse section" : "Expand section"}
+                            data-scroll-anchor-ignore
+                            onClick={() => toggleSection(index)}
+                          >
+                            <MorphIcon
+                              className="size-3.5"
+                              icon={open ? ChevronDown : ChevronRight}
+                            />
+                          </InlineButton>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          {renderMarkdown(section.heading, false)}
+                        </div>
+                      </div>
+                      {open && section.body
+                        ? renderMarkdown(
+                            section.body,
+                            shouldPreserveAssistantLineBreaks(section.body),
+                          )
+                        : null}
+                    </div>
+                  );
+                })
+              : renderMarkdown(
+                  messageText,
+                  focused || shouldPreserveAssistantLineBreaks(messageText),
+                )}
           </AssistantCitationSource>
         </div>
         {focusLinks.length > 0 ? (

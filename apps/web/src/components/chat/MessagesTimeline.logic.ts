@@ -736,6 +736,28 @@ export function extractFocusLinks(text: string): ReadonlyArray<string> {
   return [...links];
 }
 
+export interface FocusSection {
+  readonly heading: string;
+  readonly body: string;
+}
+
+/** Splits markdown at ATX headings outside code fences; text before the first heading is dropped. */
+export function splitFocusSections(text: string): ReadonlyArray<FocusSection> {
+  const sections: Array<{ heading: string; body: Array<string> }> = [];
+  let fence: string | null = null;
+  for (const line of text.split("\n")) {
+    const fenceMarker = /^\s*(`{3,}|~{3,})/u.exec(line)?.[1];
+    if (fenceMarker && (fence === null || fenceMarker.startsWith(fence))) {
+      fence = fence === null ? fenceMarker : null;
+    } else if (fence === null && /^ {0,3}#{1,6}\s/u.test(line)) {
+      sections.push({ heading: line, body: [] });
+      continue;
+    }
+    sections.at(-1)?.body.push(line);
+  }
+  return sections.map(({ heading, body }) => ({ heading, body: body.join("\n").trim() }));
+}
+
 function deriveTerminalAssistantMessageIds(timelineEntries: ReadonlyArray<TimelineEntry>) {
   const lastAssistantMessageIdByResponseKey = new Map<string, string>();
   let nullTurnResponseIndex = 0;

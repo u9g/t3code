@@ -54,6 +54,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
       if (!next.delete(index)) next.add(index);
       return next;
     });
+  const [hoveredSection, setHoveredSection] = useState<number | null>(null);
   const renderMarkdown = (text: string, lineBreaks: boolean) => (
     <ChatMarkdown
       text={text}
@@ -93,15 +94,25 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                       </div>
                     );
                   }
-                  const open = openSections.has(index);
+                  const pinned = openSections.has(index);
+                  const open = pinned || hoveredSection === index;
                   return (
-                    <div key={`${index}:${section.heading}`}>
+                    // Hover covers the heading and its body so the pointer can move into an expanded section.
+                    <div
+                      key={`${index}:${section.heading}`}
+                      onPointerEnter={(event) => {
+                        if (event.pointerType === "mouse") setHoveredSection(index);
+                      }}
+                      onPointerLeave={() =>
+                        setHoveredSection((current) => (current === index ? null : current))
+                      }
+                    >
                       <div
                         role="button"
                         tabIndex={0}
-                        aria-expanded={open}
+                        aria-expanded={pinned}
                         data-scroll-anchor-ignore
-                        className={cn("mt-[1lh] cursor-pointer", open && "underline")}
+                        className={cn("mt-[1lh] cursor-pointer", pinned && "underline")}
                         onClick={() => toggleSection(index)}
                         onKeyDown={(event) => {
                           if (event.key !== "Enter" && event.key !== " ") return;

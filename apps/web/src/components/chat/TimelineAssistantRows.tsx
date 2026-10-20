@@ -19,6 +19,7 @@ import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { splitFocusSections, extractFocusLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "~/components/ui/preview-card";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
@@ -47,7 +48,6 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
       if (!next.delete(index)) next.add(index);
       return next;
     });
-  const [hoveredSection, setHoveredSection] = useState<number | null>(null);
   const renderMarkdown = (text: string, lineBreaks: boolean) => (
     <ChatMarkdown
       text={text}
@@ -87,34 +87,41 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                       </div>
                     );
                   }
-                  const pinned = openSections.has(index);
-                  const open = pinned || hoveredSection === index;
-                  return (
-                    // Hover covers the heading and its body so the pointer can move into an expanded section.
+                  const open = openSections.has(index);
+                  const heading = (
                     <div
-                      key={`${index}:${section.heading}`}
-                      onPointerEnter={(event) => {
-                        if (event.pointerType === "mouse") setHoveredSection(index);
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={open}
+                      data-scroll-anchor-ignore
+                      className={cn("mt-[1lh] w-fit cursor-pointer", open && "underline")}
+                      onClick={() => toggleSection(index)}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        toggleSection(index);
                       }}
-                      onPointerLeave={() =>
-                        setHoveredSection((current) => (current === index ? null : current))
-                      }
                     >
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        aria-expanded={pinned}
-                        data-scroll-anchor-ignore
-                        className={cn("mt-[1lh] cursor-pointer", pinned && "underline")}
-                        onClick={() => toggleSection(index)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter" && event.key !== " ") return;
-                          event.preventDefault();
-                          toggleSection(index);
-                        }}
-                      >
-                        {renderMarkdown(section.heading, false)}
-                      </div>
+                      {renderMarkdown(section.heading, false)}
+                    </div>
+                  );
+                  return (
+                    <div key={`${index}:${section.heading}`}>
+                      {open || !section.body ? (
+                        heading
+                      ) : (
+                        <PreviewCard>
+                          <PreviewCardTrigger render={heading} delay={350} closeDelay={120} />
+                          <PreviewCardPopup side="right" className="w-[32rem]">
+                            <div className="max-h-[60vh] overflow-y-auto p-3">
+                              {renderMarkdown(
+                                section.body,
+                                shouldPreserveAssistantLineBreaks(section.body),
+                              )}
+                            </div>
+                          </PreviewCardPopup>
+                        </PreviewCard>
+                      )}
                       {open && section.body
                         ? renderMarkdown(
                             section.body,

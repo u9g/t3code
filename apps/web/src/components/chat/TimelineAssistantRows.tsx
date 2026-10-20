@@ -1,7 +1,7 @@
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { type RunId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { memo, use, useState } from "react";
+import { memo, use, useState, type ReactNode } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { GitForkIcon } from "lucide-react";
@@ -27,6 +27,27 @@ import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../times
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
+
+function FocusPreviewCard({
+  trigger,
+  children,
+}: {
+  readonly trigger: React.ReactElement;
+  readonly children: ReactNode;
+}) {
+  return (
+    <PreviewCard>
+      <PreviewCardTrigger render={trigger} delay={0} closeDelay={120} />
+      <PreviewCardPopup
+        side="right"
+        collisionAvoidance={{ side: "none", align: "shift" }}
+        className="w-[32rem] max-w-(--available-width)"
+      >
+        <div className="max-h-[60vh] overflow-y-auto p-3">{children}</div>
+      </PreviewCardPopup>
+    </PreviewCard>
+  );
+}
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -117,21 +138,12 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                       {open || !section.body ? (
                         heading
                       ) : (
-                        <PreviewCard>
-                          <PreviewCardTrigger render={heading} delay={0} closeDelay={120} />
-                          <PreviewCardPopup
-                            side="right"
-                            collisionAvoidance={{ side: "none", align: "shift" }}
-                            className="w-[32rem] max-w-(--available-width)"
-                          >
-                            <div className="max-h-[60vh] overflow-y-auto p-3">
-                              {renderMarkdown(
-                                section.body,
-                                shouldPreserveAssistantLineBreaks(section.body),
-                              )}
-                            </div>
-                          </PreviewCardPopup>
-                        </PreviewCard>
+                        <FocusPreviewCard trigger={heading}>
+                          {renderMarkdown(
+                            section.body,
+                            shouldPreserveAssistantLineBreaks(section.body),
+                          )}
+                        </FocusPreviewCard>
                       )}
                       {open && section.body
                         ? renderMarkdown(

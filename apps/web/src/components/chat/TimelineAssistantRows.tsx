@@ -119,7 +119,11 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                       ) : (
                         <PreviewCard>
                           <PreviewCardTrigger render={heading} delay={350} closeDelay={120} />
-                          <PreviewCardPopup side="right" className="w-[32rem]">
+                          <PreviewCardPopup
+                            side="right"
+                            collisionAvoidance={{ side: "none", align: "shift" }}
+                            className="w-[32rem] max-w-(--available-width)"
+                          >
                             <div className="max-h-[60vh] overflow-y-auto p-3">
                               {renderMarkdown(
                                 section.body,

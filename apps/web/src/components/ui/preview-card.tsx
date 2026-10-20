@@ -13,9 +13,11 @@ function PreviewCardPopup({
   align = "start",
   side = "top",
   sideOffset = 6,
+  collisionAvoidance,
   ...props
 }: PreviewCardPrimitive.Popup.Props & {
   align?: PreviewCardPrimitive.Positioner.Props["align"];
+  collisionAvoidance?: PreviewCardPrimitive.Positioner.Props["collisionAvoidance"];
   side?: PreviewCardPrimitive.Positioner.Props["side"];
   sideOffset?: PreviewCardPrimitive.Positioner.Props["sideOffset"];
 }) {
@@ -23,6 +25,7 @@ function PreviewCardPopup({
     <PreviewCardPrimitive.Portal>
       <PreviewCardPrimitive.Positioner
         align={align}
+        collisionAvoidance={collisionAvoidance}
         className="z-[140] max-w-(--available-width)"
         data-slot="preview-card-positioner"
         side={side}

@@ -17,7 +17,7 @@ import { useFileContextMenuHandler } from "../../fileContextMenu";
 import { useProject, useThreadShell } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
-import { extractGithubLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
+import { extractFocusLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
@@ -31,7 +31,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const focusModeEnabled = useClientSettings((settings) => settings.focusModeEnabled);
   const [focusExpanded, setFocusExpanded] = useState(false);
   const focusLinks =
-    focusModeEnabled && !row.assistantCopyStreaming ? extractGithubLinks(row.message.text) : [];
+    focusModeEnabled && !row.assistantCopyStreaming ? extractFocusLinks(row.message.text) : [];
   const focused = focusLinks.length > 0 && !focusExpanded;
   const messageText = focused
     ? focusLinks.join("\n")

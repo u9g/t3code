@@ -1,0 +1,63 @@
+name: Relay image
+
+# The relay as a Node service (`infra/relay/src/node`), for hosting it outside
+# Cloudflare. Every branch is tagged with its commit; main is also `latest`.
+on:
+  push:
+    paths:
+      - infra/relay/**
+      - packages/contracts/**
+      - packages/shared/**
+      - pnpm-lock.yaml
+      - .github/workflows/relay-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: relay-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    name: Build and push relay image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=t3code-relay...
+
+      - name: Bundle
+        run: vp run --filter t3code-relay build:node
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: infra/relay
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/t3code-relay:${{ github.sha }}
+            ${{ github.ref == 'refs/heads/main' && format('ghcr.io/{0}/t3code-relay:latest', github.repository_owner) || '' }}

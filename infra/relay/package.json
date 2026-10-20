@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "deploy": "alchemy deploy",
+    "build:node": "vp pack",
     "push:android:smoke": "node scripts/android-push-smoke.ts",
     "push:android:watch": "node scripts/android-push-watch.ts",
     "tunnels:census": "node scripts/tunnel-census.ts",
@@ -22,7 +23,8 @@
     "@t3tools/shared": "workspace:*",
     "alchemy": "2.0.0-beta.80",
     "drizzle-orm": "1.0.0-rc.5-ab785fc",
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "undici": "catalog:"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260601.1",

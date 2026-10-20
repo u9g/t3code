@@ -1049,6 +1049,9 @@ importers:
       effect:
         specifier: 4.0.5
         version: 4.0.5
+      undici:
+        specifier: 'catalog:'
+        version: 8.11.2
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^4.20260601.1

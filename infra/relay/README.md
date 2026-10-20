@@ -161,6 +161,41 @@ so `AXIOM_ORG_ID` must accompany `AXIOM_TOKEN`. The release workflow reads the p
 derived public URL and Clerk publishable key from the same environment for downstream desktop, CLI,
 and hosted web builds.
 
+## Running on Node
+
+The relay also runs as a plain Node service, for hosting it somewhere other than Cloudflare
+Workers. [`src/runtime.ts`](./src/runtime.ts) holds everything both entry points share;
+[`src/node/main.ts`](./src/node/main.ts) supplies the Node side of the platform:
+
+| Worker                        | Node                                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| Hyperdrive to PlanetScale     | `DATABASE_URL`, any Postgres; migrations run at startup                                     |
+| `HookInboxObject` (DO)        | one SQLite file per environment under `RELAY_DATA_DIR`, kept on disk                        |
+| APNs and FCM Queues           | in-process queue with the same retries; a restart drops jobs in flight                      |
+| Rate limit bindings           | in-memory windows, so run one replica                                                       |
+| Tunnel and DNS bindings       | Cloudflare's REST API with `CLOUDFLARE_API_TOKEN`                                           |
+| Cron trigger                  | the same sweep every five minutes                                                           |
+| Alchemy `KeyPair` and secrets | `RELAY_CLOUD_MINT_PRIVATE_KEY` (Ed25519 PKCS#8 PEM) and `RELAY_DELIVERY_JOB_SIGNING_SECRET` |
+
+Managed endpoints are still Cloudflare Tunnels, so a Node relay needs a Cloudflare account and a
+zone for them. The API token needs Cloudflare Tunnel Edit on the account and DNS Edit on
+`RELAY_TUNNEL_ZONE_NAME`; endpoints are `<RELAY_TUNNEL_NAMESPACE>-<digest>.<zone>`.
+
+Configure it with `PORT` (default 8080), `RELAY_PUBLIC_URL` (the HTTPS origin clients use, also
+the token issuer), the variables above, `CLOUDFLARE_ACCOUNT_ID`, and the Clerk, APNs and FCM
+variables from [`.env.example`](./.env.example). Build the bundle and image with:
+
+```sh
+vp run --filter t3code-relay build:node
+docker build infra/relay
+```
+
+`.github/workflows/relay-image.yml` publishes that image to `ghcr.io/<owner>/t3code-relay`.
+
+Clients find the relay through build-time configuration, so a self-hosted relay needs its own
+builds: set `T3CODE_RELAY_URL` and the Clerk values of the relay's Clerk application in the root
+`.env` (see [T3 Connect setup](../../docs/operations/connect-setup.md)).
+
 See:
 
 - [T3 Connect setup](../../docs/operations/connect-setup.md) for Clerk keys, JWT templates, and sign-up restrictions.

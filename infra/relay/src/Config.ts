@@ -2,6 +2,7 @@ import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 
@@ -37,6 +38,28 @@ export const legacyTunnelGraceMinutesConfig = Config.option(
   Config.schema(
     Schema.NumberFromString.pipe(Schema.check(Schema.isInt(), Schema.isGreaterThan(0))),
     RELAY_LEGACY_TUNNEL_GRACE_MINUTES,
+  ),
+);
+
+/** Null when `APNS_ENABLED=false`, for a relay without Apple credentials. */
+export const apnsCredentialsConfig = Config.Boolean("APNS_ENABLED").pipe(
+  Config.withDefault(true),
+  Config.flatMap((enabled) =>
+    enabled
+      ? Config.all({
+          environment: Config.schema(ApnsEnvironment, "APNS_ENVIRONMENT"),
+          teamId: Config.String("APNS_TEAM_ID"),
+          keyId: Config.String("APNS_KEY_ID"),
+          bundleId: Config.String("APNS_BUNDLE_ID"),
+          privateKey: Config.Redacted("APNS_PRIVATE_KEY"),
+        })
+      : Config.succeed(null),
+  ),
+);
+
+export const fcmServiceAccountConfig = Config.option(Config.Redacted("FCM_SERVICE_ACCOUNT")).pipe(
+  Config.map((value) =>
+    Option.getOrUndefined(Option.filter(value, (key) => Redacted.value(key).trim().length > 0)),
   ),
 );
 

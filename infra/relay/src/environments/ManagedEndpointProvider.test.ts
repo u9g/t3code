@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 
+import * as CloudflareBindings from "../cloudflareBindings.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as ManagedEndpointAllocations from "./ManagedEndpointAllocations.ts";
 import * as ManagedEndpointProvider from "./ManagedEndpointProvider.ts";
@@ -402,11 +403,10 @@ describe("ManagedEndpointProvider", () => {
       deleteDnsRecord: () => Effect.void,
     } as unknown as Cloudflare.DNS.ReadWriteDnsClient;
     const runtimeContext = {} as Alchemy.BaseRuntimeContext;
-    const layer = ManagedEndpointProvider.layerCloudflareBindings(
-      tunnelClient,
-      dnsClient,
-      runtimeContext,
-    ).pipe(
+    const layer = ManagedEndpointProvider.layer.pipe(
+      Layer.provideMerge(
+        CloudflareBindings.layerManagedEndpointClients(tunnelClient, dnsClient, runtimeContext),
+      ),
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(RelayConfiguration.layer(config)),
       Layer.provide(

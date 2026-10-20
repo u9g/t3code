@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Redacted from "effect/Redacted";
 
+import * as CloudflareBindings from "../cloudflareBindings.ts";
 import * as RelayConfiguration from "../Config.ts";
 import * as ApnsDeliveryQueue from "./ApnsDeliveryQueue.ts";
 
@@ -40,7 +41,8 @@ describe("ApnsDeliveryQueue", () => {
       sendBatch: () => Effect.die("batch queue binding is not used"),
     };
     const runtimeContext = {} as Alchemy.BaseRuntimeContext;
-    const layer = ApnsDeliveryQueue.layerCloudflareQueues(sender, runtimeContext).pipe(
+    const layer = ApnsDeliveryQueue.layer.pipe(
+      Layer.provide(CloudflareBindings.layerApnsDeliveryQueueSender(sender, runtimeContext)),
       Layer.provide(NodeCryptoLayer.layer),
       Layer.provide(RelayConfiguration.layer(config)),
     );

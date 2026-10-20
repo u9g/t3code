@@ -9,8 +9,8 @@ import * as Layer from "effect/Layer";
 import * as Planetscale from "alchemy/Planetscale";
 
 import { PublishClientConfig, tokenDigest } from "./src/clientConfig.ts";
-import * as RelayDb from "./src/db.ts";
-import { RelayObservability } from "./src/observability.ts";
+import * as RelayDatabase from "./src/database.ts";
+import { RelayObservability } from "./src/observabilityResources.ts";
 import { ManagedEndpointZone, RelayApiZone } from "./src/zone.ts";
 import * as RelayWorker from "./src/worker.ts";
 
@@ -26,8 +26,8 @@ export default Alchemy.Stack(
     state: Cloudflare.state(),
   },
   Effect.gen(function* () {
-    const db = yield* RelayDb.PlanetscaleDatabase;
-    const hyperdrive = yield* RelayDb.RelayHyperdrive;
+    const db = yield* RelayDatabase.PlanetscaleDatabase;
+    const hyperdrive = yield* RelayDatabase.RelayHyperdrive;
     const managedEndpointZone = yield* ManagedEndpointZone.pipe(Effect.orDie);
     const relayApiZone = yield* RelayApiZone.pipe(Effect.orDie);
     const observability = yield* RelayObservability;

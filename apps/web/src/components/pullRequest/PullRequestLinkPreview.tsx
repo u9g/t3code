@@ -10,9 +10,11 @@ import {
   type MouseEvent,
   type ReactElement,
   type ReactNode,
+  type Ref,
 } from "react";
 
 import { RelativeTime } from "~/components/RelativeTime";
+import { useSeenInViewport } from "~/hooks/useSeenInViewport";
 import { pullRequestEnvironment, useSharedPullRequestSummary } from "~/state/pullRequests";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import { useEnvironmentQuery } from "~/state/query";
@@ -53,10 +55,12 @@ export function PullRequestLinkPreview({
   fallback?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  // Read once the link is on screen, so hovering finds the card ready.
+  const [viewportRef, seen] = useSeenInViewport();
   const previewActionsRef = useRef<PreviewCardPrimitive.Root.Actions | null>(null);
   const [resolvingClick, setResolvingClick] = useState(false);
   const previewQuery = useEnvironmentQuery(
-    open
+    open || seen
       ? pullRequestEnvironment.previewCard({
           environmentId: target.environmentId,
           input: target.input,
@@ -132,7 +136,13 @@ export function PullRequestLinkPreview({
         }}
       >
         <PreviewCardTrigger
-          render={<TooltipTrigger render={trigger} />}
+          render={
+            <TooltipTrigger
+              render={cloneElement(trigger as ReactElement<{ ref?: Ref<Element> }>, {
+                ref: viewportRef,
+              })}
+            />
+          }
           delay={0}
           closeDelay={120}
         />

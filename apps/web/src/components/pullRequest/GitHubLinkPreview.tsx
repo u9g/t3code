@@ -1,7 +1,8 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useState, type ReactElement } from "react";
+import { cloneElement, useState, type ReactElement, type Ref } from "react";
 
 import { RelativeTime } from "~/components/RelativeTime";
+import { useSeenInViewport } from "~/hooks/useSeenInViewport";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
 
@@ -10,7 +11,7 @@ import { PullRequestActorAvatar } from "./pullRequestPresentation";
 
 const STATE_LABEL = { open: "Open", closed: "Closed", merged: "Merged", draft: "Draft" } as const;
 
-/** A hover card for any github.com link, read when it first opens; it shows the URL until then. */
+/** A hover card for any github.com link, read once the link is on screen so hovering finds it ready. */
 export function GitHubLinkPreview({
   link,
   url,
@@ -21,15 +22,20 @@ export function GitHubLinkPreview({
   environmentId: EnvironmentId | null;
 }) {
   const [open, setOpen] = useState(false);
+  const [viewportRef, seen] = useSeenInViewport();
   const preview = useEnvironmentQuery(
-    open && environmentId !== null
+    (open || seen) && environmentId !== null
       ? pullRequestEnvironment.gitHubLinkPreview({ environmentId, input: { url } })
       : null,
   ).data;
 
   return (
     <PreviewCard open={open} onOpenChange={setOpen}>
-      <PreviewCardTrigger render={link} delay={0} closeDelay={120} />
+      <PreviewCardTrigger
+        render={cloneElement(link as ReactElement<{ ref?: Ref<Element> }>, { ref: viewportRef })}
+        delay={0}
+        closeDelay={120}
+      />
       <PreviewCardPopup
         side="right"
         collisionAvoidance={{ side: "none", align: "shift" }}

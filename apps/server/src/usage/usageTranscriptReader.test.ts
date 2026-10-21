@@ -96,7 +96,7 @@ describe("readTranscriptRecords resume", () => {
           state.errors += 1;
           return [];
         }
-        return TEST_FORMATS.claude.parseProjected(value, undefined);
+        return TEST_FORMATS.claude.parseProjected(value, { pendingPrompts: 0 });
       },
       readMalformedRecords: (state: { errors: number }) => state.errors,
     };

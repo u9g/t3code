@@ -32,7 +32,9 @@ function claudeLine(overrides: {
 
 describe("parseClaudeLine", () => {
   it("extracts token totals and a dedupe key", () => {
-    const record = parseClaudeLine(claudeLine({ messageId: "msg_1", contentType: "text" }));
+    const record = parseClaudeLine(claudeLine({ messageId: "msg_1", contentType: "text" }), {
+      pendingPrompts: 0,
+    });
 
     expect(record).not.toBeNull();
     expect(record?.provider).toBe("claude");
@@ -51,8 +53,12 @@ describe("parseClaudeLine", () => {
   it("gives every content block of one message the same dedupe key", () => {
     // T3 Code writes one record per content block, each repeating the parent
     // message's full usage. Summing them would overcount ~2.4x on real data.
-    const text = parseClaudeLine(claudeLine({ messageId: "msg_2", contentType: "text" }));
-    const toolUse = parseClaudeLine(claudeLine({ messageId: "msg_2", contentType: "tool_use" }));
+    const text = parseClaudeLine(claudeLine({ messageId: "msg_2", contentType: "text" }), {
+      pendingPrompts: 0,
+    });
+    const toolUse = parseClaudeLine(claudeLine({ messageId: "msg_2", contentType: "tool_use" }), {
+      pendingPrompts: 0,
+    });
 
     expect(text?.dedupeKey).toBe(toolUse?.dedupeKey);
     expect(text?.totals).toEqual(toolUse?.totals);
@@ -79,11 +85,44 @@ describe("parseClaudeLine", () => {
         },
       }),
     ];
-    expect(claudeUsageFormat.parseLine(JSON.stringify(projected), undefined)).toEqual(expected);
-    expect(claudeUsageFormat.parseProjected(projected, undefined)).toEqual(expected);
+    expect(claudeUsageFormat.parseLine(JSON.stringify(projected), { pendingPrompts: 0 })).toEqual(
+      expected,
+    );
+    expect(claudeUsageFormat.parseProjected(projected, { pendingPrompts: 0 })).toEqual(expected);
 
     const synthetic = { ...projected, message: { ...projected.message, model: "<synthetic>" } };
-    expect(claudeUsageFormat.parseLine(JSON.stringify(synthetic), undefined)).toEqual([]);
-    expect(claudeUsageFormat.parseProjected(synthetic, undefined)).toEqual([]);
+    expect(claudeUsageFormat.parseLine(JSON.stringify(synthetic), { pendingPrompts: 0 })).toEqual(
+      [],
+    );
+    expect(claudeUsageFormat.parseProjected(synthetic, { pendingPrompts: 0 })).toEqual([]);
+  });
+});
+
+describe("Claude prompt counting", () => {
+  const user = (content: unknown, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ type: "user", message: { role: "user", content }, ...extra });
+
+  it("counts typed prompts once, on the next response, and nothing Claude Code wrote itself", () => {
+    const state = { pendingPrompts: 0 };
+    const lines = [
+      user("Fix the login bug"),
+      user([{ type: "tool_result", content: "ok" }]),
+      user("<task-notification>done</task-notification>"),
+      user("<command-name>/compact</command-name>"),
+      user("[Request interrupted by user for tool use]"),
+      user("Summary of earlier turns", { isCompactSummary: true }),
+      user("caveat", { isMeta: true }),
+      user("subagent task", { isSidechain: true }),
+      user([{ type: "text", text: "and this screenshot" }, { type: "image" }]),
+    ];
+    for (const line of lines) expect(parseClaudeLine(line, state)).toBeNull();
+
+    const first = parseClaudeLine(claudeLine({ messageId: "msg_p", contentType: "text" }), state);
+    const second = parseClaudeLine(
+      claudeLine({ messageId: "msg_p", contentType: "tool_use" }),
+      state,
+    );
+    expect(first?.prompts).toBe(2);
+    expect(second?.prompts).toBeUndefined();
   });
 });

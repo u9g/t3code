@@ -72,6 +72,16 @@ export const UsageBucket = Schema.Struct({
 });
 export type UsageBucket = typeof UsageBucket.Type;
 
+/** Prompts a T3 Code scheduled task sent, from the server's own records rather than transcripts. */
+export const UsageScheduledPrompts = Schema.Struct({
+  day: UsageDay,
+  hourStart: Schema.optional(TrimmedNonEmptyString),
+  provider: UsageProviderKind,
+  model: TrimmedNonEmptyString,
+  count: NonNegativeInt,
+});
+export type UsageScheduledPrompts = typeof UsageScheduledPrompts.Type;
+
 export const UsageSourceFingerprint = Schema.Struct({
   hostId: TrimmedNonEmptyString,
   provider: UsageProviderKind,
@@ -132,6 +142,7 @@ export const UsageSummary = Schema.Struct({
   sources: ForwardCompatibleArray(UsageSource),
   pricing: UsagePricing,
   scanDurationMs: NonNegativeInt,
+  scheduledPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageScheduledPrompts)),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 

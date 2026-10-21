@@ -561,3 +561,31 @@ describe("mergeUsage", () => {
     expect(merged.providers[0]?.sessions).toBe(1);
   });
 });
+
+describe("mergeUsage scheduled prompts", () => {
+  it("adds each server's scheduled prompts to the totals, providers, models and days", () => {
+    const source = { provider: "claude" as const, hostId: "mac", homePath: "/Users/me/.claude" };
+    const withScheduled = (count: number): UsageSummary => ({
+      ...summary([bucket({ prompts: 10 })], [source]),
+      scheduledPrompts: [
+        { day: "2026-08-07" as UsageDay, provider: "claude", model: "claude-fable-5", count },
+      ],
+    });
+    const merged = mergeUsage(
+      [
+        environment("mac", withScheduled(3)),
+        environment("linux", {
+          ...withScheduled(2),
+          sources: [],
+          buckets: [],
+        }),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+    expect(merged.scheduledPrompts).toBe(5);
+    expect(merged.prompts).toBe(10);
+    expect(merged.providers.find((entry) => entry.provider === "claude")?.scheduledPrompts).toBe(5);
+    expect(merged.models[0]?.scheduledPrompts).toBe(5);
+    expect(merged.daily[0]?.scheduledPrompts).toBe(5);
+  });
+});

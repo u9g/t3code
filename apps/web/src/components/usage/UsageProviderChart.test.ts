@@ -14,10 +14,10 @@ describe("buildPeriodColumns", () => {
         prompts: 0,
         scheduledPrompts: 0,
         byProvider: new Map([
-          ["codex" as const, { costUsd: 10, totalTokens: 100, prompts: 0 }],
-          ["claude" as const, { costUsd: 20, totalTokens: 200, prompts: 0 }],
-          ["pi" as const, { costUsd: 5, totalTokens: 50, prompts: 0 }],
-          ["muse" as const, { costUsd: 7, totalTokens: 70, prompts: 0 }],
+          ["codex" as const, { costUsd: 10, totalTokens: 100, prompts: 0, scheduledPrompts: 0 }],
+          ["claude" as const, { costUsd: 20, totalTokens: 200, prompts: 9, scheduledPrompts: 4 }],
+          ["pi" as const, { costUsd: 5, totalTokens: 50, prompts: 0, scheduledPrompts: 0 }],
+          ["muse" as const, { costUsd: 7, totalTokens: 70, prompts: 0, scheduledPrompts: 0 }],
         ]),
       },
     ],
@@ -29,7 +29,9 @@ describe("buildPeriodColumns", () => {
         totalTokens: 50,
         prompts: 0,
         scheduledPrompts: 0,
-        byProvider: new Map([["claude" as const, { costUsd: 5, totalTokens: 50, prompts: 0 }]]),
+        byProvider: new Map([
+          ["claude" as const, { costUsd: 5, totalTokens: 50, prompts: 0, scheduledPrompts: 0 }],
+        ]),
       },
     ],
   ]);
@@ -47,5 +49,13 @@ describe("buildPeriodColumns", () => {
       { provider: "pi", value: 5 },
       { provider: "muse", value: 7 },
     ]);
+  });
+
+  it("moves scheduled turns from their provider into their own series", () => {
+    const [first] = buildPeriodColumns(days, byDay, "turns");
+
+    expect(first?.bands.find((band) => band.provider === "claude")?.value).toBe(5);
+    expect(first?.scheduled).toBe(4);
+    expect(first?.total).toBe(9);
   });
 });

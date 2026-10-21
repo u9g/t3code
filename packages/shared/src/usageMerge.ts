@@ -20,6 +20,7 @@ export interface ProviderTotals {
   readonly costUsd: number;
   readonly totalTokens: number;
   readonly records: number;
+  readonly prompts: number;
   readonly sessions: number;
   readonly costShare: number;
   readonly tokenShare: number;
@@ -32,6 +33,7 @@ export interface ModelTotals {
   readonly totalTokens: number;
   readonly tokens: UsageTokenTotals;
   readonly records: number;
+  readonly prompts: number;
   readonly unpricedRecords: number;
   readonly unpricedTokens: number;
   readonly costShare: number;
@@ -47,10 +49,11 @@ export interface DailyTotals {
   readonly day: string;
   readonly costUsd: number;
   readonly totalTokens: number;
-  readonly records: number;
+  /** Prompts the user sent. */
+  readonly prompts: number;
   readonly byProvider: ReadonlyMap<
     UsageProviderKind,
-    { costUsd: number; totalTokens: number; records: number }
+    { costUsd: number; totalTokens: number; prompts: number }
   >;
 }
 
@@ -59,10 +62,11 @@ export interface HourlyTotals {
   readonly hourStart: string;
   readonly costUsd: number;
   readonly totalTokens: number;
-  readonly records: number;
+  /** Prompts the user sent. */
+  readonly prompts: number;
   readonly byProvider: ReadonlyMap<
     UsageProviderKind,
-    { costUsd: number; totalTokens: number; records: number }
+    { costUsd: number; totalTokens: number; prompts: number }
   >;
 }
 
@@ -103,6 +107,7 @@ export interface MergedUsage {
   readonly reasoningTokens: number;
   readonly totalTokens: number;
   readonly records: number;
+  readonly prompts: number;
   readonly sessions: number;
   readonly providers: readonly ProviderTotals[];
   readonly models: readonly ModelTotals[];
@@ -286,6 +291,7 @@ const EMPTY_MERGED: MergedUsage = {
   reasoningTokens: 0,
   totalTokens: 0,
   records: 0,
+  prompts: 0,
   sessions: 0,
   providers: [],
   models: [],
@@ -343,6 +349,7 @@ export function mergeUsage(
   let outputTokens = 0;
   let reasoningTokens = 0;
   let records = 0;
+  let prompts = 0;
   let sessions = 0;
   let cacheSavingsUsd = 0;
   let providerReportedRecords = 0;
@@ -352,7 +359,7 @@ export function mergeUsage(
 
   const providerAccumulator = new Map<
     UsageProviderKind,
-    { costUsd: number; totalTokens: number; records: number; sessions: number }
+    { costUsd: number; totalTokens: number; records: number; prompts: number; sessions: number }
   >();
   const modelAccumulator = new Map<
     string,
@@ -362,6 +369,7 @@ export function mergeUsage(
       totalTokens: number;
       tokens: UsageTokenTotals;
       records: number;
+      prompts: number;
       unpricedRecords: number;
       unpricedTokens: number;
     }
@@ -371,8 +379,8 @@ export function mergeUsage(
     {
       costUsd: number;
       totalTokens: number;
-      records: number;
-      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; records: number }>;
+      prompts: number;
+      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; prompts: number }>;
     }
   >();
   const hourlyAccumulator = new Map<
@@ -382,8 +390,8 @@ export function mergeUsage(
       hourStart: string;
       costUsd: number;
       totalTokens: number;
-      records: number;
-      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; records: number }>;
+      prompts: number;
+      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; prompts: number }>;
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
@@ -404,6 +412,7 @@ export function mergeUsage(
         costUsd: 0,
         totalTokens: 0,
         records: 0,
+        prompts: 0,
         sessions: 0,
       };
       provider.sessions += providerSessions;
@@ -421,6 +430,7 @@ export function mergeUsage(
       outputTokens += bucket.totals.outputTokens;
       reasoningTokens += bucket.totals.reasoningTokens;
       records += bucket.records;
+      prompts += bucket.prompts ?? 0;
       unpricedRecords += bucket.unpricedRecords;
       if (bucket.costSource === "providerReported") providerReportedRecords += bucket.records;
       if (bucket.categoryCostUsd !== undefined) {
@@ -437,11 +447,13 @@ export function mergeUsage(
         costUsd: 0,
         totalTokens: 0,
         records: 0,
+        prompts: 0,
         sessions: 0,
       };
       provider.costUsd += bucket.costUsd;
       provider.totalTokens += tokens;
       provider.records += bucket.records;
+      provider.prompts += bucket.prompts ?? 0;
       providerAccumulator.set(bucket.provider, provider);
 
       const modelKey = `${bucket.provider} ${bucket.model}`;
@@ -457,6 +469,7 @@ export function mergeUsage(
           reasoningTokens: 0,
         },
         records: 0,
+        prompts: 0,
         unpricedRecords: 0,
         unpricedTokens: 0,
       };
@@ -470,6 +483,7 @@ export function mergeUsage(
         reasoningTokens: model.tokens.reasoningTokens + bucket.totals.reasoningTokens,
       };
       model.records += bucket.records;
+      model.prompts += bucket.prompts ?? 0;
       model.unpricedRecords += bucket.unpricedRecords;
       if (bucket.records > 0) {
         model.unpricedTokens += (tokens * bucket.unpricedRecords) / bucket.records;
@@ -479,23 +493,23 @@ export function mergeUsage(
       const day = dailyAccumulator.get(bucket.day) ?? {
         costUsd: 0,
         totalTokens: 0,
-        records: 0,
+        prompts: 0,
         byProvider: new Map<
           UsageProviderKind,
-          { costUsd: number; totalTokens: number; records: number }
+          { costUsd: number; totalTokens: number; prompts: number }
         >(),
       };
       day.costUsd += bucket.costUsd;
       day.totalTokens += tokens;
-      day.records += bucket.records;
+      day.prompts += bucket.prompts ?? 0;
       const dayProvider = day.byProvider.get(bucket.provider) ?? {
         costUsd: 0,
         totalTokens: 0,
-        records: 0,
+        prompts: 0,
       };
       dayProvider.costUsd += bucket.costUsd;
       dayProvider.totalTokens += tokens;
-      dayProvider.records += bucket.records;
+      dayProvider.prompts += bucket.prompts ?? 0;
       day.byProvider.set(bucket.provider, dayProvider);
       dailyAccumulator.set(bucket.day, day);
 
@@ -505,23 +519,23 @@ export function mergeUsage(
           hourStart: bucket.hourStart,
           costUsd: 0,
           totalTokens: 0,
-          records: 0,
+          prompts: 0,
           byProvider: new Map<
             UsageProviderKind,
-            { costUsd: number; totalTokens: number; records: number }
+            { costUsd: number; totalTokens: number; prompts: number }
           >(),
         };
         hour.costUsd += bucket.costUsd;
         hour.totalTokens += tokens;
-        hour.records += bucket.records;
+        hour.prompts += bucket.prompts ?? 0;
         const hourProvider = hour.byProvider.get(bucket.provider) ?? {
           costUsd: 0,
           totalTokens: 0,
-          records: 0,
+          prompts: 0,
         };
         hourProvider.costUsd += bucket.costUsd;
         hourProvider.totalTokens += tokens;
-        hourProvider.records += bucket.records;
+        hourProvider.prompts += bucket.prompts ?? 0;
         hour.byProvider.set(bucket.provider, hourProvider);
         hourlyAccumulator.set(bucket.hourStart, hour);
       }
@@ -536,6 +550,7 @@ export function mergeUsage(
       costUsd: totals.costUsd,
       totalTokens: totals.totalTokens,
       records: totals.records,
+      prompts: totals.prompts,
       sessions: totals.sessions,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
@@ -550,6 +565,7 @@ export function mergeUsage(
       totalTokens: totals.totalTokens,
       tokens: totals.tokens,
       records: totals.records,
+      prompts: totals.prompts,
       unpricedRecords: totals.unpricedRecords,
       unpricedTokens: totals.unpricedTokens,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
@@ -562,7 +578,7 @@ export function mergeUsage(
       day,
       costUsd: totals.costUsd,
       totalTokens: totals.totalTokens,
-      records: totals.records,
+      prompts: totals.prompts,
       byProvider: totals.byProvider,
     }))
     .sort((a, b) => a.day.localeCompare(b.day));
@@ -580,6 +596,7 @@ export function mergeUsage(
     reasoningTokens,
     totalTokens,
     records,
+    prompts,
     sessions,
     providers,
     models,

@@ -22,6 +22,8 @@ export interface UsageRecord {
   readonly speed: UsageSpeed;
   readonly unresolvedServiceTierTurnId?: string;
   readonly dedupeKey: string | null;
+  /** User prompts this response answered, counted on the session's first response after them. */
+  readonly prompts?: number;
 }
 
 export const EMPTY_TOTALS: UsageTokenTotals = {

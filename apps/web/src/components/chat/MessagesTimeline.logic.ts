@@ -727,6 +727,17 @@ export function extractFocusLinks(text: string): ReadonlyArray<string> {
   return [...links];
 }
 
+/** The reply's first prose paragraph: headings, lists, quotes, tables and code blocks are skipped. */
+export function extractFocusIntro(text: string): string | null {
+  for (const block of text.split(/\n\s*\n/u)) {
+    const trimmed = block.trim();
+    if (trimmed.length === 0) continue;
+    if (/^(#{1,6}\s|```|~~~|[-*+]\s|\d+[.)]\s|>|\|)/u.test(trimmed)) continue;
+    return trimmed;
+  }
+  return null;
+}
+
 export interface FocusSection {
   /** Null for the text before the first heading, which is always shown. */
   readonly heading: string | null;

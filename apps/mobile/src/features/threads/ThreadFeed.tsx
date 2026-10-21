@@ -158,6 +158,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import {
   extractFocusIntro,
   extractFocusLinks,
+  isFocusVideoLink,
   splitFocusSections,
 } from "@t3tools/shared/focusMode";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
@@ -1239,8 +1240,8 @@ function compactionLabel(label: string, title: string | undefined) {
 
 /**
  * Focus mode for one finished assistant reply. Earlier replies collapse to a "Show full reply"
- * control; the latest collapses to its first paragraph and links, or to its headings, which a tap
- * opens one at a time.
+ * control; the latest collapses to its first paragraph and videos (or to its links when it has no
+ * paragraph), or to its headings, which a tap opens one at a time.
  */
 function FocusAssistantMarkdown(props: {
   readonly text: string;
@@ -1257,8 +1258,9 @@ function FocusAssistantMarkdown(props: {
     const summary = props.previous
       ? ""
       : [
-          ...(intro === null ? [] : [intro]),
-          ...links.filter((link) => !intro?.includes(link)),
+          ...(intro === null
+            ? links
+            : [intro, ...links.filter((link) => isFocusVideoLink(link) && !intro.includes(link))]),
         ].join("\n\n");
     return (
       <>

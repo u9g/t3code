@@ -1,5 +1,6 @@
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -770,6 +771,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(TraceDiagnostics.TraceDiagnostics)({}),
   Layer.mock(TriageService.TriageService)({}),
   Layer.mock(ProjectFaviconResolver.ProjectFaviconResolver)({}),
+  Layer.mock(GitHubRest.GitHubRest)({}),
   Layer.mock(ProjectEnrichment.ProjectEnrichmentService)({}),
   Layer.mock(AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator)({}),
   Layer.mock(AcpRegistrySupport.AcpRegistryCatalog)({}),

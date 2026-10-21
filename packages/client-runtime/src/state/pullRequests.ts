@@ -254,6 +254,11 @@ export function createPullRequestEnvironmentAtoms<R, E>(
       refreshTrigger: ({ environmentId }) => refreshes({ environmentId, input: {} }),
     }),
   );
+  const gitHubLinkPreview = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:pull-requests:github-link-preview",
+    tag: WS_METHODS.pullRequestsGitHubLinkPreview,
+    staleTimeMs: 60_000,
+  });
   const labelCandidates = writableQueryFamily(
     createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:label-candidates",
@@ -385,6 +390,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     detail,
     preview,
     previewCard,
+    gitHubLinkPreview,
     checks: normalizePullRequestQuery(
       createEnvironmentRpcQueryAtomFamily(runtime, {
         label: "environment-data:pull-requests:checks",

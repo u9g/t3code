@@ -451,6 +451,22 @@ export const PullRequestPreview = Schema.Struct({
 });
 export type PullRequestPreview = typeof PullRequestPreview.Type;
 
+export const GitHubLinkPreviewInput = Schema.Struct({ url: TrimmedNonEmptyString });
+export type GitHubLinkPreviewInput = typeof GitHubLinkPreviewInput.Type;
+
+/** What a hover card shows for any github.com link, read through the server's GitHub account. */
+export const GitHubLinkPreview = Schema.Struct({
+  kind: Schema.Literals(["pull-request", "issue", "commit", "repository", "user"]),
+  /** The repository or account the link points into, with its number or short sha. */
+  context: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  description: Schema.NullOr(Schema.String),
+  state: Schema.NullOr(Schema.Literals(["open", "closed", "merged", "draft"])),
+  author: Schema.NullOr(PullRequestActor),
+  createdAt: Schema.NullOr(IsoDateTime),
+});
+export type GitHubLinkPreview = typeof GitHubLinkPreview.Type;
+
 export const PullRequestSummary = Schema.Struct({
   provider: SourceControlProviderKind,
   projectId: ProjectId,

@@ -23,16 +23,16 @@ const NONE_LOADING: ReadonlySet<UsageProviderKind> = new Set();
 
 export type UsageChartMetric = "tokens" | "cost" | "turns";
 
-/** The figure a metric charts; a turn is one model response. */
+/** The figure a metric charts; a turn is one prompt the user sent. */
 export function usageMetricValue(
-  entry: { readonly costUsd: number; readonly totalTokens: number; readonly records: number },
+  entry: { readonly costUsd: number; readonly totalTokens: number; readonly prompts: number },
   metric: UsageChartMetric,
 ): number {
   return metric === "cost"
     ? entry.costUsd
     : metric === "tokens"
       ? entry.totalTokens
-      : entry.records;
+      : entry.prompts;
 }
 
 export function formatUsageMetric(metric: UsageChartMetric): (value: number) => string {

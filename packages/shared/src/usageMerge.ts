@@ -47,6 +47,14 @@ export function isModelCostUnknown(model: ModelTotals): boolean {
   return model.records > 0 && model.unpricedRecords >= model.records;
 }
 
+export interface PeriodProviderTotals {
+  costUsd: number;
+  totalTokens: number;
+  prompts: number;
+  /** The share of `prompts` that scheduled tasks sent. */
+  scheduledPrompts: number;
+}
+
 export interface DailyTotals {
   readonly day: string;
   readonly costUsd: number;
@@ -54,10 +62,7 @@ export interface DailyTotals {
   /** Prompts the user sent. */
   readonly prompts: number;
   readonly scheduledPrompts: number;
-  readonly byProvider: ReadonlyMap<
-    UsageProviderKind,
-    { costUsd: number; totalTokens: number; prompts: number }
-  >;
+  readonly byProvider: ReadonlyMap<UsageProviderKind, PeriodProviderTotals>;
 }
 
 export interface HourlyTotals {
@@ -68,10 +73,7 @@ export interface HourlyTotals {
   /** Prompts the user sent. */
   readonly prompts: number;
   readonly scheduledPrompts: number;
-  readonly byProvider: ReadonlyMap<
-    UsageProviderKind,
-    { costUsd: number; totalTokens: number; prompts: number }
-  >;
+  readonly byProvider: ReadonlyMap<UsageProviderKind, PeriodProviderTotals>;
 }
 
 export interface CostQuality {
@@ -437,7 +439,7 @@ export function mergeUsage(
       totalTokens: number;
       prompts: number;
       scheduledPrompts: number;
-      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; prompts: number }>;
+      byProvider: Map<UsageProviderKind, PeriodProviderTotals>;
     }
   >();
   const hourlyAccumulator = new Map<
@@ -449,7 +451,7 @@ export function mergeUsage(
       totalTokens: number;
       prompts: number;
       scheduledPrompts: number;
-      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; prompts: number }>;
+      byProvider: Map<UsageProviderKind, PeriodProviderTotals>;
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
@@ -498,12 +500,17 @@ export function mergeUsage(
         totalTokens: 0,
         prompts: 0,
         scheduledPrompts: 0,
-        byProvider: new Map<
-          UsageProviderKind,
-          { costUsd: number; totalTokens: number; prompts: number }
-        >(),
+        byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
       };
       day.scheduledPrompts += entry.count;
+      const dayProvider = day.byProvider.get(entry.provider) ?? {
+        costUsd: 0,
+        totalTokens: 0,
+        prompts: 0,
+        scheduledPrompts: 0,
+      };
+      dayProvider.scheduledPrompts += entry.count;
+      day.byProvider.set(entry.provider, dayProvider);
       dailyAccumulator.set(entry.day, day);
 
       if (entry.hourStart !== undefined) {
@@ -514,12 +521,17 @@ export function mergeUsage(
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
-          byProvider: new Map<
-            UsageProviderKind,
-            { costUsd: number; totalTokens: number; prompts: number }
-          >(),
+          byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
         };
         hour.scheduledPrompts += entry.count;
+        const hourProvider = hour.byProvider.get(entry.provider) ?? {
+          costUsd: 0,
+          totalTokens: 0,
+          prompts: 0,
+          scheduledPrompts: 0,
+        };
+        hourProvider.scheduledPrompts += entry.count;
+        hour.byProvider.set(entry.provider, hourProvider);
         hourlyAccumulator.set(entry.hourStart, hour);
       }
     }
@@ -619,10 +631,7 @@ export function mergeUsage(
         totalTokens: 0,
         prompts: 0,
         scheduledPrompts: 0,
-        byProvider: new Map<
-          UsageProviderKind,
-          { costUsd: number; totalTokens: number; prompts: number }
-        >(),
+        byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
       };
       day.costUsd += bucket.costUsd;
       day.totalTokens += tokens;
@@ -631,6 +640,7 @@ export function mergeUsage(
         costUsd: 0,
         totalTokens: 0,
         prompts: 0,
+        scheduledPrompts: 0,
       };
       dayProvider.costUsd += bucket.costUsd;
       dayProvider.totalTokens += tokens;
@@ -646,10 +656,7 @@ export function mergeUsage(
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
-          byProvider: new Map<
-            UsageProviderKind,
-            { costUsd: number; totalTokens: number; prompts: number }
-          >(),
+          byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
         };
         hour.costUsd += bucket.costUsd;
         hour.totalTokens += tokens;
@@ -658,6 +665,7 @@ export function mergeUsage(
           costUsd: 0,
           totalTokens: 0,
           prompts: 0,
+          scheduledPrompts: 0,
         };
         hourProvider.costUsd += bucket.costUsd;
         hourProvider.totalTokens += tokens;

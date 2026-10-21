@@ -3,7 +3,8 @@ import type { DailyTotals } from "@t3tools/shared/usageMerge";
 
 import { PROVIDER_ORDER } from "./usageProviders";
 
-export type UsageChartMetric = "cost" | "tokens";
+/** A turn is one model response. */
+export type UsageChartMetric = "cost" | "tokens" | "turns";
 
 export interface UsageChartDay {
   readonly day: string;
@@ -21,7 +22,14 @@ export function buildChartDays(
     const totals = byDay.get(day);
     const values = PROVIDER_ORDER.map((provider) => {
       const entry = totals?.byProvider.get(provider);
-      const value = entry === undefined ? 0 : metric === "cost" ? entry.costUsd : entry.totalTokens;
+      const value =
+        entry === undefined
+          ? 0
+          : metric === "cost"
+            ? entry.costUsd
+            : metric === "tokens"
+              ? entry.totalTokens
+              : entry.records;
       return { provider, value };
     });
     return {

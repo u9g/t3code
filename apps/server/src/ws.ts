@@ -269,6 +269,7 @@ import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
+import { gitHubLinkPreview } from "./pullRequest/gitHubLinkPreview.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as IssueService from "./issue/IssueService.ts";
 import * as ThreadIssueService from "./orchestration-v2/ThreadIssueService.ts";
@@ -2968,6 +2969,7 @@ export const layerWsRpc = (
           withPullRequestViewer(input, openedPullRequestRead(pullRequests.detail(input))),
         [WS_METHODS.pullRequestsPreview]: (input) =>
           withPullRequestViewer(input, pullRequests.preview(input)),
+        [WS_METHODS.pullRequestsGitHubLinkPreview]: (input) => gitHubLinkPreview(input.url),
         [WS_METHODS.pullRequestsChecks]: (input) =>
           withPullRequestViewer(input, pullRequests.checks(input)),
         [WS_METHODS.pullRequestsActivity]: (input) =>

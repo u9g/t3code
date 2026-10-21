@@ -104,7 +104,7 @@ export function UsageModelDialog({
               daily={usage.daily}
               hours={chartWindow.hours}
               hourly={usage.hourly}
-              metric={costUnknown ? "tokens" : metric}
+              metric={costUnknown && metric === "cost" ? "tokens" : metric}
               referenceTime={chartWindow.referenceTime}
               resolution={chartWindow.resolution}
               timeZone={chartWindow.timeZone}

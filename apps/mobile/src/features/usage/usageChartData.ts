@@ -3,7 +3,7 @@ import type { DailyTotals } from "@t3tools/shared/usageMerge";
 
 import { PROVIDER_ORDER } from "./usageProviders";
 
-/** A turn is one model response. */
+/** A turn is one prompt the user sent. */
 export type UsageChartMetric = "cost" | "tokens" | "turns";
 
 export interface UsageChartDay {
@@ -29,7 +29,7 @@ export function buildChartDays(
             ? entry.costUsd
             : metric === "tokens"
               ? entry.totalTokens
-              : entry.records;
+              : entry.prompts;
       return { provider, value };
     });
     return {

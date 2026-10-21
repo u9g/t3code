@@ -86,6 +86,8 @@ export const CodexScanState = Schema.Struct({
   sawThreadSettings: Schema.mutableKey(Schema.Boolean),
   suppressingForkCopies: Schema.mutableKey(Schema.Boolean),
   forkCopyAnchorMs: Schema.mutableKey(Schema.Finite),
+  /** Turns started since the last emitted record; each turn is one prompt. */
+  pendingPrompts: Schema.mutableKey(Schema.Int),
 });
 export type CodexScanState = typeof CodexScanState.Type;
 
@@ -103,6 +105,7 @@ export function initialCodexScanState(): CodexScanState {
     sawThreadSettings: false,
     suppressingForkCopies: false,
     forkCopyAnchorMs: 0,
+    pendingPrompts: 0,
   };
 }
 
@@ -162,6 +165,12 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
 
   if (record["type"] === "turn_context") {
     if (typeof payloadRecord["model"] === "string") state.model = payloadRecord["model"];
+    const turnTimestampMs = parseTimestampMs(record["timestamp"]);
+    const copiedFromFork =
+      state.suppressingForkCopies &&
+      turnTimestampMs !== null &&
+      turnTimestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS;
+    if (!copiedFromFork) state.pendingPrompts += 1;
     // Model carry is useful for usage, but history recovery needs this context's own identity.
     state.turnId =
       typeof payloadRecord["turn_id"] === "string" &&
@@ -291,6 +300,8 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
   };
 
   if (totalTokens(totals) === 0) return null;
+  const prompts = state.pendingPrompts;
+  state.pendingPrompts = 0;
 
   return {
     provider: "codex",
@@ -307,6 +318,7 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): UsageRecord |
       ? { unresolvedServiceTierTurnId: state.turnId }
       : {}),
     dedupeKey: null,
+    ...(prompts > 0 ? { prompts } : {}),
   };
 }
 

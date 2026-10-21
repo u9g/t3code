@@ -21,6 +21,7 @@ const model = (
     reasoningTokens: 0,
   },
   records: 1,
+  prompts: 0,
   unpricedRecords: 0,
   unpricedTokens: 0,
   costShare: 0,

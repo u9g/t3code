@@ -149,7 +149,7 @@ function UsageScreen(props: {
         day: hour.hourStart,
         costUsd: hour.costUsd,
         totalTokens: hour.totalTokens,
-        records: hour.records,
+        prompts: hour.prompts,
         byProvider: hour.byProvider,
       }))
     : merged.daily;
@@ -558,7 +558,7 @@ function ChartCard(props: {
             ? `${formatUsd(merged.costUsd)}*`
             : metric === "tokens"
               ? formatTokens(merged.totalTokens)
-              : formatCount(merged.records)}
+              : formatCount(merged.prompts)}
         </Text>
         <Text className="text-sm text-foreground-muted">
           {metric === "cost"
@@ -628,7 +628,7 @@ function ProviderSection(props: {
       ? b.costUsd - a.costUsd
       : metric === "tokens"
         ? b.totalTokens - a.totalTokens
-        : b.records - a.records,
+        : b.prompts - a.prompts,
   );
   const rows: Array<
     | { readonly kind: "usage"; readonly provider: (typeof ordered)[number] }
@@ -669,8 +669,8 @@ function ProviderSection(props: {
             ? provider.costShare
             : metric === "tokens"
               ? provider.tokenShare
-              : merged.records > 0
-                ? provider.records / merged.records
+              : merged.prompts > 0
+                ? provider.prompts / merged.prompts
                 : 0;
         return (
           <View
@@ -690,7 +690,7 @@ function ProviderSection(props: {
                   ? formatUsd(provider.costUsd)
                   : metric === "tokens"
                     ? formatTokens(provider.totalTokens)
-                    : formatCount(provider.records)}
+                    : formatCount(provider.prompts)}
               </Text>
             </View>
             <View className="h-1 flex-row overflow-hidden rounded-full bg-subtle">
@@ -867,7 +867,7 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
       ? b.costUsd - a.costUsd || b.totalTokens - a.totalTokens
       : metric === "tokens"
         ? b.totalTokens - a.totalTokens || b.costUsd - a.costUsd
-        : b.records - a.records,
+        : b.prompts - a.prompts,
   );
 
   return (
@@ -891,7 +891,7 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
             </Text>
             <Text className="text-sm text-foreground-muted">
               {metric === "turns"
-                ? `${formatPercent(merged.records > 0 ? model.records / merged.records : 0)} of turns · ${formatTokens(model.totalTokens)} tokens`
+                ? `${formatPercent(merged.prompts > 0 ? model.prompts / merged.prompts : 0)} of turns · ${formatTokens(model.totalTokens)} tokens`
                 : metric === "tokens"
                   ? `${formatPercent(model.tokenShare)} of tokens · ${
                       isModelCostUnknown(model) ? "no known rates" : formatUsd(model.costUsd)
@@ -903,7 +903,7 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
           </View>
           <Text className="text-base tabular-nums text-foreground">
             {metric === "turns"
-              ? formatCount(model.records)
+              ? formatCount(model.prompts)
               : metric === "tokens"
                 ? formatTokens(model.totalTokens)
                 : isModelCostUnknown(model)

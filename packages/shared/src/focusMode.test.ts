@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { extractFocusIntro, extractFocusLinks, splitFocusSections } from "./focusMode.ts";
+import {
+  extractFocusIntro,
+  extractFocusLinks,
+  isFocusVideoLink,
+  splitFocusSections,
+} from "./focusMode.ts";
 
 describe("extractFocusLinks", () => {
   it("collects bare, markdown, and autolinked github URLs once each", () => {
@@ -38,6 +43,14 @@ describe("extractFocusLinks", () => {
 
   it("returns nothing when no github URL is present", () => {
     expect(extractFocusLinks("Done. Tests pass.")).toEqual([]);
+  });
+});
+
+describe("isFocusVideoLink", () => {
+  it("matches bare and markdown .mp4 links only", () => {
+    expect(isFocusVideoLink("[demo video](/Users/me/demo.mp4)")).toBe(true);
+    expect(isFocusVideoLink("https://cdn.example.com/a/demo.mp4?sig=1")).toBe(true);
+    expect(isFocusVideoLink("https://github.com/acme/app/pull/12")).toBe(false);
   });
 });
 

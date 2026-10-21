@@ -18,6 +18,10 @@ export function extractFocusLinks(text: string): ReadonlyArray<string> {
   return [...links];
 }
 
+export function isFocusVideoLink(link: string): boolean {
+  return /\.mp4(?:[?#)]|$)/iu.test(link);
+}
+
 /** The reply's first prose paragraph: headings, lists, quotes, tables and code blocks are skipped. */
 export function extractFocusIntro(text: string): string | null {
   for (const block of text.split(/\n\s*\n/u)) {

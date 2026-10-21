@@ -1,9 +1,13 @@
-import { ArrowLeftIcon, ChartNoAxesColumnIcon, SettingsIcon } from "lucide-react";
+import { ArrowLeftIcon, ChartNoAxesColumnIcon, FocusIcon, SettingsIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { memo } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
-import { useEnvironmentIdentificationMode } from "../../hooks/useSettings";
+import {
+  updateClientSettings,
+  useClientSettings,
+  useEnvironmentIdentificationMode,
+} from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { usePullRequestsSupported } from "../../state/environments";
 import { T3Wordmark } from "../T3Wordmark";
@@ -135,17 +139,25 @@ function SidebarUtilityItem({
   icon,
   label,
   onClick,
+  pressed,
 }: {
   icon: ReactNode;
   label: string;
   onClick: () => void;
+  pressed?: boolean;
 }) {
   return (
     <SidebarMenuItem className="shrink-0">
       <Tooltip>
         <TooltipTrigger
           render={
-            <SidebarMenuButton aria-label={label} onClick={onClick} size="icon">
+            <SidebarMenuButton
+              aria-label={label}
+              aria-pressed={pressed}
+              isActive={pressed ?? false}
+              onClick={onClick}
+              size="icon"
+            >
               {icon}
             </SidebarMenuButton>
           }
@@ -164,6 +176,7 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     select: (location) => isSidebarUtilityPage(location.pathname),
   });
   const pullRequestsSupported = usePullRequestsSupported();
+  const focusModeEnabled = useClientSettings((settings) => settings.focusModeEnabled);
   const closeMobileSidebar = () => {
     if (isMobile) {
       setOpenMobile(false);
@@ -220,6 +233,12 @@ export const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"
             onClick={handleUsageClick}
+          />
+          <SidebarUtilityItem
+            icon={<FocusIcon />}
+            label="Focus mode"
+            pressed={focusModeEnabled}
+            onClick={() => void updateClientSettings({ focusModeEnabled: !focusModeEnabled })}
           />
         </>
       )}

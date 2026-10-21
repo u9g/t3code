@@ -50,6 +50,10 @@ const actor = (account: typeof Account.Type | null): PullRequestActor | null =>
       };
 
 /** github.com paths that are not accounts, so a one-segment link to them has no preview. */
+/** A file link's anchor: one line, or a range, optionally with columns. */
+const LINE_ANCHOR = /^#L(\d+)(?:C\d+)?(?:-L(\d+)(?:C\d+)?)?$/u;
+const MAX_CODE_LINES = 40;
+
 const RESERVED_TOP_LEVEL = new Set([
   "about",
   "apps",
@@ -74,7 +78,7 @@ export const gitHubLinkPreview = Effect.fn("PullRequests.gitHubLinkPreview")(
   function* (url: string) {
     const parsed = URL.parse(url);
     if (parsed === null || !/^(www\.)?github\.com$/u.test(parsed.hostname)) return null;
-    const [owner, repo, section, id] = parsed.pathname.split("/").filter(Boolean);
+    const [owner, repo, section, id, ...rest] = parsed.pathname.split("/").filter(Boolean);
     if (owner === undefined) return null;
 
     const github = yield* GitHubRest.GitHubRest;
@@ -141,6 +145,42 @@ export const gitHubLinkPreview = Effect.fn("PullRequests.gitHubLinkPreview")(
             ? null
             : { login: commit.commit.author.name, name: null, avatarUrl: null }),
         createdAt: commit.commit.author?.date ?? null,
+      } satisfies GitHubLinkPreview;
+    }
+
+    if (section === "blob" && id !== undefined && rest.length > 0) {
+      const path = rest.join("/");
+      const anchor = LINE_ANCHOR.exec(parsed.hash);
+      const start = anchor === null ? 0 : Number(anchor[1]);
+      const end = anchor === null ? 0 : Math.max(start, Number(anchor[2] ?? anchor[1]));
+      const code =
+        start > 0
+          ? yield* github
+              .rest({
+                host: "github.com",
+                operation: "linkPreview",
+                path: `repos/${repository}/contents/${path}?ref=${id}`,
+                accept: "application/vnd.github.raw+json",
+              })
+              .pipe(
+                Effect.map((response) => ({
+                  startLine: start,
+                  text: response.body
+                    .split("\n")
+                    .slice(start - 1, Math.min(end, start + MAX_CODE_LINES - 1))
+                    .join("\n"),
+                })),
+              )
+          : undefined;
+      return {
+        kind: "file",
+        context: `${repository} @ ${/^[0-9a-f]{40}$/u.test(id) ? id.slice(0, 7) : id}`,
+        title: decodeURIComponent(path),
+        description: null,
+        state: null,
+        author: null,
+        createdAt: null,
+        ...(code === undefined ? {} : { code }),
       } satisfies GitHubLinkPreview;
     }
 

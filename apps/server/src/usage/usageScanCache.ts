@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import { CLAUDE_SYNTHETIC_MODEL } from "../provider/Drivers/claudeUsage.ts";
 import { GUARD_LENGTH, type TranscriptParsePosition } from "./usageTranscriptReader.ts";
 
-const USAGE_SCAN_CACHE_VERSION = 9 as const;
+const USAGE_SCAN_CACHE_VERSION = 10 as const;
 const SPEED_COMPATIBLE_SINCE_VERSION = 4;
 
 /**
@@ -17,8 +17,9 @@ const SPEED_COMPATIBLE_SINCE_VERSION = 4;
  * replace it, dropping saved usage for deleted transcripts. Separate files keep
  * both.
  */
-export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v9.json";
+export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v10.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [
+  "usage-scan-cache-v9.json",
   "usage-scan-cache-v8.json",
   "usage-scan-cache-v7.json",
   "usage-scan-cache-v6.json",
@@ -55,7 +56,8 @@ type SerializedRecord = readonly [
   reportedCostUsd: number | null,
   speed: number,
   rateModelIndex?: number | null,
-  unresolvedServiceTierTurnId?: string,
+  unresolvedServiceTierTurnId?: string | null,
+  prompts?: number,
 ];
 
 interface SerializedFile {
@@ -114,9 +116,11 @@ function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile 
     record.rateModel === undefined
       ? null
       : intern(tables.models, tables.modelIndex, record.rateModel),
-    ...(record.unresolvedServiceTierTurnId === undefined
-      ? ([] as const)
-      : ([record.unresolvedServiceTierTurnId] as const)),
+    ...(record.prompts !== undefined
+      ? ([record.unresolvedServiceTierTurnId ?? null, record.prompts] as const)
+      : record.unresolvedServiceTierTurnId === undefined
+        ? ([] as const)
+        : ([record.unresolvedServiceTierTurnId] as const)),
   ];
   return {
     s: entry.size,
@@ -222,8 +226,10 @@ export function decodeScanCache(
         reportedCostUsd,
         speedIndex,
         rateModelIndex,
-        unresolvedServiceTierTurnId,
+        unresolvedServiceTierTurnIdSlot,
+        prompts,
       ] = row as SerializedRecord;
+      const unresolvedServiceTierTurnId = unresolvedServiceTierTurnIdSlot ?? undefined;
       const speed = typeof speedIndex === "number" ? SPEEDS[speedIndex] : undefined;
 
       const model = typeof modelIndex === "number" ? models[modelIndex] : undefined;
@@ -235,6 +241,7 @@ export function decodeScanCache(
         (unresolvedServiceTierTurnId !== undefined &&
           typeof unresolvedServiceTierTurnId !== "string") ||
         (rateModelIndex != null && rateModel === undefined) ||
+        (prompts !== undefined && !(Number.isSafeInteger(prompts) && prompts > 0)) ||
         !Number.isFinite(uncached) ||
         !Number.isFinite(cached) ||
         !Number.isFinite(cacheCreation) ||
@@ -268,6 +275,7 @@ export function decodeScanCache(
           ? { unresolvedServiceTierTurnId }
           : {}),
         dedupeKey: typeof dedupeKey === "string" ? dedupeKey : null,
+        ...(prompts === undefined ? {} : { prompts }),
       });
     }
     return records;
@@ -302,11 +310,13 @@ export function decodeScanCache(
       continue;
     }
     // Keep history for deleted rollouts, but re-parse incompatible reducer state.
-    // v9 repairs skipped initial Codex requests; clean v8 entries can still resume.
+    // v9 repairs skipped initial Codex requests (clean v8 entries can still resume);
+    // v10 counts prompts for Claude and Codex.
     const legacy =
       format.state !== undefined &&
       (version < 6 ||
-        (entry.p === "codex" && (version < 8 || (version < 9 && malformedRecords > 0))));
+        (entry.p === "codex" && (version < 8 || (version < 9 && malformedRecords > 0))) ||
+        ((entry.p === "claude" || entry.p === "codex") && version < 10));
     // A corrupt state disqualifies the entry: resuming with it would attach
     // appended usage to the wrong model or replay fork-copied history.
     if (!legacy && !isValidState.get(entry.p)?.(entry.cs)) continue;

@@ -1,5 +1,6 @@
 import type { ClaudeSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Path from "effect/Path";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
@@ -20,20 +21,53 @@ export const CLAUDE_SYNTHETIC_MODEL = "<synthetic>";
  * the same complete `usage` object for the parent message. Summing them overcounts by roughly
  * 2.4x on a real workload, so the caller must drop repeats by `dedupeKey` and keep the first.
  */
-export function parseClaudeLine(line: string): UsageRecord | null {
+export function parseClaudeLine(line: string, state: ClaudeScanState): UsageRecord | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
   } catch {
     return null;
   }
-  return parseClaudeRecord(parsed);
+  return parseClaudeRecord(parsed, state);
 }
 
-function parseClaudeRecord(parsed: unknown): UsageRecord | null {
+/** Prompts seen since the session's last response; the next response carries them. */
+export const ClaudeScanState = Schema.Struct({
+  pendingPrompts: Schema.mutableKey(Schema.Int),
+});
+export type ClaudeScanState = typeof ClaudeScanState.Type;
+
+// Claude Code records these as user messages, but they are its own output, not a prompt.
+const AUTOMATED_USER_TEXT =
+  /^(<(task-notification|command-[a-z]+|local-command-[a-z]+|bash-[a-z]+|system-reminder)>|\[Request interrupted)/u;
+
+/** A message the user sent: not a tool result, subagent, meta note or compaction summary. */
+function isUserPrompt(record: Record<string, unknown>): boolean {
+  if (record["isSidechain"] === true || record["isMeta"] === true) return false;
+  if (record["isCompactSummary"] === true) return false;
+  const message = record["message"];
+  if (typeof message !== "object" || message === null) return false;
+  const content = (message as Record<string, unknown>)["content"];
+  if (typeof content === "string") return !AUTOMATED_USER_TEXT.test(content.trimStart());
+  if (!Array.isArray(content)) return false;
+  const types = new Set(
+    content.map((block) =>
+      typeof block === "object" && block !== null
+        ? (block as Record<string, unknown>)["type"]
+        : null,
+    ),
+  );
+  return !types.has("tool_result") && (types.has("text") || types.has("image"));
+}
+
+function parseClaudeRecord(parsed: unknown, state: ClaudeScanState): UsageRecord | null {
   if (typeof parsed !== "object" || parsed === null) return null;
 
   const record = parsed as Record<string, unknown>;
+  if (record["type"] === "user") {
+    if (isUserPrompt(record)) state.pendingPrompts += 1;
+    return null;
+  }
   if (record["type"] !== "assistant") return null;
 
   const message = record["message"];
@@ -56,6 +90,8 @@ function parseClaudeRecord(parsed: unknown): UsageRecord | null {
     messageId === null && requestId === null ? null : `${messageId ?? ""}:${requestId ?? ""}`;
 
   const cost = record["costUSD"];
+  const prompts = state.pendingPrompts;
+  state.pendingPrompts = 0;
 
   return {
     provider: "claude",
@@ -73,24 +109,29 @@ function parseClaudeRecord(parsed: unknown): UsageRecord | null {
     reportedCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
     speed: usageRecord["speed"] === "fast" ? "fast" : "standard",
     dedupeKey,
+    ...(prompts > 0 ? { prompts } : {}),
   };
 }
 
 const orEmpty = (record: UsageRecord | null): readonly UsageRecord[] =>
   record === null ? [] : [record];
 
-export const claudeUsageFormat: TranscriptUsageFormat<void> = {
+export const claudeUsageFormat: TranscriptUsageFormat<ClaudeScanState> = {
   selectFields: {
     type: true,
     timestamp: true,
     requestId: true,
     sessionId: true,
     costUSD: true,
-    message: { id: true, model: true, usage: true },
+    isSidechain: true,
+    isMeta: true,
+    isCompactSummary: true,
+    message: { id: true, model: true, usage: true, content: true },
   },
-  usageMarkers: ['"usage"'],
-  parseLine: (line) => orEmpty(parseClaudeLine(line)),
-  parseProjected: (projected) => orEmpty(parseClaudeRecord(projected)),
+  usageMarkers: ['"usage"', '"type":"user"'],
+  parseLine: (line, state) => orEmpty(parseClaudeLine(line, state)),
+  parseProjected: (projected, state) => orEmpty(parseClaudeRecord(projected, state)),
+  state: { initial: () => ({ pendingPrompts: 0 }), schema: ClaudeScanState },
 };
 
 export const claudeUsageReader: ProviderUsageReader<ClaudeSettings, Path.Path> = {

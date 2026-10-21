@@ -30,6 +30,16 @@ describe("parseCodexLine", () => {
         },
       },
     });
+  it("counts each turn as one prompt, carried on the turn's first usage record", () => {
+    const state = initialCodexScanState();
+    parseCodexLine(sessionMeta, state);
+    parseCodexLine(turnContext, state);
+    expect(parseCodexLine(tokenCount(100, 0, 10, 0), state)?.prompts).toBe(1);
+    expect(parseCodexLine(tokenCount(200, 0, 20, 0), state)?.prompts).toBeUndefined();
+    parseCodexLine(turnContext, state);
+    expect(parseCodexLine(tokenCount(300, 0, 30, 0), state)?.prompts).toBe(1);
+  });
+
   const counters = (input: number, output: number) => ({
     input_tokens: input,
     cached_input_tokens: 0,

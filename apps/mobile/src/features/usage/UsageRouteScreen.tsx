@@ -156,6 +156,7 @@ function UsageScreen(props: {
         costUsd: hour.costUsd,
         totalTokens: hour.totalTokens,
         prompts: hour.prompts,
+        scheduledPrompts: hour.scheduledPrompts,
         byProvider: hour.byProvider,
       }))
     : merged.daily;
@@ -570,7 +571,9 @@ function ChartCard(props: {
         <Text className="text-sm text-foreground-muted">
           {metric === "cost"
             ? "* if billed at full API rate"
-            : `Across ${formatCount(merged.sessions)} sessions`}
+            : metric === "turns"
+              ? `${formatCount(merged.scheduledPrompts)} scheduled · across ${formatCount(merged.sessions)} sessions`
+              : `Across ${formatCount(merged.sessions)} sessions`}
         </Text>
       </View>
 
@@ -712,7 +715,7 @@ function ProviderSection(props: {
                 ? `${formatPercent(share)} of cost · ${formatTokens(provider.totalTokens)} tokens`
                 : metric === "tokens"
                   ? `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`
-                  : `${formatPercent(share)} of turns · ${formatTokens(provider.totalTokens)} tokens`}
+                  : `${formatPercent(share)} of turns · ${formatCount(provider.scheduledPrompts)} scheduled · ${formatTokens(provider.totalTokens)} tokens`}
             </Text>
           </View>
         );
@@ -898,7 +901,7 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
             </Text>
             <Text className="text-sm text-foreground-muted">
               {metric === "turns"
-                ? `${formatPercent(merged.prompts > 0 ? model.prompts / merged.prompts : 0)} of turns · ${formatTokens(model.totalTokens)} tokens`
+                ? `${formatPercent(merged.prompts > 0 ? model.prompts / merged.prompts : 0)} of turns · ${formatCount(model.scheduledPrompts)} scheduled`
                 : metric === "tokens"
                   ? `${formatPercent(model.tokenShare)} of tokens · ${
                       isModelCostUnknown(model) ? "no known rates" : formatUsd(model.costUsd)

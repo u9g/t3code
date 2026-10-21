@@ -50,7 +50,11 @@ export interface DailyTotals {
   readonly day: string;
   readonly costUsd: number;
   readonly totalTokens: number;
-  readonly byProvider: ReadonlyMap<UsageProviderKind, { costUsd: number; totalTokens: number }>;
+  readonly records: number;
+  readonly byProvider: ReadonlyMap<
+    UsageProviderKind,
+    { costUsd: number; totalTokens: number; records: number }
+  >;
 }
 
 export interface HourlyTotals {
@@ -58,7 +62,11 @@ export interface HourlyTotals {
   readonly hourStart: string;
   readonly costUsd: number;
   readonly totalTokens: number;
-  readonly byProvider: ReadonlyMap<UsageProviderKind, { costUsd: number; totalTokens: number }>;
+  readonly records: number;
+  readonly byProvider: ReadonlyMap<
+    UsageProviderKind,
+    { costUsd: number; totalTokens: number; records: number }
+  >;
 }
 
 export interface CostQuality {
@@ -372,7 +380,8 @@ export function mergeUsage(
     {
       costUsd: number;
       totalTokens: number;
-      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number }>;
+      records: number;
+      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; records: number }>;
     }
   >();
   const hourlyAccumulator = new Map<
@@ -382,7 +391,8 @@ export function mergeUsage(
       hourStart: string;
       costUsd: number;
       totalTokens: number;
-      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number }>;
+      records: number;
+      byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; records: number }>;
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
@@ -478,13 +488,23 @@ export function mergeUsage(
       const day = dailyAccumulator.get(bucket.day) ?? {
         costUsd: 0,
         totalTokens: 0,
-        byProvider: new Map<UsageProviderKind, { costUsd: number; totalTokens: number }>(),
+        records: 0,
+        byProvider: new Map<
+          UsageProviderKind,
+          { costUsd: number; totalTokens: number; records: number }
+        >(),
       };
       day.costUsd += bucket.costUsd;
       day.totalTokens += tokens;
-      const dayProvider = day.byProvider.get(bucket.provider) ?? { costUsd: 0, totalTokens: 0 };
+      day.records += bucket.records;
+      const dayProvider = day.byProvider.get(bucket.provider) ?? {
+        costUsd: 0,
+        totalTokens: 0,
+        records: 0,
+      };
       dayProvider.costUsd += bucket.costUsd;
       dayProvider.totalTokens += tokens;
+      dayProvider.records += bucket.records;
       day.byProvider.set(bucket.provider, dayProvider);
       dailyAccumulator.set(bucket.day, day);
 
@@ -494,16 +514,23 @@ export function mergeUsage(
           hourStart: bucket.hourStart,
           costUsd: 0,
           totalTokens: 0,
-          byProvider: new Map<UsageProviderKind, { costUsd: number; totalTokens: number }>(),
+          records: 0,
+          byProvider: new Map<
+            UsageProviderKind,
+            { costUsd: number; totalTokens: number; records: number }
+          >(),
         };
         hour.costUsd += bucket.costUsd;
         hour.totalTokens += tokens;
+        hour.records += bucket.records;
         const hourProvider = hour.byProvider.get(bucket.provider) ?? {
           costUsd: 0,
           totalTokens: 0,
+          records: 0,
         };
         hourProvider.costUsd += bucket.costUsd;
         hourProvider.totalTokens += tokens;
+        hourProvider.records += bucket.records;
         hour.byProvider.set(bucket.provider, hourProvider);
         hourlyAccumulator.set(bucket.hourStart, hour);
       }
@@ -544,6 +571,7 @@ export function mergeUsage(
       day,
       costUsd: totals.costUsd,
       totalTokens: totals.totalTokens,
+      records: totals.records,
       byProvider: totals.byProvider,
     }))
     .sort((a, b) => a.day.localeCompare(b.day));

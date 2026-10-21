@@ -84,7 +84,12 @@ import {
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { UsageLimitsSection } from "./UsageLimits";
 import { UsagePriceOverrides } from "./UsagePriceOverrides";
-import { UsageProviderChart } from "./UsageProviderChart";
+import {
+  UsageProviderChart,
+  formatUsageMetric,
+  usageMetricValue,
+  type UsageChartMetric,
+} from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
 import { UsageShareBar } from "./UsageShareBar";
 import {
@@ -556,7 +561,7 @@ export function UsagePage() {
                 days={days}
                 hours={hours}
                 showingKept={showingKept}
-                metric={metric === "tokens" ? "tokens" : "cost"}
+                metric={metric}
                 selectedEnvironments={selectedEnvironments}
                 hiddenProviders={hiddenProviders}
                 refreshingUsage={refreshingUsage}
@@ -576,7 +581,7 @@ export function UsagePage() {
         <UsageModelDialogHost
           models={merged.models}
           environments={selectedEnvironments}
-          metric={metric === "tokens" ? "tokens" : "cost"}
+          metric={metric}
           chartWindow={{
             days,
             hours,
@@ -624,7 +629,7 @@ function UsageOverview({
   readonly days: readonly string[];
   readonly hours: readonly string[];
   readonly showingKept: boolean;
-  readonly metric: "tokens" | "cost";
+  readonly metric: UsageChartMetric;
   readonly selectedEnvironments: readonly EnvironmentUsageStatus[];
   readonly hiddenProviders: ReadonlySet<UsageProviderKind>;
   readonly refreshingUsage: boolean;
@@ -665,11 +670,14 @@ function UsageOverview({
   const breakdownModels =
     breakdown === "model" && metric === "tokens"
       ? sortModelsByTokens(merged.models)
-      : merged.models;
+      : breakdown === "model" && metric === "turns"
+        ? merged.models.toSorted((left, right) => right.records - left.records)
+        : merged.models;
   const breakdownPeak = breakdownModels.reduce(
-    (peak, model) => Math.max(peak, metric === "tokens" ? model.totalTokens : model.costUsd),
+    (peak, model) => Math.max(peak, usageMetricValue(model, metric)),
     0,
   );
+  const turnShare = (records: number) => (merged.records > 0 ? records / merged.records : 0);
   const cursorInsertAt =
     Math.max(activeProviders.indexOf("codex"), activeProviders.indexOf("claude")) + 1;
   const summaryRows: ReadonlyArray<
@@ -701,7 +709,7 @@ function UsageOverview({
                 figureClass(loadingPartial),
               )}
             >
-              {metric === "cost" ? formatUsd(merged.costUsd) : formatTokens(merged.totalTokens)}
+              {formatUsageMetric(metric)(usageMetricValue(merged, metric))}
             </span>
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <span>
@@ -749,7 +757,12 @@ function UsageOverview({
             }
             const provider = row.provider;
             const totals = merged.providers.find((entry) => entry.provider === provider);
-            const share = metric === "cost" ? (totals?.costShare ?? 0) : (totals?.tokenShare ?? 0);
+            const share =
+              metric === "cost"
+                ? (totals?.costShare ?? 0)
+                : metric === "tokens"
+                  ? (totals?.tokenShare ?? 0)
+                  : turnShare(totals?.records ?? 0);
             const providerSessions = totals?.sessions ?? 0;
             const sessionLabel = `${formatCount(providerSessions)} ${
               providerSessions === 1 ? "session" : "sessions"
@@ -789,9 +802,9 @@ function UsageOverview({
                   >
                     {awaitingData
                       ? "-"
-                      : metric === "cost"
-                        ? formatUsd(totals?.costUsd ?? 0)
-                        : formatTokens(totals?.totalTokens ?? 0)}
+                      : formatUsageMetric(metric)(
+                          totals === undefined ? 0 : usageMetricValue(totals, metric),
+                        )}
                   </span>
                 </div>
                 <span
@@ -803,7 +816,9 @@ function UsageOverview({
                 >
                   {metric === "cost"
                     ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
-                    : `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`}
+                    : metric === "tokens"
+                      ? `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`
+                      : `${formatPercent(share)} of turns · ${formatTokens(totals?.totalTokens ?? 0)} tokens`}
                 </span>
               </div>
             );
@@ -812,7 +827,7 @@ function UsageOverview({
 
         <div className="flex min-w-0 flex-col gap-3">
           <h2 className="text-sm font-medium text-foreground">
-            {shownHourly ? "Hourly" : "Daily"} {metric === "tokens" ? "processed tokens" : "cost"}
+            {shownHourly ? "Hourly" : "Daily"} {metric === "tokens" ? "processed tokens" : metric}
           </h2>
           <UsageProviderChart
             providers={activeProviders}
@@ -865,7 +880,7 @@ function UsageOverview({
         <section
           className={cn("grid gap-x-12 gap-y-8 lg:grid-cols-2", figureClass(loadingPartial))}
         >
-          {metric === "tokens" ? (
+          {metric !== "cost" ? (
             <UsageShareBar
               label="Tokens by type"
               segments={tokenTypeSegments(merged)}
@@ -925,21 +940,23 @@ function UsageOverview({
                 <th className="py-2 pl-6 font-normal">Cost</th>
                 <th className="hidden py-2 pl-6 font-normal sm:table-cell">Share</th>
                 <th className="py-2 pl-6 font-normal">Tokens</th>
+                <th className="py-2 pl-6 font-normal">Turns</th>
               </tr>
             </thead>
             <tbody>
               {breakdownModels.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={6} className="py-6 text-center text-muted-foreground">
                     No activity in this window.
                   </td>
                 </tr>
               ) : (
                 breakdownModels.map((model, index) => {
                   const key = `${model.provider}:${model.model}`;
-                  const value = metric === "tokens" ? model.totalTokens : model.costUsd;
+                  const value = usageMetricValue(model, metric);
                   const hasBar = value > 0 && breakdownPeak > 0;
-                  const share = modelShare(model, metric === "tokens" ? "tokens" : "cost");
+                  const share =
+                    metric === "turns" ? turnShare(model.records) : modelShare(model, metric);
                   const rowFigures = figureClass(loadingProviders.has(model.provider));
                   return (
                     <tr
@@ -984,6 +1001,9 @@ function UsageOverview({
                       <td className={cn("py-2.5 pl-6", rowFigures)}>
                         {formatTokens(model.totalTokens)}
                       </td>
+                      <td className={cn("py-2.5 pl-6", rowFigures)}>
+                        {formatCount(model.records)}
+                      </td>
                     </tr>
                   );
                 })
@@ -1011,13 +1031,14 @@ function UsageOverview({
                   ))}
                   <th className="py-2 pl-4 text-right font-normal">Total</th>
                   <th className="py-2 pl-4 text-right font-normal">Tokens</th>
+                  <th className="py-2 pl-4 text-right font-normal">Turns</th>
                 </tr>
               </thead>
               <tbody>
                 {breakdownPeriods.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={activeProviders.length + 3}
+                      colSpan={activeProviders.length + 4}
                       className="py-6 text-center text-muted-foreground"
                     >
                       No activity in this window.
@@ -1060,6 +1081,14 @@ function UsageOverview({
                         )}
                       >
                         {formatTokens(period.totalTokens)}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-2 pl-4 text-right text-muted-foreground tabular-nums",
+                          figureClass(loadingPartial),
+                        )}
+                      >
+                        {formatCount(period.records)}
                       </td>
                     </tr>
                   ))

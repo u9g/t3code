@@ -97,6 +97,8 @@ export function TextAppearanceSection() {
     setMonoFontId,
     mathRenderingEnabled,
     setMathRenderingEnabled,
+    focusModeEnabled,
+    setFocusModeEnabled,
   } = useAppearancePreferences();
 
   return (
@@ -138,6 +140,13 @@ export function TextAppearanceSection() {
         label={gt("Render math")}
         value={mathRenderingEnabled}
         onValueChange={setMathRenderingEnabled}
+      />
+      <SettingsSwitchRow
+        disabled={!isReady}
+        icon="arrow.down.right.and.arrow.up.left"
+        label={gt("Focus mode")}
+        value={focusModeEnabled}
+        onValueChange={setFocusModeEnabled}
       />
     </SettingsSection>
   );

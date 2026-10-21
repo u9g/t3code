@@ -161,6 +161,7 @@ export interface Preferences {
   readonly crashReportsEnabled?: boolean;
   /** Unset means on: connection traces are sent unless the user turns them off. */
   readonly connectionTracesEnabled?: boolean;
+  readonly focusModeEnabled?: boolean;
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
   readonly collapsedProjectGroups?: readonly string[];
   readonly dismissedDatabaseStorageNotices?: readonly string[];
@@ -260,6 +261,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     mathRenderingEnabled?: boolean;
     crashReportsEnabled?: boolean;
     connectionTracesEnabled?: boolean;
+    focusModeEnabled?: boolean;
     connectOnboardingOptOutAccounts?: ReadonlyArray<string>;
     collapsedProjectGroups?: readonly string[];
     dismissedDatabaseStorageNotices?: readonly string[];
@@ -367,6 +369,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.connectionTracesEnabled === "boolean") {
     preferences.connectionTracesEnabled = parsed.connectionTracesEnabled;
+  }
+  if (typeof parsed.focusModeEnabled === "boolean") {
+    preferences.focusModeEnabled = parsed.focusModeEnabled;
   }
   if (Array.isArray(parsed.connectOnboardingOptOutAccounts)) {
     preferences.connectOnboardingOptOutAccounts = parsed.connectOnboardingOptOutAccounts.filter(

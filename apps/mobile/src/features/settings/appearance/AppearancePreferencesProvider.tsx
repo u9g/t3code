@@ -88,6 +88,8 @@ interface AppearancePreferencesContextValue {
   readonly setCodeWordBreak: (value: boolean) => void;
   readonly mathRenderingEnabled: boolean;
   readonly setMathRenderingEnabled: (value: boolean) => void;
+  readonly focusModeEnabled: boolean;
+  readonly setFocusModeEnabled: (value: boolean) => void;
 }
 
 const AppearancePreferencesContext = createContext<AppearancePreferencesContextValue | null>(null);
@@ -327,6 +329,9 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   const setMathRenderingEnabled = (value: boolean) =>
     updatePreferences({ mathRenderingEnabled: value });
 
+  const focusModeEnabled = storedPreferences?.focusModeEnabled === true;
+  const setFocusModeEnabled = (value: boolean) => updatePreferences({ focusModeEnabled: value });
+
   const value = useMemo(
     (): AppearancePreferencesContextValue => ({
       appearance,
@@ -357,6 +362,8 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       setCodeWordBreak,
       mathRenderingEnabled,
       setMathRenderingEnabled,
+      focusModeEnabled,
+      setFocusModeEnabled,
     }),
     [
       appearance,
@@ -384,6 +391,8 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
       setCodeWordBreak,
       mathRenderingEnabled,
       setMathRenderingEnabled,
+      focusModeEnabled,
+      setFocusModeEnabled,
     ],
   );
 

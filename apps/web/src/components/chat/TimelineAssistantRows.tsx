@@ -32,7 +32,7 @@ import {
 } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
-import { splitFocusSections, extractFocusLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
+import { extractFocusIntro, splitFocusSections, extractFocusLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "~/components/ui/preview-card";
 import { cn } from "~/lib/utils";
@@ -85,10 +85,14 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const previousReply = focusModeEnabled && ctx.focusPreviousReplyIds.has(row.message.id);
   const collapsible = previousReply || focusLinks.length > 0;
   const focused = collapsible && !focusExpanded;
+  const focusIntro = focused && !previousReply ? extractFocusIntro(row.message.text) : null;
   const messageText = focused
     ? previousReply
       ? ""
-      : focusLinks.join("\n")
+      : [
+          ...(focusIntro === null ? [] : [focusIntro, ""]),
+          ...focusLinks.filter((link) => !focusIntro?.includes(link)),
+        ].join("\n")
     : text || (row.message.streaming || row.suppressEmptyResponse ? "" : gt("(empty response)"));
   const focusSections =
     focusModeEnabled && !row.assistantCopyStreaming && !collapsible

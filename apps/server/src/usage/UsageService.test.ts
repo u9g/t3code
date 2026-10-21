@@ -998,7 +998,7 @@ describe("UsageService", () => {
           verify(yield* first.readSummary(WINDOW), 2, 7);
           yield* first.awaitPersisted;
 
-          // Downgrade the saved cache to v14, whose clean Codex entries cannot resume.
+          // Downgrade the saved cache to v14, whose Codex entries are re-read.
           yield* Effect.promise(async () => {
             const cachePath = NodePath.join(stateDir, SCAN_CACHE_FILE_NAME);
             const document = JSON.parse(await NodeFSP.readFile(cachePath, "utf8"));
@@ -3105,7 +3105,7 @@ describe("UsageService", () => {
       }),
   );
 
-  it.effect.each([4, 5, 6, 7, 8, 10, 11, 12, 13, 14])(
+  it.effect.each([4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])(
     "upgrades a v%s cache: reparses live Codex usage, keeps deleted rollouts, removes the old file",
     (version) =>
       Effect.gen(function* () {

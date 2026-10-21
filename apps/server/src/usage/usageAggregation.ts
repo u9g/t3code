@@ -57,6 +57,7 @@ interface MutableBucket {
   ultrafastCostUsd: number;
   speedPremiumUsd: number;
   records: number;
+  prompts: number;
   unpricedRecords: number;
   unpricedTokens: number;
   providerReportedRecords: number;
@@ -290,6 +291,7 @@ export class UsageAggregator {
       this.#options.priceOverrides,
     );
     bucket.records += 1;
+    bucket.prompts += record.prompts ?? 0;
     if (priced.costSource === "unpriced") {
       bucket.unpricedRecords += 1;
       bucket.unpricedTokens +=
@@ -343,6 +345,7 @@ export class UsageAggregator {
         ultrafastCostUsd: 0,
         speedPremiumUsd: 0,
         records: 0,
+        prompts: 0,
         unpricedRecords: 0,
         unpricedTokens: 0,
         providerReportedRecords: 0,
@@ -391,6 +394,7 @@ export class UsageAggregator {
         ...(speedPremiumUsd === 0 ? {} : { speedPremiumUsd }),
         costSource: resolveCostSource(bucket),
         records: bucket.records,
+        ...(bucket.prompts === 0 ? {} : { prompts: bucket.prompts }),
         unpricedRecords: bucket.unpricedRecords,
         unpricedTokens: bucket.unpricedTokens,
         sessions: bucket.sessions.size,

@@ -72,7 +72,9 @@ describe("scan cache round trip", () => {
             model: "claude-opus-5-5",
             speed: "fast",
             cacheCreation1hTokens: 8,
+            prompts: 2,
           }),
+          record({ dedupeKey: "msg_3:", prompts: 1 }),
         ],
       ],
       [
@@ -82,6 +84,8 @@ describe("scan cache round trip", () => {
           record({
             sessionId: "session-b",
             reportedCostUsd: 1.5,
+            unresolvedServiceTierTurnId: "turn-1",
+            prompts: 3,
             totals: {
               uncachedInputTokens: 0,
               cachedInputTokens: 0,
@@ -168,7 +172,7 @@ describe("scan cache round trip", () => {
     expect(restored).toEqual(original);
   });
 
-  it.each([5, 6, 7, 8, 10, 11, 12, 13])(
+  it.each([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])(
     "retains v%s history and compatible positions but invalidates obsolete state",
     (version) => {
       const original = cacheWith([["/gone.jsonl", 100, [record({ speed: "fast" })]]]);
@@ -225,20 +229,18 @@ describe("scan cache round trip", () => {
       };
 
       const restored = decodeScanCache(JSON.parse(JSON.stringify(legacy)), TEST_FORMAT_MAP);
-      expect(restored.get("/gone.jsonl")).toEqual(
-        version >= 13
-          ? original.get("/gone.jsonl")
-          : {
-              ...original.get("/gone.jsonl"),
-              size: -1,
-              position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
-            },
-      );
+      // Claude transcripts are re-read once so pre-v16 history gains prompt counts.
+      expect(restored.get("/gone.jsonl")).toEqual({
+        ...original.get("/gone.jsonl"),
+        size: -1,
+        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+      });
       expect(restored.get("/gone-codex.jsonl")).toEqual({
         ...original.get("/gone-codex.jsonl"),
         size: -1,
         position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
       });
+      // Clean Codex entries are re-read too, so they gain prompt counts.
       expect(restored.get("/clean-codex.jsonl")).toEqual({
         ...cleanCodex,
         size: -1,
@@ -256,7 +258,7 @@ describe("scan cache round trip", () => {
     },
   );
 
-  it("re-parses a v14 Codex entry that skipped records and restarts a clean one when it grows", () => {
+  it("re-parses v14 Codex entries, skipped or clean, so they gain prompt counts", () => {
     const codex = (malformedRecords: number): CachedFile => ({
       size: 10,
       mtimeMs: 100,
@@ -280,9 +282,10 @@ describe("scan cache round trip", () => {
       size: -1,
       position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
     });
-    // Served while unchanged, but its state predates the latest snapshot time, so it cannot resume.
+    // Clean entries are re-read too: v16 adds prompt counts no older entry holds.
     expect(restored.get("/clean-codex.jsonl")).toEqual({
       ...codex(0),
+      size: -1,
       position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
     });
     // The migrated entries persist without a state and load again under the current version.

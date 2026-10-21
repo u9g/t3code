@@ -65,6 +65,7 @@ type SerializedRecord = readonly [
   rateModelIndex?: number | null,
   unresolvedServiceTierTurnId?: string | null,
   cacheCreation1hTokens?: number,
+  prompts?: number,
 ];
 
 interface SerializedFile {
@@ -123,11 +124,17 @@ function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile 
     record.rateModel === undefined
       ? null
       : intern(tables.models, tables.modelIndex, record.rateModel),
-    ...(record.cacheCreation1hTokens !== undefined
-      ? ([record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens] as const)
-      : record.unresolvedServiceTierTurnId !== undefined
-        ? ([record.unresolvedServiceTierTurnId] as const)
-        : ([] as const)),
+    ...(record.prompts !== undefined
+      ? ([
+          record.unresolvedServiceTierTurnId ?? null,
+          record.cacheCreation1hTokens ?? 0,
+          record.prompts,
+        ] as const)
+      : record.cacheCreation1hTokens !== undefined
+        ? ([record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens] as const)
+        : record.unresolvedServiceTierTurnId !== undefined
+          ? ([record.unresolvedServiceTierTurnId] as const)
+          : ([] as const)),
   ];
   return {
     s: entry.size,
@@ -217,9 +224,11 @@ export function decodeScanCache(
         reportedCostUsd,
         speedIndex,
         rateModelIndex,
-        unresolvedServiceTierTurnId,
+        unresolvedServiceTierTurnIdSlot,
         cacheCreation1h = 0,
+        prompts,
       ] = row as SerializedRecord;
+      const unresolvedServiceTierTurnId = unresolvedServiceTierTurnIdSlot ?? undefined;
       const speed = typeof speedIndex === "number" ? SPEEDS[speedIndex] : undefined;
 
       const model = typeof modelIndex === "number" ? models[modelIndex] : undefined;
@@ -231,6 +240,7 @@ export function decodeScanCache(
         (unresolvedServiceTierTurnId != null && typeof unresolvedServiceTierTurnId !== "string") ||
         !Number.isFinite(cacheCreation1h) ||
         (rateModelIndex != null && rateModel === undefined) ||
+        (prompts !== undefined && !(Number.isSafeInteger(prompts) && prompts > 0)) ||
         !Number.isFinite(uncached) ||
         !Number.isFinite(cached) ||
         !Number.isFinite(cacheCreation) ||
@@ -265,6 +275,7 @@ export function decodeScanCache(
           ? { unresolvedServiceTierTurnId }
           : {}),
         dedupeKey: typeof dedupeKey === "string" ? dedupeKey : null,
+        ...(prompts === undefined ? {} : { prompts }),
       });
     }
     return records;
@@ -300,12 +311,11 @@ export function decodeScanCache(
     }
     // Keep history for deleted rollouts, but re-parse incompatible reducer state.
     // v13 adds Claude 1-hour cache writes; v14 uses Codex request ledgers.
-    // v15 repairs skipped Codex requests whose counters rewound; clean v14 entries stay served.
+    // v15 repairs skipped Codex requests whose counters rewound.
+    // v16 counts prompts for Claude and Codex, which no older entry holds.
     const legacy =
-      (entry.p === "claude" && version < 13) ||
-      (format.state !== undefined &&
-        (version < 6 ||
-          (entry.p === "codex" && (version < 14 || (version < 15 && malformedRecords > 0)))));
+      (entry.p === "claude" && version < 16) ||
+      (format.state !== undefined && (version < 6 || (entry.p === "codex" && version < 16)));
     // A corrupt state disqualifies the entry: resuming with it would attach
     // appended usage to the wrong model or replay fork-copied history.
     if (!legacy && !isValidState.get(entry.p)?.(entry.cs)) continue;

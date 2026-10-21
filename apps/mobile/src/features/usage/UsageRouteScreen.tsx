@@ -51,6 +51,7 @@ type UsageView = UsageChartMetric | "limits";
 const VIEW_OPTIONS = [
   { value: "cost", label: "Cost" },
   { value: "tokens", label: "Tokens" },
+  { value: "turns", label: "Turns" },
   { value: "limits", label: "Limits" },
 ] as const satisfies readonly { value: UsageView; label: string }[];
 
@@ -125,6 +126,7 @@ function UsageScreen(props: {
         day: hour.hourStart,
         costUsd: hour.costUsd,
         totalTokens: hour.totalTokens,
+        records: hour.records,
         byProvider: hour.byProvider,
       }))
     : merged.daily;
@@ -132,7 +134,7 @@ function UsageScreen(props: {
   const [refreshingUsage, setRefreshingUsage] = useState(false);
   const refreshingRef = useRef(false);
   const showingLimits = view === "limits";
-  const metric: UsageChartMetric = view === "tokens" ? "tokens" : "cost";
+  const metric: UsageChartMetric = view === "limits" ? "cost" : view;
   const progress = usageProgress(selectedEnvironments, {
     refreshing: refreshingUsage,
     providerLabel,
@@ -488,10 +490,14 @@ function UsageSummary(props: { readonly merged: MergedUsage; readonly metric: Us
   return (
     <View className="gap-0.5">
       <Text className="text-sm text-foreground-muted">
-        {metric === "cost" ? "Raw token cost" : "Processed tokens"}
+        {metric === "cost" ? "Raw token cost" : metric === "tokens" ? "Processed tokens" : "Turns"}
       </Text>
       <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
-        {metric === "cost" ? `${formatUsd(merged.costUsd)}*` : formatTokens(merged.totalTokens)}
+        {metric === "cost"
+          ? `${formatUsd(merged.costUsd)}*`
+          : metric === "tokens"
+            ? formatTokens(merged.totalTokens)
+            : formatCount(merged.records)}
       </Text>
       <Text className="text-sm text-foreground-muted">
         {metric === "cost"
@@ -514,13 +520,24 @@ function ProviderSection(props: {
 
   // Hermes lacks toSorted.
   const ordered = [...merged.providers].sort((a, b) =>
-    metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens,
+    metric === "cost"
+      ? b.costUsd - a.costUsd
+      : metric === "tokens"
+        ? b.totalTokens - a.totalTokens
+        : b.records - a.records,
   );
 
   return (
     <SettingsSection title="Providers">
       {ordered.map((provider, index) => {
-        const share = metric === "cost" ? provider.costShare : provider.tokenShare;
+        const share =
+          metric === "cost"
+            ? provider.costShare
+            : metric === "tokens"
+              ? provider.tokenShare
+              : merged.records > 0
+                ? provider.records / merged.records
+                : 0;
         return (
           <View
             key={provider.provider}
@@ -552,7 +569,9 @@ function ProviderSection(props: {
               >
                 {metric === "cost"
                   ? formatUsd(provider.costUsd)
-                  : formatTokens(provider.totalTokens)}
+                  : metric === "tokens"
+                    ? formatTokens(provider.totalTokens)
+                    : formatCount(provider.records)}
               </Text>
             </View>
             {props.compact ? null : (
@@ -567,7 +586,9 @@ function ProviderSection(props: {
             <Text className="text-sm text-foreground-muted">
               {metric === "cost"
                 ? `${formatPercent(share)} of cost · ${formatTokens(provider.totalTokens)} tokens`
-                : `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`}
+                : metric === "tokens"
+                  ? `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`
+                  : `${formatPercent(share)} of turns · ${formatTokens(provider.totalTokens)} tokens`}
             </Text>
           </View>
         );
@@ -752,7 +773,9 @@ function ModelsSection(props: {
   const ordered = [...merged.models].sort((a, b) =>
     metric === "cost"
       ? b.costUsd - a.costUsd || b.totalTokens - a.totalTokens
-      : b.totalTokens - a.totalTokens || b.costUsd - a.costUsd,
+      : metric === "tokens"
+        ? b.totalTokens - a.totalTokens || b.costUsd - a.costUsd
+        : b.records - a.records,
   );
 
   return (
@@ -777,7 +800,9 @@ function ModelsSection(props: {
                 {model.model}
               </Text>
               <Text className="text-sm text-foreground-muted">
-                {metric === "tokens"
+                {metric === "turns"
+                  ? `${formatPercent(merged.records > 0 ? model.records / merged.records : 0)} of turns · ${formatTokens(model.totalTokens)} tokens`
+                  : metric === "tokens"
                   ? `${formatPercent(model.tokenShare)} of tokens · ${
                       isModelCostUnknown(model) ? "no known rates" : formatUsd(model.costUsd)
                     }`
@@ -787,8 +812,10 @@ function ModelsSection(props: {
               </Text>
             </View>
             <Text className="text-base tabular-nums text-foreground">
-              {metric === "tokens"
-                ? formatTokens(model.totalTokens)
+              {metric === "turns"
+                ? formatCount(model.records)
+                : metric === "tokens"
+                  ? formatTokens(model.totalTokens)
                 : isModelCostUnknown(model)
                   ? "Unpriced"
                   : formatUsd(model.costUsd)}

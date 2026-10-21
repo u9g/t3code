@@ -58,6 +58,8 @@ export interface DayColumn {
     readonly provider: UsageProviderKind;
     readonly value: number;
   }[];
+  /** Turns scheduled tasks sent; on the turns metric they leave the provider bands. */
+  readonly scheduled: number;
   readonly total: number;
 }
 
@@ -73,7 +75,9 @@ function valueFor(
 ): number {
   const entry = totals?.byProvider.get(provider);
   if (entry === undefined) return 0;
-  return usageMetricValue(entry, metric);
+  return metric === "turns"
+    ? Math.max(0, entry.prompts - entry.scheduledPrompts)
+    : usageMetricValue(entry, metric);
 }
 
 export function buildPeriodColumns(
@@ -87,7 +91,18 @@ export function buildPeriodColumns(
       provider,
       value: valueFor(entry, provider, metric),
     }));
-    return { bands, total: bands.reduce((sum, band) => sum + band.value, 0) };
+    const scheduled =
+      metric === "turns"
+        ? PROVIDER_ORDER.reduce(
+            (sum, provider) => sum + (entry?.byProvider.get(provider)?.scheduledPrompts ?? 0),
+            0,
+          )
+        : 0;
+    return {
+      bands,
+      scheduled,
+      total: bands.reduce((sum, band) => sum + band.value, scheduled),
+    };
   });
 }
 
@@ -195,7 +210,11 @@ function chartScale(
   // Not the sum: layered series each measure from zero, so a combined peak
   // would leave the plot permanently half empty.
   const peak = columns.reduce(
-    (max, column) => column.bands.reduce((inner, band) => Math.max(inner, band.value), max),
+    (max, column) =>
+      column.bands.reduce(
+        (inner, band) => Math.max(inner, band.value),
+        Math.max(max, column.scheduled),
+      ),
     0,
   );
   return peak === 0 && loadingProviders.size > 0
@@ -238,7 +257,24 @@ function buildChart(
     };
   });
 
-  return { columns, scale, stepX, paths: paths.toSorted((a, b) => b.total - a.total) };
+  const scheduledLine = columns.some((column) => column.scheduled > 0)
+    ? curvePath(
+        smoothCurve(
+          columns.map((column, periodIndex) => ({
+            x: periodIndex * stepX,
+            y: valueToY(column.scheduled, scale.max),
+          })),
+        ),
+      )
+    : null;
+
+  return {
+    columns,
+    scale,
+    stepX,
+    paths: paths.toSorted((a, b) => b.total - a.total),
+    scheduledLine,
+  };
 }
 
 function UsageChartTooltip({
@@ -248,6 +284,7 @@ function UsageChartTooltip({
   providers,
   loadingProviders,
   format,
+  showScheduled,
 }: {
   readonly tooltipRef: React.Ref<HTMLDivElement>;
   readonly label: string;
@@ -255,6 +292,7 @@ function UsageChartTooltip({
   readonly providers: readonly UsageProviderKind[];
   readonly loadingProviders: ReadonlySet<UsageProviderKind>;
   readonly format: (value: number) => string;
+  readonly showScheduled: boolean;
 }) {
   const partial = providers.some((provider) => loadingProviders.has(provider));
   return (
@@ -290,6 +328,12 @@ function UsageChartTooltip({
           </div>
         );
       })}
+      {showScheduled ? (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Scheduled</span>
+          <span className="text-foreground tabular-nums">{format(column?.scheduled ?? 0)}</span>
+        </div>
+      ) : null}
       <div className="mt-1 flex items-center justify-between gap-3 border-t border-border pt-1">
         <span className="text-muted-foreground">Total</span>
         <span className={cn("tabular-nums", partial ? "text-muted-foreground" : "text-foreground")}>
@@ -309,6 +353,7 @@ function UsageChartPlot({
   format,
   formatTooltipPeriod,
   ariaLabel,
+  showScheduled,
   children,
 }: {
   readonly periods: readonly string[];
@@ -319,6 +364,7 @@ function UsageChartPlot({
   readonly format: (value: number) => string;
   readonly formatTooltipPeriod: (period: string) => string;
   readonly ariaLabel: string;
+  readonly showScheduled: boolean;
   readonly children: React.ReactNode;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -418,6 +464,7 @@ function UsageChartPlot({
           providers={providers}
           loadingProviders={loadingProviders}
           format={format}
+          showScheduled={showScheduled}
         />
       )}
     </div>
@@ -442,7 +489,7 @@ export function UsageProviderChart({
   const byPeriod = new Map(
     totals.map((entry) => ["hourStart" in entry ? entry.hourStart : entry.day, entry]),
   );
-  const { columns, scale, paths, stepX } = buildChart(
+  const { columns, scale, paths, stepX, scheduledLine } = buildChart(
     periods,
     byPeriod,
     metric,
@@ -486,6 +533,7 @@ export function UsageProviderChart({
           loadingProviders={loadingProviders}
           format={format}
           formatTooltipPeriod={formatTooltipPeriod}
+          showScheduled={scheduledLine !== null}
           ariaLabel={`${resolution === "hour" ? "Hourly" : "Daily"} ${metric === "tokens" ? "processed tokens" : metric} by provider`}
         >
           {scale.ticks.map((tick) => {
@@ -525,6 +573,17 @@ export function UsageProviderChart({
               vectorEffect="non-scaling-stroke"
             />
           ))}
+          {scheduledLine === null ? null : (
+            <path
+              d={scheduledLine}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeDasharray="4 3"
+              className="text-muted-foreground"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
         </UsageChartPlot>
       </div>
 

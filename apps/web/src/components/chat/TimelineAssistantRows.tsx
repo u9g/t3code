@@ -19,8 +19,13 @@ import { McpAppFrame } from "./McpAppFrame";
 import { readResponseSubagents, useAssistantMessageText } from "../../state/entities";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
-import { extractFocusIntro, splitFocusSections, extractFocusLinks, resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
+import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "~/components/ui/preview-card";
+import {
+  extractFocusIntro,
+  extractFocusLinks,
+  splitFocusSections,
+} from "@t3tools/shared/focusMode";
 import { cn } from "~/lib/utils";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 import { readThreadTurnItems } from "../../state/entities";

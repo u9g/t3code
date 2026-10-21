@@ -670,14 +670,14 @@ function UsageOverview({
     breakdown === "model" && metric === "tokens"
       ? sortModelsByTokens(merged.models)
       : breakdown === "model" && metric === "turns"
-        ? merged.models.toSorted((left, right) => right.records - left.records)
+        ? merged.models.toSorted((left, right) => right.prompts - left.prompts)
         : merged.models;
   const breakdownPeak = breakdownModels.reduce(
     (peak, model) => Math.max(peak, usageMetricValue(model, metric)),
     0,
   );
   const rankedProviders = rankProvidersByMetric(activeProviders, merged.providers, metric);
-  const turnShare = (records: number) => (merged.records > 0 ? records / merged.records : 0);
+  const turnShare = (prompts: number) => (merged.prompts > 0 ? prompts / merged.prompts : 0);
 
   return (
     <div aria-busy={loadingPartial} className="flex flex-col gap-6">
@@ -743,7 +743,7 @@ function UsageOverview({
                 ? (totals?.costShare ?? 0)
                 : metric === "tokens"
                   ? (totals?.tokenShare ?? 0)
-                  : turnShare(totals?.records ?? 0);
+                  : turnShare(totals?.prompts ?? 0);
             const providerSessions = totals?.sessions ?? 0;
             const sessionLabel = gt(
               "{count, plural, one {{formatted} session} other {{formatted} sessions}}",
@@ -971,7 +971,7 @@ function UsageOverview({
                   const value = usageMetricValue(model, metric);
                   const hasBar = value > 0 && breakdownPeak > 0;
                   const share =
-                    metric === "turns" ? turnShare(model.records) : modelShare(model, metric);
+                    metric === "turns" ? turnShare(model.prompts) : modelShare(model, metric);
                   const rowFigures = figureClass(loadingProviders.has(model.provider));
                   return (
                     <tr
@@ -1019,7 +1019,7 @@ function UsageOverview({
                         {formatTokens(model.totalTokens)}
                       </td>
                       <td className={cn("py-2.5 pr-2 pl-6", rowFigures)}>
-                        {formatCount(model.records, locale)}
+                        {formatCount(model.prompts, locale)}
                       </td>
                     </tr>
                   );
@@ -1111,7 +1111,7 @@ function UsageOverview({
                           figureClass(loadingPartial),
                         )}
                       >
-                        {formatCount(period.records, locale)}
+                        {formatCount(period.prompts, locale)}
                       </td>
                     </tr>
                   ))

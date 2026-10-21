@@ -184,6 +184,8 @@ import {
   PullRequestCommentUpdateInput,
   PullRequestDetail,
   PullRequestPreview,
+  GitHubLinkPreview,
+  GitHubLinkPreviewInput,
   PullRequestChecks,
   PullRequestDiffFileContentsInput,
   PullRequestDiffFileContentsResult,
@@ -576,6 +578,7 @@ export const WS_METHODS = {
   pullRequestsLinkedThreads: "pullRequests.linkedThreads",
   pullRequestsDetail: "pullRequests.detail",
   pullRequestsPreview: "pullRequests.preview",
+  pullRequestsGitHubLinkPreview: "pullRequests.gitHubLinkPreview",
   pullRequestsChecks: "pullRequests.checks",
   pullRequestsActivity: "pullRequests.activity",
   pullRequestsReviewGuide: "pullRequests.reviewGuide",
@@ -1117,6 +1120,11 @@ const WsPullRequestsPreviewRpc = Rpc.make(WS_METHODS.pullRequestsPreview, {
   payload: PullRequestRef,
   success: PullRequestPreview,
   error: PullRequestRpcError,
+});
+
+const WsPullRequestsGitHubLinkPreviewRpc = Rpc.make(WS_METHODS.pullRequestsGitHubLinkPreview, {
+  payload: GitHubLinkPreviewInput,
+  success: Schema.NullOr(GitHubLinkPreview),
 });
 
 const WsPullRequestsChecksRpc = Rpc.make(WS_METHODS.pullRequestsChecks, {
@@ -2194,6 +2202,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsPullRequestsLinkedThreadsRpc,
   WsPullRequestsDetailRpc,
   WsPullRequestsPreviewRpc,
+  WsPullRequestsGitHubLinkPreviewRpc,
   WsPullRequestsChecksRpc,
   WsPullRequestsActivityRpc,
   WsPullRequestsReviewGuideRpc,

@@ -605,6 +605,11 @@ export function createPullRequestEnvironmentAtoms<R, E>(
   // Hover cards read their own atoms, so a pending or failed hover read never decides where a
   // click on the same link goes.
   const previewCard = previewQuery("environment-data:pull-requests:preview-card");
+  const gitHubLinkPreview = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:pull-requests:github-link-preview",
+    tag: WS_METHODS.pullRequestsGitHubLinkPreview,
+    staleTimeMs: 60_000,
+  });
   const labelCandidates = writableQueryFamily(
     createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:pull-requests:label-candidates",
@@ -788,6 +793,7 @@ export function createPullRequestEnvironmentAtoms<R, E>(
     detailReadVersion,
     preview,
     previewCard,
+    gitHubLinkPreview,
     checks: normalizePullRequestQuery(
       createEnvironmentRpcQueryAtomFamily(runtime, {
         label: "environment-data:pull-requests:checks",

@@ -12,6 +12,7 @@ describe("buildPeriodColumns", () => {
         costUsd: 42,
         totalTokens: 420,
         prompts: 0,
+        scheduledPrompts: 0,
         byProvider: new Map([
           ["codex" as const, { costUsd: 10, totalTokens: 100, prompts: 0 }],
           ["claude" as const, { costUsd: 20, totalTokens: 200, prompts: 0 }],
@@ -27,6 +28,7 @@ describe("buildPeriodColumns", () => {
         costUsd: 5,
         totalTokens: 50,
         prompts: 0,
+        scheduledPrompts: 0,
         byProvider: new Map([["claude" as const, { costUsd: 5, totalTokens: 50, prompts: 0 }]]),
       },
     ],

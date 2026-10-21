@@ -247,6 +247,10 @@
       "types": "./src/threadPullRequests.ts",
       "import": "./src/threadPullRequests.ts"
     },
+    "./focusMode": {
+      "types": "./src/focusMode.ts",
+      "import": "./src/focusMode.ts"
+    },
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"

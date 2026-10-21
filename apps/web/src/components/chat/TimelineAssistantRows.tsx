@@ -24,6 +24,7 @@ import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "~/components/
 import {
   extractFocusIntro,
   extractFocusLinks,
+  isFocusVideoLink,
   splitFocusSections,
 } from "@t3tools/shared/focusMode";
 import { cn } from "~/lib/utils";
@@ -75,7 +76,9 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
       ? ""
       : [
           ...(focusIntro === null ? [] : [focusIntro, ""]),
-          ...focusLinks.filter((link) => !focusIntro?.includes(link)),
+          ...(focusIntro === null
+            ? focusLinks
+            : focusLinks.filter((link) => isFocusVideoLink(link) && !focusIntro.includes(link))),
         ].join("\n")
     : text || (row.message.streaming ? "" : "(empty response)");
   const focusSections =

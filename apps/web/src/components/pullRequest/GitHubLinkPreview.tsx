@@ -1,6 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { cloneElement, useState, type ReactElement, type Ref } from "react";
 
+import { cn } from "~/lib/utils";
 import { RelativeTime } from "~/components/RelativeTime";
 import { useSeenInViewport } from "~/hooks/useSeenInViewport";
 import { pullRequestEnvironment } from "~/state/pullRequests";
@@ -28,6 +29,7 @@ export function GitHubLinkPreview({
       ? pullRequestEnvironment.gitHubLinkPreview({ environmentId, input: { url } })
       : null,
   ).data;
+  const code = preview?.code;
 
   return (
     <PreviewCard open={open} onOpenChange={setOpen}>
@@ -39,7 +41,7 @@ export function GitHubLinkPreview({
       <PreviewCardPopup
         side="right"
         collisionAvoidance={{ side: "none", align: "shift" }}
-        className="w-80 max-w-(--available-width)"
+        className={cn(code ? "w-[36rem]" : "w-80", "max-w-(--available-width)")}
       >
         <div className="p-3">
           {preview === null ? (
@@ -63,6 +65,21 @@ export function GitHubLinkPreview({
                   {preview.description}
                 </p>
               ) : null}
+              {code === undefined ? null : (
+                <pre className="mt-2 max-h-80 overflow-auto rounded-md bg-muted/50 py-1.5 font-mono text-2xs leading-relaxed">
+                  {code.text.split("\n").map((line, index) => {
+                    const lineNumber = code.startLine + index;
+                    return (
+                      <div key={lineNumber} className="flex">
+                        <span className="w-10 shrink-0 select-none pr-3 text-right text-muted-foreground/60">
+                          {lineNumber}
+                        </span>
+                        <span className="whitespace-pre pr-3">{line}</span>
+                      </div>
+                    );
+                  })}
+                </pre>
+              )}
               {preview.author === null && preview.createdAt === null ? null : (
                 <div className="mt-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                   {preview.author === null ? null : (

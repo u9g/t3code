@@ -68,9 +68,15 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const focusLinks =
     focusModeEnabled && !row.assistantCopyStreaming ? extractFocusLinks(text) : [];
   const previousReply = focusModeEnabled && ctx.focusPreviousReplyIds.has(row.message.id);
-  const collapsible = previousReply || focusLinks.length > 0;
+  const focusIntro =
+    focusModeEnabled && !row.assistantCopyStreaming && !previousReply
+      ? extractFocusIntro(row.message.text)
+      : null;
+  const collapsible =
+    previousReply ||
+    focusLinks.length > 0 ||
+    (focusIntro !== null && focusIntro !== row.message.text.trim());
   const focused = collapsible && !focusExpanded;
-  const focusIntro = focused && !previousReply ? extractFocusIntro(row.message.text) : null;
   const messageText = focused
     ? previousReply
       ? ""

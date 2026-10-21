@@ -74,6 +74,37 @@ it.effect("previews an issue without a second request", () =>
   ),
 );
 
+it.effect("previews the lines a file link selects", () =>
+  gitHubLinkPreview("https://github.com/acme/web/blob/main/src/app.ts#L2-L3").pipe(
+    Effect.map((preview) => {
+      assert.deepStrictEqual(preview, {
+        kind: "file",
+        context: "acme/web @ main",
+        title: "src/app.ts",
+        description: null,
+        state: null,
+        author: null,
+        createdAt: null,
+        code: { startLine: 2, text: "two\nthree" },
+      });
+    }),
+    Effect.provide(
+      Layer.mock(GitHubRest.GitHubRest)({
+        rest: (input) =>
+          input.path === "repos/acme/web/contents/src/app.ts?ref=main"
+            ? Effect.succeed({
+                status: 200,
+                headers: {},
+                body: "one\ntwo\nthree\nfour",
+                truncated: false,
+                invalidUtf8: false,
+              })
+            : Effect.die(`unexpected path ${input.path}`),
+      }),
+    ),
+  ),
+);
+
 it.effect("has no preview for non-GitHub links or failed reads", () =>
   Effect.all([
     gitHubLinkPreview("https://example.com/acme/web/pull/7"),

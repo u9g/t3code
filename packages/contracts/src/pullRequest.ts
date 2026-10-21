@@ -454,7 +454,7 @@ export type GitHubLinkPreviewInput = typeof GitHubLinkPreviewInput.Type;
 
 /** What a hover card shows for any github.com link, read through the server's GitHub account. */
 export const GitHubLinkPreview = Schema.Struct({
-  kind: Schema.Literals(["pull-request", "issue", "commit", "repository", "user"]),
+  kind: Schema.Literals(["pull-request", "issue", "commit", "repository", "user", "file"]),
   /** The repository or account the link points into, with its number or short sha. */
   context: TrimmedNonEmptyString,
   title: TrimmedNonEmptyString,
@@ -462,6 +462,8 @@ export const GitHubLinkPreview = Schema.Struct({
   state: Schema.NullOr(Schema.Literals(["open", "closed", "merged", "draft"])),
   author: Schema.NullOr(PullRequestActor),
   createdAt: Schema.NullOr(IsoDateTime),
+  /** The lines a file link's `#L` anchor selects. */
+  code: Schema.optional(Schema.Struct({ startLine: PositiveInt, text: Schema.String })),
 });
 export type GitHubLinkPreview = typeof GitHubLinkPreview.Type;
 

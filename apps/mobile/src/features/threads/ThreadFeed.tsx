@@ -1217,7 +1217,7 @@ function compactionLabel(label: string, title: string | undefined) {
 /**
  * Focus mode for one finished assistant reply. Earlier replies collapse to a "Show full reply"
  * control; the latest collapses to its first paragraph and videos (or to its links when it has no
- * paragraph), or to its headings, which a tap opens one at a time.
+ * paragraph). A reply with neither collapses to its headings, which a tap opens one at a time.
  */
 function FocusAssistantMarkdown(props: {
   readonly text: string;
@@ -1227,9 +1227,9 @@ function FocusAssistantMarkdown(props: {
   const [expanded, setExpanded] = useState(false);
   const [openSections, setOpenSections] = useState<ReadonlySet<number>>(() => new Set());
   const links = extractFocusLinks(props.text);
+  const intro = props.previous ? null : extractFocusIntro(props.text);
 
-  if (props.previous || links.length > 0) {
-    const intro = props.previous ? null : extractFocusIntro(props.text);
+  if (props.previous || links.length > 0 || (intro !== null && intro !== props.text.trim())) {
     // Blank lines keep each link on its own line: the native renderer joins single newlines.
     const summary = props.previous
       ? ""

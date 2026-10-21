@@ -65,6 +65,8 @@ export const UsageBucket = Schema.Struct({
   speedPremiumUsd: Schema.optional(Schema.Number),
   costSource: UsageCostSource,
   records: NonNegativeInt,
+  /** Prompts the user sent, counted on the first response to each. */
+  prompts: Schema.optionalKey(NonNegativeInt),
   unpricedRecords: NonNegativeInt,
   sessions: NonNegativeInt,
 });

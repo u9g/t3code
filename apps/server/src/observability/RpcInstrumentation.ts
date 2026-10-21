@@ -107,6 +107,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.pullRequestsLinkedThreads]: "pull-requests",
   [WS_METHODS.pullRequestsDetail]: "pull-requests",
   [WS_METHODS.pullRequestsPreview]: "pull-requests",
+  [WS_METHODS.pullRequestsGitHubLinkPreview]: "pull-requests",
   [WS_METHODS.pullRequestsChecks]: "pull-requests",
   [WS_METHODS.pullRequestsActivity]: "pull-requests",
   [WS_METHODS.pullRequestsReviewGuide]: "pull-requests",

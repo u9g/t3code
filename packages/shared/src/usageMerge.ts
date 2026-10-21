@@ -21,6 +21,7 @@ export interface ProviderTotals {
   readonly totalTokens: number;
   readonly records: number;
   readonly prompts: number;
+  readonly scheduledPrompts: number;
   readonly sessions: number;
   readonly costShare: number;
   readonly tokenShare: number;
@@ -34,6 +35,7 @@ export interface ModelTotals {
   readonly tokens: UsageTokenTotals;
   readonly records: number;
   readonly prompts: number;
+  readonly scheduledPrompts: number;
   readonly unpricedRecords: number;
   readonly unpricedTokens: number;
   readonly costShare: number;
@@ -54,6 +56,7 @@ export interface DailyTotals {
   readonly totalTokens: number;
   /** Prompts the user sent. */
   readonly prompts: number;
+  readonly scheduledPrompts: number;
   readonly byProvider: ReadonlyMap<
     UsageProviderKind,
     { costUsd: number; totalTokens: number; prompts: number }
@@ -67,6 +70,7 @@ export interface HourlyTotals {
   readonly totalTokens: number;
   /** Prompts the user sent. */
   readonly prompts: number;
+  readonly scheduledPrompts: number;
   readonly byProvider: ReadonlyMap<
     UsageProviderKind,
     { costUsd: number; totalTokens: number; prompts: number }
@@ -111,6 +115,7 @@ export interface MergedUsage {
   readonly totalTokens: number;
   readonly records: number;
   readonly prompts: number;
+  readonly scheduledPrompts: number;
   readonly sessions: number;
   readonly providers: readonly ProviderTotals[];
   readonly models: readonly ModelTotals[];
@@ -291,6 +296,14 @@ export function isCompatibleUsageContractVersion(version: number, expected: numb
   return version >= USAGE_MERGE_COMPATIBLE_SINCE && version <= expected;
 }
 
+const EMPTY_TOKEN_TOTALS: UsageTokenTotals = {
+  uncachedInputTokens: 0,
+  cachedInputTokens: 0,
+  cacheCreationTokens: 0,
+  outputTokens: 0,
+  reasoningTokens: 0,
+};
+
 const EMPTY_MERGED: MergedUsage = {
   costUsd: 0,
   uncachedInputTokens: 0,
@@ -301,6 +314,7 @@ const EMPTY_MERGED: MergedUsage = {
   totalTokens: 0,
   records: 0,
   prompts: 0,
+  scheduledPrompts: 0,
   sessions: 0,
   providers: [],
   models: [],
@@ -359,6 +373,7 @@ export function mergeUsage(
   let reasoningTokens = 0;
   let records = 0;
   let prompts = 0;
+  let scheduledPrompts = 0;
   let sessions = 0;
   let cacheSavingsUsd = 0;
   let providerReportedRecords = 0;
@@ -368,7 +383,14 @@ export function mergeUsage(
 
   const providerAccumulator = new Map<
     UsageProviderKind,
-    { costUsd: number; totalTokens: number; records: number; prompts: number; sessions: number }
+    {
+      costUsd: number;
+      totalTokens: number;
+      records: number;
+      prompts: number;
+      scheduledPrompts: number;
+      sessions: number;
+    }
   >();
   const modelAccumulator = new Map<
     string,
@@ -379,6 +401,7 @@ export function mergeUsage(
       tokens: UsageTokenTotals;
       records: number;
       prompts: number;
+      scheduledPrompts: number;
       unpricedRecords: number;
       unpricedTokens: number;
     }
@@ -389,6 +412,7 @@ export function mergeUsage(
       costUsd: number;
       totalTokens: number;
       prompts: number;
+      scheduledPrompts: number;
       byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; prompts: number }>;
     }
   >();
@@ -400,6 +424,7 @@ export function mergeUsage(
       costUsd: number;
       totalTokens: number;
       prompts: number;
+      scheduledPrompts: number;
       byProvider: Map<UsageProviderKind, { costUsd: number; totalTokens: number; prompts: number }>;
     }
   >();
@@ -414,6 +439,66 @@ export function mergeUsage(
     );
     if (buckets.length > 0) contributingEnvironments.push(environment.environmentId);
 
+    // Each server reports only its own scheduled tasks, so these never overlap across environments.
+    for (const entry of environment.summary.scheduledPrompts ?? []) {
+      scheduledPrompts += entry.count;
+      const provider = providerAccumulator.get(entry.provider) ?? {
+        costUsd: 0,
+        totalTokens: 0,
+        records: 0,
+        prompts: 0,
+        scheduledPrompts: 0,
+        sessions: 0,
+      };
+      provider.scheduledPrompts += entry.count;
+      providerAccumulator.set(entry.provider, provider);
+
+      const modelKey = `${entry.provider} ${entry.model}`;
+      const model = modelAccumulator.get(modelKey) ?? {
+        provider: entry.provider,
+        costUsd: 0,
+        totalTokens: 0,
+        tokens: { ...EMPTY_TOKEN_TOTALS },
+        records: 0,
+        prompts: 0,
+        scheduledPrompts: 0,
+        unpricedRecords: 0,
+        unpricedTokens: 0,
+      };
+      model.scheduledPrompts += entry.count;
+      modelAccumulator.set(modelKey, model);
+
+      const day = dailyAccumulator.get(entry.day) ?? {
+        costUsd: 0,
+        totalTokens: 0,
+        prompts: 0,
+        scheduledPrompts: 0,
+        byProvider: new Map<
+          UsageProviderKind,
+          { costUsd: number; totalTokens: number; prompts: number }
+        >(),
+      };
+      day.scheduledPrompts += entry.count;
+      dailyAccumulator.set(entry.day, day);
+
+      if (entry.hourStart !== undefined) {
+        const hour = hourlyAccumulator.get(entry.hourStart) ?? {
+          day: entry.day,
+          hourStart: entry.hourStart,
+          costUsd: 0,
+          totalTokens: 0,
+          prompts: 0,
+          scheduledPrompts: 0,
+          byProvider: new Map<
+            UsageProviderKind,
+            { costUsd: number; totalTokens: number; prompts: number }
+          >(),
+        };
+        hour.scheduledPrompts += entry.count;
+        hourlyAccumulator.set(entry.hourStart, hour);
+      }
+    }
+
     for (const [providerKind, providerSessions] of sessionsByProvider) {
       sessions += providerSessions;
       if (providerSessions === 0) continue;
@@ -422,6 +507,7 @@ export function mergeUsage(
         totalTokens: 0,
         records: 0,
         prompts: 0,
+        scheduledPrompts: 0,
         sessions: 0,
       };
       provider.sessions += providerSessions;
@@ -457,6 +543,7 @@ export function mergeUsage(
         totalTokens: 0,
         records: 0,
         prompts: 0,
+        scheduledPrompts: 0,
         sessions: 0,
       };
       provider.costUsd += bucket.costUsd;
@@ -479,6 +566,7 @@ export function mergeUsage(
         },
         records: 0,
         prompts: 0,
+        scheduledPrompts: 0,
         unpricedRecords: 0,
         unpricedTokens: 0,
       };
@@ -503,6 +591,7 @@ export function mergeUsage(
         costUsd: 0,
         totalTokens: 0,
         prompts: 0,
+        scheduledPrompts: 0,
         byProvider: new Map<
           UsageProviderKind,
           { costUsd: number; totalTokens: number; prompts: number }
@@ -529,6 +618,7 @@ export function mergeUsage(
           costUsd: 0,
           totalTokens: 0,
           prompts: 0,
+          scheduledPrompts: 0,
           byProvider: new Map<
             UsageProviderKind,
             { costUsd: number; totalTokens: number; prompts: number }
@@ -560,6 +650,7 @@ export function mergeUsage(
       totalTokens: totals.totalTokens,
       records: totals.records,
       prompts: totals.prompts,
+      scheduledPrompts: totals.scheduledPrompts,
       sessions: totals.sessions,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
@@ -575,6 +666,7 @@ export function mergeUsage(
       tokens: totals.tokens,
       records: totals.records,
       prompts: totals.prompts,
+      scheduledPrompts: totals.scheduledPrompts,
       unpricedRecords: totals.unpricedRecords,
       unpricedTokens: totals.unpricedTokens,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
@@ -588,6 +680,7 @@ export function mergeUsage(
       costUsd: totals.costUsd,
       totalTokens: totals.totalTokens,
       prompts: totals.prompts,
+      scheduledPrompts: totals.scheduledPrompts,
       byProvider: totals.byProvider,
     }))
     .sort((a, b) => a.day.localeCompare(b.day));
@@ -606,6 +699,7 @@ export function mergeUsage(
     totalTokens,
     records,
     prompts,
+    scheduledPrompts,
     sessions,
     providers,
     models,

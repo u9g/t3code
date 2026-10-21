@@ -3,7 +3,9 @@ import type {
   UsageBucket,
   UsageCategoryCost,
   UsageDay,
+  UsageProviderKind,
   UsageResolution,
+  UsageScheduledPrompts,
   UsageTokenTotals,
 } from "@t3tools/contracts";
 
@@ -97,6 +99,7 @@ export function resolveModelAliases(
 
 export interface AggregateResult {
   readonly buckets: readonly UsageBucket[];
+  readonly scheduledPrompts: readonly UsageScheduledPrompts[];
   readonly duplicatesDropped: number;
   readonly outOfWindow: number;
 }
@@ -108,6 +111,7 @@ export interface AggregateResult {
  */
 export class UsageAggregator {
   readonly #buckets = new Map<string, MutableBucket>();
+  readonly #scheduledPrompts = new Map<string, number>();
   readonly #seen = new Set<string>();
   readonly #toDay: (timestampMs: number) => string;
   readonly #hourlyWindow: { readonly sinceTimeMs: number; readonly untilTimeMs: number } | null;
@@ -149,28 +153,12 @@ export class UsageAggregator {
       this.#seen.add(record.dedupeKey);
     }
 
-    if (
-      this.#hourlyWindow !== null &&
-      (record.timestampMs < this.#hourlyWindow.sinceTimeMs ||
-        record.timestampMs >= this.#hourlyWindow.untilTimeMs)
-    ) {
+    const slot = this.#slotFor(record.timestampMs);
+    if (slot === null) {
       this.#outOfWindow += 1;
       return false;
     }
-
-    const day = this.#toDay(record.timestampMs);
-    if (
-      this.#hourlyWindow === null &&
-      (day < this.#options.sinceDay || day > this.#options.untilDay)
-    ) {
-      this.#outOfWindow += 1;
-      return false;
-    }
-
-    const hourIndex =
-      this.#hourlyWindow === null
-        ? -1
-        : Math.floor((record.timestampMs - this.#hourlyWindow.sinceTimeMs) / HOUR_MS);
+    const { day, hourIndex } = slot;
     const bucket = this.#bucketFor(day, hourIndex, record.provider, record.model, sourcePath ?? "");
 
     const priced = priceUsage(this.#options.rates, record, this.#options.priceOverrides);
@@ -211,6 +199,43 @@ export class UsageAggregator {
     return true;
   }
 
+  /** A prompt a scheduled task sent; counted apart from usage records and their de-duplication. */
+  addScheduledPrompt(timestampMs: number, provider: UsageProviderKind, model: string): void {
+    const slot = this.#slotFor(timestampMs);
+    if (slot === null) return;
+    const mapped = this.#options.modelAliases?.get(model) ?? model;
+    const key = `${slot.day}\u0000${this.#hourStartFor(slot.hourIndex)}\u0000${provider}\u0000${mapped}`;
+    this.#scheduledPrompts.set(key, (this.#scheduledPrompts.get(key) ?? 0) + 1);
+  }
+
+  /** The day and hour a timestamp falls in, or null outside the requested window. */
+  #slotFor(timestampMs: number): { readonly day: string; readonly hourIndex: number } | null {
+    if (
+      this.#hourlyWindow !== null &&
+      (timestampMs < this.#hourlyWindow.sinceTimeMs ||
+        timestampMs >= this.#hourlyWindow.untilTimeMs)
+    ) {
+      return null;
+    }
+    const day = this.#toDay(timestampMs);
+    if (
+      this.#hourlyWindow === null &&
+      (day < this.#options.sinceDay || day > this.#options.untilDay)
+    ) {
+      return null;
+    }
+    const hourIndex =
+      this.#hourlyWindow === null
+        ? -1
+        : Math.floor((timestampMs - this.#hourlyWindow.sinceTimeMs) / HOUR_MS);
+    return { day, hourIndex };
+  }
+
+  #hourStartFor(hourIndex: number): string {
+    const window = this.#hourlyWindow;
+    return window === null ? "" : new Date(window.sinceTimeMs + hourIndex * HOUR_MS).toISOString();
+  }
+
   /** The target's own rate applies, so a provider-specific `rateModel` is dropped. */
   #mapModel(record: UsageRecord): UsageRecord {
     const model = this.#options.modelAliases?.get(record.model);
@@ -242,9 +267,7 @@ export class UsageAggregator {
     ) {
       return last.bucket;
     }
-    const window = this.#hourlyWindow;
-    const hourStart =
-      window === null ? "" : new Date(window.sinceTimeMs + hourIndex * HOUR_MS).toISOString();
+    const hourStart = this.#hourStartFor(hourIndex);
     const key = `${day}\u0000${hourStart}\u0000${provider}\u0000${model}\u0000${source}`;
     let bucket = this.#buckets.get(key);
     if (bucket === undefined) {
@@ -314,8 +337,21 @@ export class UsageAggregator {
         a.model.localeCompare(b.model),
     );
 
+    const scheduledPrompts: UsageScheduledPrompts[] = [];
+    for (const [key, count] of this.#scheduledPrompts) {
+      const [day = "", hourStart = "", provider = "", model = ""] = key.split("\u0000");
+      scheduledPrompts.push({
+        day: day as UsageDay,
+        ...(hourStart === "" ? {} : { hourStart }),
+        provider: provider as UsageProviderKind,
+        model,
+        count,
+      });
+    }
+
     return {
       buckets,
+      scheduledPrompts,
       duplicatesDropped: this.#duplicatesDropped,
       outOfWindow: this.#outOfWindow,
     };

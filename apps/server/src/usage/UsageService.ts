@@ -5,7 +5,7 @@ import {
   ProviderInstanceId,
   USAGE_CONTRACT_VERSION,
   type ServerSettings as ServerSettingsValue,
-  type UsageProviderKind,
+  UsageProviderKind,
   type UsageSource,
   type UsagePricing,
   type UsageSummary,
@@ -26,6 +26,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Semaphore from "effect/Semaphore";
 import { HttpClient, HttpClientResponse } from "effect/http";
 
@@ -185,6 +186,12 @@ const layerTest = Layer.succeed(
   }),
 );
 
+/** Usage groups providers by product; a run records the driver that ran it. */
+function usageProviderForDriver(driver: string): UsageProviderKind | null {
+  if (driver === "claudeAgent") return "claude";
+  return Schema.is(UsageProviderKind)(driver) ? driver : null;
+}
+
 export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -193,6 +200,23 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const hostEnvironment = yield* HostProcess.Environment;
   const readerContext = yield* Effect.context<BuiltInUsageReadersEnv>();
+  const sql = yield* SqlClient.SqlClient;
+  // Prompts this server's scheduled tasks sent. A database without the tables yet has none.
+  const readScheduledPrompts = (sinceMs: number) =>
+    sql<{
+      readonly created_at: string;
+      readonly provider: string;
+      readonly model: string | null;
+    }>`
+      SELECT message.created_at AS created_at,
+        run.provider AS provider,
+        json_extract(run.payload_json, '$.modelSelection.model') AS model
+      FROM orchestration_v2_projection_messages AS message
+      JOIN orchestration_v2_projection_runs AS run ON run.run_id = message.run_id
+      WHERE message.role = 'user'
+        AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+        AND message.created_at >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
+    `.pipe(Effect.orElseSucceed(() => []));
 
   const fileCache: ScanCache = new Map();
   // Reads from concurrent windows can still hold the original record after it is corrected.
@@ -894,6 +918,12 @@ export const make = Effect.gen(function* () {
     const pruned = pruneScanCache(fileCache, retentionCutoffMs);
     if (pruned > 0) cacheDirty = true;
 
+    for (const row of yield* readScheduledPrompts(windowStartMs)) {
+      const provider = usageProviderForDriver(row.provider);
+      const timestampMs = Date.parse(row.created_at);
+      if (provider === null || row.model === null || Number.isNaN(timestampMs)) continue;
+      aggregator.addScheduledPrompt(timestampMs, provider, row.model);
+    }
     const aggregated = aggregator.finish();
     const readAt = yield* DateTime.now;
     const finishedAtMs = yield* Clock.currentTimeMillis;
@@ -908,6 +938,9 @@ export const make = Effect.gen(function* () {
       sources,
       pricing: pricing(),
       scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),
+      ...(aggregated.scheduledPrompts.length === 0
+        ? {}
+        : { scheduledPrompts: aggregated.scheduledPrompts }),
     } satisfies UsageSummary;
   });
 

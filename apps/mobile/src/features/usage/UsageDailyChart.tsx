@@ -2,7 +2,7 @@ import { View } from "react-native";
 
 import type { DailyTotals } from "@t3tools/shared/usageMerge";
 
-import { buildChartDays, type UsageChartMetric } from "./usageChartData";
+import { buildChartDays, SCHEDULED_COLOR, type UsageChartMetric } from "./usageChartData";
 import { useProviderColors } from "./usageProviders";
 
 export interface UsageDailyChartProps {
@@ -31,6 +31,12 @@ export function UsageDailyChart({ days, daily, metric, height }: UsageDailyChart
               }}
             />
           ))}
+          <View
+            style={{
+              height: max === 0 ? 0 : (day.scheduled / max) * height,
+              backgroundColor: SCHEDULED_COLOR,
+            }}
+          />
         </View>
       ))}
     </View>

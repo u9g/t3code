@@ -14,6 +14,18 @@ describe("rankProvidersByMetric", () => {
     expect(rankProvidersByMetric(providers, totals, "cost")).toEqual(["codex", "claude"]);
   });
 
+  it("ranks the Turns tab by prompts sent", () => {
+    const totals = [
+      { provider: "codex" as const, totalTokens: 100, costUsd: 20, prompts: 9 },
+      { provider: "claude" as const, totalTokens: 200, costUsd: 10, prompts: 3 },
+    ];
+
+    expect(rankProvidersByMetric(["claude", "codex"], totals, "turns")).toEqual([
+      "codex",
+      "claude",
+    ]);
+  });
+
   it("keeps ties in input order without reordering the shared provider list", () => {
     const totals = [
       { provider: "codex" as const, totalTokens: 10, costUsd: 1 },

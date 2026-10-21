@@ -13,8 +13,15 @@ import { FontSizeSliderRow } from "../components/FontSizeSliderRow";
 import { SettingsSwitchRow } from "../../components/SettingsSwitchRow";
 
 export function TextAppearanceSection() {
-  const { isReady, appearance, setBaseFontSize, mathRenderingEnabled, setMathRenderingEnabled } =
-    useAppearancePreferences();
+  const {
+    isReady,
+    appearance,
+    setBaseFontSize,
+    mathRenderingEnabled,
+    setMathRenderingEnabled,
+    focusModeEnabled,
+    setFocusModeEnabled,
+  } = useAppearancePreferences();
 
   return (
     <SettingsSection title="Text">
@@ -37,6 +44,13 @@ export function TextAppearanceSection() {
         label="Render math"
         value={mathRenderingEnabled}
         onValueChange={setMathRenderingEnabled}
+      />
+      <SettingsSwitchRow
+        disabled={!isReady}
+        icon="arrow.down.right.and.arrow.up.left"
+        label="Focus mode"
+        value={focusModeEnabled}
+        onValueChange={setFocusModeEnabled}
       />
     </SettingsSection>
   );

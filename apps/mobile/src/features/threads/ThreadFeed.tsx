@@ -156,6 +156,11 @@ import {
 } from "../../native/SelectableMarkdownText";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import {
+  extractFocusIntro,
+  extractFocusLinks,
+  splitFocusSections,
+} from "@t3tools/shared/focusMode";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/VideoPreviewModal";
 import { VideoAttachmentTile } from "../../components/VideoAttachmentTile";
 import { MediaVideoPlayer } from "../../components/MediaVideoPlayer";
@@ -1208,6 +1213,78 @@ function compactionLabel(label: string, title: string | undefined) {
     : label;
 }
 
+/**
+ * Focus mode for one finished assistant reply. Earlier replies collapse to a "Show full reply"
+ * control; the latest collapses to its first paragraph and links, or to its headings, which a tap
+ * opens one at a time.
+ */
+function FocusAssistantMarkdown(props: {
+  readonly text: string;
+  readonly previous: boolean;
+  readonly renderMarkdown: (markdown: string) => ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [openSections, setOpenSections] = useState<ReadonlySet<number>>(() => new Set());
+  const links = extractFocusLinks(props.text);
+
+  if (props.previous || links.length > 0) {
+    const intro = props.previous ? null : extractFocusIntro(props.text);
+    // Blank lines keep each link on its own line: the native renderer joins single newlines.
+    const summary = props.previous
+      ? ""
+      : [
+          ...(intro === null ? [] : [intro]),
+          ...links.filter((link) => !intro?.includes(link)),
+        ].join("\n\n");
+    return (
+      <>
+        {expanded
+          ? props.renderMarkdown(props.text)
+          : summary
+            ? props.renderMarkdown(summary)
+            : null}
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setExpanded(!expanded)}
+          className="py-1"
+        >
+          <Text className="text-xs text-foreground-muted">
+            {expanded ? "Collapse reply" : "Show full reply"}
+          </Text>
+        </Pressable>
+      </>
+    );
+  }
+
+  const sections = splitFocusSections(props.text);
+  if (sections.length === 0) return props.renderMarkdown(props.text);
+  return sections.map((section, index) => {
+    if (section.heading === null) {
+      return <View key="intro">{props.renderMarkdown(section.body)}</View>;
+    }
+    const open = openSections.has(index);
+    return (
+      <View key={`${index}:${section.heading}`}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          onPress={() =>
+            setOpenSections((current) => {
+              const next = new Set(current);
+              if (!next.delete(index)) next.add(index);
+              return next;
+            })
+          }
+          className={cn("mt-3", open && "opacity-70")}
+        >
+          {props.renderMarkdown(section.heading)}
+        </Pressable>
+        {open && section.body ? props.renderMarkdown(section.body) : null}
+      </View>
+    );
+  });
+}
+
 function renderFeedEntry(
   info: { item: PendingThreadFeedEntry; index: number },
   props: Pick<
@@ -1225,6 +1302,8 @@ function renderFeedEntry(
     readonly workRowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
     readonly workGroupScrollPositions: Map<string, ThreadWorkGroupScrollPosition>;
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
+    readonly focusModeEnabled: boolean;
+    readonly focusPreviousReplyIds: ReadonlySet<string>;
     readonly unsettledTurnId: RunId | null;
     readonly compactionLabelsByEntryId: ReadonlyMap<string, { title: string; compacting: string }>;
     readonly failedRunIds: ReadonlySet<RunId>;
@@ -1717,15 +1796,36 @@ function renderFeedEntry(
       >
         {renderedText.trim().length > 0 ? (
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
-            <AssistantMarkdownContent
-              markdown={renderedText}
-              environmentId={props.environmentId}
-              markdownStyles={styles}
-              linkHandlers={props.markdownLinkHandlers}
-              onUseArtifactTemplate={props.onUseArtifactTemplate}
-              renderImage={props.renderMarkdownImage}
-              skills={props.skills}
-            />
+            {props.focusModeEnabled &&
+            message.role === "assistant" &&
+            !message.streaming &&
+            !assistantTurnStillInProgress ? (
+              <FocusAssistantMarkdown
+                text={renderedText}
+                previous={props.focusPreviousReplyIds.has(message.id)}
+                renderMarkdown={(markdown) => (
+                  <AssistantMarkdownContent
+                    markdown={markdown}
+                    environmentId={props.environmentId}
+                    markdownStyles={styles}
+                    linkHandlers={props.markdownLinkHandlers}
+                    onUseArtifactTemplate={props.onUseArtifactTemplate}
+                    renderImage={props.renderMarkdownImage}
+                    skills={props.skills}
+                  />
+                )}
+              />
+            ) : (
+              <AssistantMarkdownContent
+                markdown={renderedText}
+                environmentId={props.environmentId}
+                markdownStyles={styles}
+                linkHandlers={props.markdownLinkHandlers}
+                onUseArtifactTemplate={props.onUseArtifactTemplate}
+                renderImage={props.renderMarkdownImage}
+                skills={props.skills}
+              />
+            )}
           </MarkdownImageAvailableWidthContext>
         ) : null}
         {attachments.map((attachment) => {
@@ -2800,6 +2900,19 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
     return new Set(terminalIdsByTurn.values());
   })();
+  const { focusModeEnabled } = useAppearancePreferences();
+  // Assistant replies that come before the thread's latest user message.
+  const focusPreviousReplyIds = (() => {
+    const ids = new Set<string>();
+    let laterPrompt = false;
+    for (let index = props.feed.length - 1; index >= 0; index--) {
+      const entry = props.feed[index];
+      if (entry?.type !== "message") continue;
+      if (entry.message.role === "user") laterPrompt = true;
+      else if (laterPrompt && entry.message.role === "assistant") ids.add(entry.message.id);
+    }
+    return ids;
+  })();
   useEffect(() => {
     const previous = previousLatestTurnRef.current;
     previousLatestTurnRef.current = props.latestRun;
@@ -3039,6 +3152,8 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             workRowSizing,
             workGroupScrollPositions,
             terminalAssistantMessageIds,
+            focusModeEnabled,
+            focusPreviousReplyIds,
             unsettledTurnId,
             compactionLabelsByEntryId,
             failedRunIds,

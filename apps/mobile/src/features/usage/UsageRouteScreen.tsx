@@ -76,6 +76,7 @@ const WINDOW_OPTIONS = [
 const METRIC_OPTIONS = [
   { value: "cost", label: "Cost" },
   { value: "tokens", label: "Tokens" },
+  { value: "turns", label: "Turns" },
 ] as const satisfies readonly { value: UsageChartMetric; label: string }[];
 
 const CHART_HEIGHT = 180;
@@ -154,6 +155,7 @@ function UsageScreen(props: {
         day: hour.hourStart,
         costUsd: hour.costUsd,
         totalTokens: hour.totalTokens,
+        records: hour.records,
         byProvider: hour.byProvider,
       }))
     : merged.daily;
@@ -552,10 +554,18 @@ function ChartCard(props: {
     <View className="gap-4 rounded-[24px] border-continuous bg-grouped-card p-4">
       <View className="gap-0.5">
         <Text className="text-sm text-foreground-muted">
-          {metric === "cost" ? "Raw token cost" : "Processed tokens"}
+          {metric === "cost"
+            ? "Raw token cost"
+            : metric === "tokens"
+              ? "Processed tokens"
+              : "Turns"}
         </Text>
         <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
-          {metric === "cost" ? `${formatUsd(merged.costUsd)}*` : formatTokens(merged.totalTokens)}
+          {metric === "cost"
+            ? `${formatUsd(merged.costUsd)}*`
+            : metric === "tokens"
+              ? formatTokens(merged.totalTokens)
+              : formatCount(merged.records)}
         </Text>
         <Text className="text-sm text-foreground-muted">
           {metric === "cost"
@@ -621,7 +631,11 @@ function ProviderSection(props: {
 
   // .sort() on a copy, not .toSorted(): Hermes doesn't ship the ES2023 method.
   const ordered = [...merged.providers].sort((a, b) =>
-    metric === "cost" ? b.costUsd - a.costUsd : b.totalTokens - a.totalTokens,
+    metric === "cost"
+      ? b.costUsd - a.costUsd
+      : metric === "tokens"
+        ? b.totalTokens - a.totalTokens
+        : b.records - a.records,
   );
   const rows: Array<
     | { readonly kind: "usage"; readonly provider: (typeof ordered)[number] }
@@ -657,7 +671,14 @@ function ProviderSection(props: {
           );
         }
         const provider = row.provider;
-        const share = metric === "cost" ? provider.costShare : provider.tokenShare;
+        const share =
+          metric === "cost"
+            ? provider.costShare
+            : metric === "tokens"
+              ? provider.tokenShare
+              : merged.records > 0
+                ? provider.records / merged.records
+                : 0;
         return (
           <View
             key={provider.provider}
@@ -674,7 +695,9 @@ function ProviderSection(props: {
               <Text className="text-lg tabular-nums text-foreground">
                 {metric === "cost"
                   ? formatUsd(provider.costUsd)
-                  : formatTokens(provider.totalTokens)}
+                  : metric === "tokens"
+                    ? formatTokens(provider.totalTokens)
+                    : formatCount(provider.records)}
               </Text>
             </View>
             <View className="h-1 flex-row overflow-hidden rounded-full bg-subtle">
@@ -687,7 +710,9 @@ function ProviderSection(props: {
             <Text className="text-sm text-foreground-muted">
               {metric === "cost"
                 ? `${formatPercent(share)} of cost · ${formatTokens(provider.totalTokens)} tokens`
-                : `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`}
+                : metric === "tokens"
+                  ? `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`
+                  : `${formatPercent(share)} of turns · ${formatTokens(provider.totalTokens)} tokens`}
             </Text>
           </View>
         );
@@ -847,7 +872,9 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
   const ordered = [...merged.models].sort((a, b) =>
     metric === "cost"
       ? b.costUsd - a.costUsd || b.totalTokens - a.totalTokens
-      : b.totalTokens - a.totalTokens || b.costUsd - a.costUsd,
+      : metric === "tokens"
+        ? b.totalTokens - a.totalTokens || b.costUsd - a.costUsd
+        : b.records - a.records,
   );
 
   return (
@@ -870,21 +897,25 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
               {model.model}
             </Text>
             <Text className="text-sm text-foreground-muted">
-              {metric === "tokens"
-                ? `${formatPercent(model.tokenShare)} of tokens · ${
-                    isModelCostUnknown(model) ? "no known rates" : formatUsd(model.costUsd)
-                  }`
-                : isModelCostUnknown(model)
-                  ? `no known rates · ${formatTokens(model.totalTokens)} tokens`
-                  : `${formatPercent(model.costShare)} of cost · ${formatTokens(model.totalTokens)} tokens`}
+              {metric === "turns"
+                ? `${formatPercent(merged.records > 0 ? model.records / merged.records : 0)} of turns · ${formatTokens(model.totalTokens)} tokens`
+                : metric === "tokens"
+                  ? `${formatPercent(model.tokenShare)} of tokens · ${
+                      isModelCostUnknown(model) ? "no known rates" : formatUsd(model.costUsd)
+                    }`
+                  : isModelCostUnknown(model)
+                    ? `no known rates · ${formatTokens(model.totalTokens)} tokens`
+                    : `${formatPercent(model.costShare)} of cost · ${formatTokens(model.totalTokens)} tokens`}
             </Text>
           </View>
           <Text className="text-base tabular-nums text-foreground">
-            {metric === "tokens"
-              ? formatTokens(model.totalTokens)
-              : isModelCostUnknown(model)
-                ? "Unpriced"
-                : formatUsd(model.costUsd)}
+            {metric === "turns"
+              ? formatCount(model.records)
+              : metric === "tokens"
+                ? formatTokens(model.totalTokens)
+                : isModelCostUnknown(model)
+                  ? "Unpriced"
+                  : formatUsd(model.costUsd)}
           </Text>
         </View>
       ))}

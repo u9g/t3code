@@ -33,6 +33,7 @@ import {
   liveAnswerPreview,
   deriveMessagesTimelineRowsWithState,
   extractFocusLinks,
+  extractFocusIntro,
   deriveFocusPreviousReplyIds,
   splitFocusSections,
   resolveAssistantMessageCopyState,
@@ -5231,5 +5232,29 @@ describe("deriveFocusPreviousReplyIds", () => {
         message("a3", "assistant"),
       ]),
     ).toEqual(new Set(["a1", "a2"]));
+  });
+});
+
+describe("extractFocusIntro", () => {
+  it("returns the first prose paragraph, skipping headings, lists and code", () => {
+    expect(
+      extractFocusIntro(
+        [
+          "## Summary",
+          "",
+          "- https://github.com/a/b/pull/1",
+          "",
+          "Merged the fix.\nCI is green.",
+          "",
+          "More.",
+        ].join("\n"),
+      ),
+    ).toBe("Merged the fix.\nCI is green.");
+  });
+
+  it("is null when the reply has no prose paragraph", () => {
+    expect(
+      extractFocusIntro("- https://github.com/a/b/pull/1\n- https://github.com/a/b/pull/2"),
+    ).toBeNull();
   });
 });

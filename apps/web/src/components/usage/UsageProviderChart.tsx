@@ -7,6 +7,7 @@ import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
 import {
   formatDayShort,
   formatHourShort,
+  formatCount,
   formatTokens,
   formatUsd,
 } from "@t3tools/shared/usageFormat";
@@ -21,7 +22,28 @@ const TICK_COUNT = 4;
 const PLOT_TOP = 8;
 const NONE_LOADING: ReadonlySet<UsageProviderKind> = new Set();
 
-export type UsageChartMetric = "tokens" | "cost";
+export type UsageChartMetric = "tokens" | "cost" | "turns";
+
+/** The figure a metric charts; a turn is one model response. */
+export function usageMetricValue(
+  entry: { readonly costUsd: number; readonly totalTokens: number; readonly records: number },
+  metric: UsageChartMetric,
+): number {
+  return metric === "cost"
+    ? entry.costUsd
+    : metric === "tokens"
+      ? entry.totalTokens
+      : entry.records;
+}
+
+export function formatUsageMetric(
+  metric: UsageChartMetric,
+  locale: string,
+): (value: number) => string {
+  if (metric === "tokens") return formatTokens;
+  const format = metric === "cost" ? formatUsd : formatCount;
+  return (value) => format(value, locale);
+}
 
 interface UsageProviderChartProps {
   readonly providers: readonly UsageProviderKind[];
@@ -57,7 +79,7 @@ function valueFor(
 ): number {
   const entry = totals?.byProvider.get(provider);
   if (entry === undefined) return 0;
-  return metric === "tokens" ? entry.totalTokens : entry.costUsd;
+  return usageMetricValue(entry, metric);
 }
 
 export function buildPeriodColumns(
@@ -437,7 +459,7 @@ export function UsageProviderChart({
   const toY = (value: number) => valueToY(value, scale.max);
   const seriesClassName = (loading: boolean) =>
     cn("transition-opacity", loading && "opacity-40 delay-150");
-  const format = metric === "tokens" ? formatTokens : (value: number) => formatUsd(value, locale);
+  const format = formatUsageMetric(metric, locale);
   const formatPeriod = (period: string) =>
     resolution === "hour"
       ? formatHourShort(period, timeZone, hour12, locale)
@@ -538,10 +560,14 @@ export function UsageProviderChart({
             {resolution === "hour"
               ? metric === "tokens"
                 ? gt("Hourly processed tokens by provider")
-                : gt("Hourly cost by provider")
+                : metric === "cost"
+                  ? gt("Hourly cost by provider")
+                  : gt("Hourly turns by provider")
               : metric === "tokens"
                 ? gt("Daily processed tokens by provider")
-                : gt("Daily cost by provider")}
+                : metric === "cost"
+                  ? gt("Daily cost by provider")
+                  : gt("Daily turns by provider")}
           </caption>
           <thead>
             <tr>

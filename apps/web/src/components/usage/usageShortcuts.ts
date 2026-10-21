@@ -6,6 +6,7 @@ export type UsageMetric = UsageChartMetric | "limits";
 export const METRIC_OPTIONS = [
   { value: "cost", label: "Cost", command: "usage.cost" },
   { value: "tokens", label: "Tokens", command: "usage.tokens" },
+  { value: "turns", label: "Turns", command: "usage.turns" },
   { value: "limits", label: "Limits", command: "usage.limits" },
 ] as const satisfies readonly { value: UsageMetric; label: string; command: KeybindingCommand }[];
 

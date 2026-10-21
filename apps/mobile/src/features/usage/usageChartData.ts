@@ -6,9 +6,14 @@ import { PROVIDER_ORDER } from "./usageProviders";
 /** A turn is one prompt the user sent. */
 export type UsageChartMetric = "cost" | "tokens" | "turns";
 
+/** Scheduled turns stack above the providers in a neutral gray. */
+export const SCHEDULED_COLOR = "#9ca3af";
+
 export interface UsageChartDay {
   readonly day: string;
   readonly values: readonly { readonly provider: UsageProviderKind; readonly value: number }[];
+  /** Turns scheduled tasks sent; on the turns metric they leave the provider values. */
+  readonly scheduled: number;
   readonly total: number;
 }
 
@@ -29,13 +34,21 @@ export function buildChartDays(
             ? entry.costUsd
             : metric === "tokens"
               ? entry.totalTokens
-              : entry.prompts;
+              : Math.max(0, entry.prompts - entry.scheduledPrompts);
       return { provider, value };
     });
+    const scheduled =
+      metric === "turns"
+        ? PROVIDER_ORDER.reduce(
+            (sum, provider) => sum + (totals?.byProvider.get(provider)?.scheduledPrompts ?? 0),
+            0,
+          )
+        : 0;
     return {
       day,
       values,
-      total: values.reduce((sum, entry) => sum + entry.value, 0),
+      scheduled,
+      total: values.reduce((sum, entry) => sum + entry.value, scheduled),
     };
   });
 }

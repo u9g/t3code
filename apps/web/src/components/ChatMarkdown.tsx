@@ -228,6 +228,7 @@ import {
   nodeToPlainText,
 } from "./chat/MarkdownCodeBlock.logic";
 import { reportMarkdownActionFailure } from "./chat/markdownActionFailure";
+import { GitHubLinkPreview } from "./pullRequest/GitHubLinkPreview";
 
 const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
 
@@ -1404,6 +1405,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
             onOpenFallback={openDeferredMarkdownLink}
           />
         );
+      }
+      if (/^https?:\/\/(www\.)?github\.com\//iu.test(href)) {
+        return <GitHubLinkPreview link={link} url={href} environmentId={environmentId ?? null} />;
       }
       return (
         <Tooltip>

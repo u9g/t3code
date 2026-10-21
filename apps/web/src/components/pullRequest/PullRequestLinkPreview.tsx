@@ -133,13 +133,17 @@ export function PullRequestLinkPreview({
       >
         <PreviewCardTrigger
           render={<TooltipTrigger render={trigger} />}
-          delay={350}
+          delay={0}
           closeDelay={120}
         />
         <TooltipPopup side="top">{originalUrl}</TooltipPopup>
       </Tooltip>
       {showCard ? (
-        <PreviewCardPopup align="center" className="w-80 max-w-[calc(100vw-2rem)]">
+        <PreviewCardPopup
+          side="right"
+          collisionAvoidance={{ side: "none", align: "shift" }}
+          className="w-80 max-w-(--available-width)"
+        >
           <div className="p-3">
             {card === null ? (
               fallback

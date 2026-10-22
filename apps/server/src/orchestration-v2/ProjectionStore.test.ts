@@ -3293,7 +3293,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 
-  it.effect("marks the shell when a scheduled task requested the active run", () =>
+  it.effect("marks the shell while a scheduled task requested the latest run", () =>
     Effect.gen(function* () {
       const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
       const now = yield* DateTime.now;
@@ -3389,7 +3389,23 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       )!;
       for (const shell of [sqlShell, ProjectionStore.threadShellFromProjection(projection)]) {
         assert.equal(shell.activeRunId, runId);
-        assert.isTrue(shell.activeRunAutomated);
+        assert.isTrue(shell.latestRunAutomated);
+      }
+
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-shell-automated:completed"),
+        type: "run.updated",
+        threadId,
+        occurredAt: now,
+        payload: { ...projection.runs[0]!, status: "completed", completedAt: now },
+      });
+      const settled = yield* projectionStore.getThreadProjection(threadId);
+      const settledSqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
+        (row) => row.id === threadId,
+      )!;
+      for (const shell of [settledSqlShell, ProjectionStore.threadShellFromProjection(settled)]) {
+        assert.equal(shell.activeRunId, null);
+        assert.isTrue(shell.latestRunAutomated);
       }
     }),
   );

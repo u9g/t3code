@@ -543,7 +543,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const working: EnvironmentThreadShell[] = [];
   const automations: EnvironmentThreadShell[] = [];
   const inbox = (thread: EnvironmentThreadShell) =>
-    thread.source.activeRunAutomated === true
+    thread.source.latestRunAutomated === true
       ? automations
       : workingShelfEnabled && isSidebarThreadWorking(thread)
         ? working

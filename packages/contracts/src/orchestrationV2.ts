@@ -2218,8 +2218,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   /** The latest run answers a background-work progress wake, like a Monitor line, not a terminal one. Absent from older servers. */
   latestRunBackgroundWake: Schema.optional(Schema.Boolean),
   activeRunId: Schema.NullOr(RunId),
-  /** The active run was requested by a scheduled task's message. */
-  activeRunAutomated: Schema.optional(Schema.Boolean),
+  /** The latest run was requested by a scheduled task's message, not by the user. */
+  latestRunAutomated: Schema.optional(Schema.Boolean),
   activityRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   activityRunStatus: Schema.optional(
     Schema.NullOr(Schema.Literals(["preparing", "starting", "running", "waiting"])),

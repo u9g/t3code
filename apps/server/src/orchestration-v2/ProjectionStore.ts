@@ -1117,6 +1117,7 @@ type ShellThreadRow = {
   readonly latest_run_stop_requested: number;
   readonly active_run_id: string | null;
   readonly active_run_status: string | null;
+  readonly active_run_automated: number;
   readonly activity_run_status: string | null;
   readonly activity_run_started_at: string | null;
   readonly last_error: string | null;
@@ -1667,6 +1668,12 @@ export function threadShellFromProjection(
         (item) => item.runId === latestRun.id && item.type === "run_interrupt_request",
       ),
     activeRunId: activeRun?.id ?? null,
+    activeRunAutomated:
+      activeRun !== null &&
+      projection.messages.some(
+        (message) =>
+          message.id === activeRun.userMessageId && message.scheduledTaskId !== undefined,
+      ),
     blockedOnThreadWait: deriveBlockedOnThreadWait({ activeRun, turnItems: projection.turnItems }),
     activityRunStatus: activityRun?.status ?? null,
     activityRunStartedAt:
@@ -1784,6 +1791,7 @@ type ShellThreadState = {
   readonly latestRunCompletedAt: DateTime.Utc | null;
   readonly latestRunStopRequested: boolean;
   readonly activeRunId: RunId | null;
+  readonly activeRunAutomated: boolean;
   readonly blockedOnThreadWait: boolean;
   readonly activityRunStatus: ShellActivityRunStatus | null;
   readonly activityRunStartedAt: DateTime.Utc | null;
@@ -1939,6 +1947,7 @@ function shellFromState(input: {
     latestRunCompletedAt: input.state.latestRunCompletedAt,
     latestRunStopRequested: input.state.latestRunStopRequested,
     activeRunId: input.state.activeRunId,
+    activeRunAutomated: input.state.activeRunAutomated,
     blockedOnThreadWait: input.state.blockedOnThreadWait,
     activityRunStatus: input.state.activityRunStatus,
     activityRunStartedAt: input.state.activityRunStartedAt,
@@ -5816,6 +5825,11 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ) AS latest_run_stop_requested,
               active.run_id AS active_run_id,
               active.status AS active_run_status,
+              EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_messages message
+                WHERE message.message_id = json_extract(active.payload_json, '$.userMessageId')
+                  AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+              ) AS active_run_automated,
               (
                 SELECT r.status
                 FROM orchestration_v2_projection_runs r
@@ -6422,6 +6436,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           latestRunCompletedAt,
           latestRunStopRequested,
           activeRunId: row.active_run_id === null ? null : RunId.make(row.active_run_id),
+          activeRunAutomated: row.active_run_automated === 1,
           blockedOnThreadWait: deriveBlockedOnThreadWait({
             activeRun:
               row.active_run_id === null || row.active_run_status !== "running"

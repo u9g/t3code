@@ -23,6 +23,7 @@ import {
   RuntimeRequestId,
   RunAttemptId,
   RunId,
+  ScheduledTaskId,
   ThreadId,
   TurnItemId,
   type ThreadPullRequestLink,
@@ -4103,6 +4104,107 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           wakeShell.activityRunStartedAt && DateTime.toEpochMillis(wakeShell.activityRunStartedAt),
           DateTime.toEpochMillis(now),
         );
+      }
+    }),
+  );
+
+  it.effect("marks the shell when a scheduled task requested the active run", () =>
+    Effect.gen(function* () {
+      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const threadId = ThreadId.make("thread:projection-shell-automated");
+      const runId = RunId.make("run:projection-shell-automated");
+      const rootNodeId = NodeId.make("node:projection-shell-automated");
+      const userMessageId = MessageId.make("message:projection-shell-automated");
+
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-shell-automated:thread"),
+        type: "thread.created",
+        threadId,
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: threadId,
+          projectId: ProjectId.make("project:projection-shell-automated"),
+          title: "Automated shell run",
+          providerInstanceId,
+          modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: {
+            parentThreadId: null,
+            relationshipToParent: null,
+            rootThreadId: threadId,
+          },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-shell-automated:message"),
+        type: "message.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          createdBy: "agent",
+          creationSource: "server",
+          id: userMessageId,
+          threadId,
+          runId,
+          nodeId: rootNodeId,
+          role: "user",
+          text: "Scheduled prompt",
+          attachments: [],
+          scheduledTaskId: ScheduledTaskId.make("scheduled-task:projection-shell-automated"),
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      yield* projectionStore.apply({
+        id: EventId.make("event:projection-shell-automated:running"),
+        type: "run.created",
+        threadId,
+        runId,
+        nodeId: rootNodeId,
+        driver,
+        occurredAt: now,
+        payload: {
+          id: runId,
+          threadId,
+          ordinal: 1,
+          providerInstanceId,
+          modelSelection,
+          providerThreadId: null,
+          userMessageId,
+          rootNodeId,
+          activeAttemptId: null,
+          status: "running",
+          requestedAt: now,
+          startedAt: now,
+          completedAt: null,
+          checkpointId: null,
+          contextHandoffId: null,
+        },
+      });
+
+      const projection = yield* projectionStore.getThreadProjection(threadId);
+      const sqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
+        (row) => row.id === threadId,
+      )!;
+      for (const shell of [sqlShell, ProjectionStore.threadShellFromProjection(projection)]) {
+        assert.equal(shell.activeRunId, runId);
+        assert.isTrue(shell.activeRunAutomated);
       }
     }),
   );

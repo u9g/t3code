@@ -352,6 +352,7 @@ const REVEAL_ROW_CLASS_NAME =
 const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
 const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
 const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
+const AUTOMATIONS_SHELF_EXPANDED_KEY = "t3code:sidebar:automations-expanded";
 
 const inboxReturns = createInboxReturnTracker();
 
@@ -487,6 +488,11 @@ function useSidebarThreads(input: {
     false,
     Schema.Boolean,
   );
+  const [automationsShelfExpanded, setAutomationsShelfExpanded] = useLocalStorage(
+    AUTOMATIONS_SHELF_EXPANDED_KEY,
+    false,
+    Schema.Boolean,
+  );
   // Shared with the old per-project sidebar, so folders keep their open state.
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
@@ -513,8 +519,14 @@ function useSidebarThreads(input: {
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
-  const { pinnedThreads, activeThreads, workingThreads, snoozedThreads, settledThreads } =
-    partition;
+  const {
+    pinnedThreads,
+    activeThreads,
+    workingThreads,
+    automationThreads,
+    snoozedThreads,
+    settledThreads,
+  } = partition;
   // Older settled threads load in pages; the shelf lists them only as far as they are loaded.
   const olderSettledShelf = useOlderSettledShelf({
     scopes: olderSettledScopes([...serverConfigs.keys()], scopedProjectKeys),
@@ -574,12 +586,16 @@ function useSidebarThreads(input: {
             canShowLess: showAll && hidden.length > 0,
           };
         });
+  const visibleAutomationThreads = automationsShelfExpanded
+    ? automationThreads
+    : routeThreadOnly(automationThreads, routeRowThreadKey);
   const orderedThreads = [
     ...pinnedThreads,
     ...(projectFolders === null
       ? activeThreads
       : projectFolders.flatMap((folder) => folder.threads)),
     ...visibleWorkingThreads,
+    ...visibleAutomationThreads,
     ...visibleSnoozedThreads,
     ...renderedSettledThreads,
   ];
@@ -588,6 +604,7 @@ function useSidebarThreads(input: {
     [pinnedThreads, "pinned"],
     [activeThreads, "active"],
     [workingThreads, "working"],
+    [automationThreads, "automations"],
     [snoozedThreads, "snoozed"],
     [settledThreads, "settled"],
   ] as const) {
@@ -601,6 +618,7 @@ function useSidebarThreads(input: {
       ...pinnedThreads,
       ...activeThreads,
       ...workingThreads,
+      ...automationThreads,
       ...snoozedThreads,
       ...settledThreads,
     ],
@@ -619,6 +637,8 @@ function useSidebarThreads(input: {
     toggleSnoozedShelf: () => setSnoozedShelfExpanded((value) => !value),
     workingShelfExpanded,
     toggleWorkingShelf: () => setWorkingShelfExpanded((value) => !value),
+    automationsShelfExpanded,
+    toggleAutomationsShelf: () => setAutomationsShelfExpanded((value) => !value),
     projectFolders,
     toggleProjectFolder: (group: SidebarProjectSnapshot) => {
       const keys = sidebarFolderExpansionKeys(group);
@@ -633,6 +653,7 @@ function useSidebarThreads(input: {
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
+    visibleAutomationThreads,
     orderedThreadKeys: orderedThreads.map(threadShellKey),
     threadByKey: new Map(orderedThreads.map((thread) => [threadShellKey(thread), thread] as const)),
     settledThreadKeys: new Set(settledThreads.map(threadShellKey)),
@@ -668,11 +689,14 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
   const working: EnvironmentThreadShell[] = [];
+  const automations: EnvironmentThreadShell[] = [];
   const inbox = (thread: EnvironmentThreadShell, manuallyMoved = false) =>
-    workingShelfEnabled &&
-    (manuallyMoved ? isThreadWorking(thread) : inboxObservation.isWorking(thread))
-      ? working
-      : active;
+    thread.source.activeRunAutomated === true
+      ? automations
+      : workingShelfEnabled &&
+          (manuallyMoved ? isThreadWorking(thread) : inboxObservation.isWorking(thread))
+        ? working
+        : active;
   const snoozed: EnvironmentThreadShell[] = [];
   const settled: EnvironmentThreadShell[] = [];
   const { draggableThreadKeys, activeReorderableThreadKeys } = resolveSidebarReorderableThreadKeys({
@@ -743,6 +767,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
             getId: (thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
           }),
     workingThreads: sortWorkingThreadsBySend(working),
+    automationThreads: sortWorkingThreadsBySend(automations),
     snoozedThreads: snoozed.toSorted(
       (left, right) =>
         firstValidTimestampMs(left.snoozedUntil ?? null) -
@@ -1360,6 +1385,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     activeReorderableThreadKeys,
     activeThreads,
     workingThreads,
+    automationThreads,
     snoozedThreads,
     settledThreads,
     snoozeNow,
@@ -1375,12 +1401,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     toggleSnoozedShelf,
     workingShelfExpanded,
     toggleWorkingShelf,
+    automationsShelfExpanded,
+    toggleAutomationsShelf,
     projectFolders,
     toggleProjectFolder,
     toggleProjectFolderShowAll,
     renderedSettledThreads,
     visibleSnoozedThreads,
     visibleWorkingThreads,
+    visibleAutomationThreads,
     orderedThreadKeys,
     threadByKey,
     settledThreadKeys,
@@ -1806,7 +1835,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const isContextDrag =
     projectFolders !== null ||
     dragState?.contextDrag === true ||
-    dragState?.activeSection === "working";
+    dragState?.activeSection === "working" ||
+    dragState?.activeSection === "automations";
   const dragTargetSection = isContextDrag ? null : (dragState?.targetSection ?? null);
   const finishThreadDrag = (started: boolean) => {
     dragSensorRef.current = null;
@@ -2029,6 +2059,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       pinnedThreads.length +
         activeThreads.length +
         workingThreads.length +
+        automationThreads.length +
         snoozedThreads.length +
         settledCount ===
         0
@@ -2045,6 +2076,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     if (workingThreads.length > 0) {
       items.push({ kind: "marker", marker: "working-header" });
       items.push(...rowsOf(visibleWorkingThreads, "working"));
+    }
+    if (automationThreads.length > 0) {
+      items.push({ kind: "marker", marker: "automations-header" });
+      items.push(...rowsOf(visibleAutomationThreads, "automations"));
     }
     if (snoozedThreads.length > 0) {
       items.push({ kind: "marker", marker: "snoozed-header" });
@@ -3464,6 +3499,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           pinnedThreads.length +
             activeThreads.length +
             workingThreads.length +
+            automationThreads.length +
             snoozedThreads.length ===
             0 &&
           (settledCount === 0 || scopedProjectGroups.length > 0) ? (
@@ -3547,7 +3583,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         scopeThreadRef(thread.environmentId, thread.id),
                       );
                       const isCard =
-                        section === "active" || section === "pinned" || section === "working";
+                        section === "active" ||
+                        section === "pinned" ||
+                        section === "working" ||
+                        section === "automations";
                       const rowVariant = folderRow
                         ? folderRowsMultiline
                           ? "folder-multiline"
@@ -3569,7 +3608,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           variant={rowVariant}
                           navigationParent={
                             folderRow ??
-                            (section === "working" || section === "snoozed" || section === "settled"
+                            (section === "working" ||
+                            section === "automations" ||
+                            section === "snoozed" ||
+                            section === "settled"
                               ? `shelf:${section}`
                               : undefined)
                           }
@@ -3773,12 +3815,29 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             />,
                           );
                           break;
+                        case "automations-header":
+                          items.push(
+                            <SidebarSectionHeader
+                              key="automations-shelf-header"
+                              marker="automations-header"
+                              className={cn(workingThreads.length === 0 && "mt-auto")}
+                              label="Automations"
+                              count={automationThreads.length}
+                              toggle={{
+                                expanded: automationsShelfExpanded,
+                                onToggle: toggleAutomationsShelf,
+                              }}
+                            />,
+                          );
+                          break;
                         case "snoozed-header":
                           items.push(
                             <SidebarSectionHeader
                               key="snoozed-shelf-header"
                               marker="snoozed-header"
-                              className={cn(workingThreads.length === 0 && "mt-auto")}
+                              className={cn(
+                                workingThreads.length + automationThreads.length === 0 && "mt-auto",
+                              )}
                               label={gt("Snoozed", { $context: "sidebar section" })}
                               count={snoozedThreads.length}
                               toggle={{
@@ -3794,7 +3853,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               key="settled-shelf-header"
                               marker="settled-header"
                               className={cn(
-                                workingThreads.length + snoozedThreads.length === 0 && "mt-auto",
+                                workingThreads.length + automationThreads.length + snoozedThreads.length ===
+                                  0 && "mt-auto",
                               )}
                               label={gt("Settled", { $context: "sidebar section" })}
                               count={settledCount}

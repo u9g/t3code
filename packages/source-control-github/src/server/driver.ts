@@ -12,6 +12,7 @@ import { definition } from "../shared/definition.ts";
 
 import * as GitHubAppAccess from "./GitHubAppAccess.ts";
 import * as GitHubAppSignIn from "./GitHubAppSignIn.ts";
+import { gitHubLinkPreview } from "./gitHubLinkPreview.ts";
 import * as GitHubMediaFetch from "./gitHubMediaFetch.ts";
 import * as GitHubPullRequestApi from "./GitHubPullRequestApi.ts";
 import * as GitHubPullRequestProvider from "./GitHubPullRequestProvider.ts";
@@ -110,6 +111,11 @@ const makeInstance = Effect.gen(function* () {
       signIn: makeSignIn,
       isRepositoryStarred: makeIsRepositoryStarred,
       starRepository: makeStarRepository,
+      linkPreview: Effect.map(
+        GitHubRest.GitHubRest,
+        (github) => (url: string) =>
+          gitHubLinkPreview(url).pipe(Effect.provideService(GitHubRest.GitHubRest, github)),
+      ),
     }),
     services,
   );

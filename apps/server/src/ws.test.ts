@@ -1,6 +1,5 @@
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -117,6 +116,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as NpmRelease from "./cloud/npmRelease.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
+import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
@@ -804,7 +804,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(TriageService.TriageService)({}),
   Layer.mock(TextGenerators.TextGenerators)({}),
   Layer.mock(ProjectFaviconResolver.ProjectFaviconResolver)({}),
-  Layer.mock(GitHubRest.GitHubRest)({}),
+  Layer.succeed(SourceControlBuiltInDrivers.SourceControlDrivers, []),
   Layer.mock(ProjectEnrichment.ProjectEnrichmentService)({}),
   Layer.mock(AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator)({}),
   Layer.mock(AcpRegistrySupport.AcpRegistryCatalog)({}),

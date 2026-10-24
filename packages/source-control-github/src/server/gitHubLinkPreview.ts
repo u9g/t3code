@@ -1,5 +1,5 @@
 import type { GitHubLinkPreview, PullRequestActor } from "@t3tools/contracts";
-import * as GitHubRest from "@t3tools/source-control-github/server/GitHubRest";
+import * as GitHubRest from "./GitHubRest.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 

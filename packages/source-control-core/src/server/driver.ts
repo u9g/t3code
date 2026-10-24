@@ -1,4 +1,5 @@
 import type {
+  GitHubLinkPreview,
   SourceControlAppAccess,
   SourceControlProviderKind,
   SourceControlSignInError,
@@ -65,6 +66,8 @@ export interface SourceControlDriverInstance {
   readonly signIn?: SourceControlSignIn;
   /** Whether the server's account on `host` starred `repository` (`owner/name`). */
   readonly isRepositoryStarred?: (host: string, repository: string) => Effect.Effect<boolean>;
+  /** What a hover card shows for a link into this host; null when the link has no preview. */
+  readonly linkPreview?: (url: string) => Effect.Effect<GitHubLinkPreview | null>;
 }
 
 /** What the server gives every driver. A driver builds anything else it needs itself. */

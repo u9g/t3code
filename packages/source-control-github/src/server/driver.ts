@@ -7,6 +7,7 @@ import * as Layer from "effect/Layer";
 
 import { definition } from "../shared/definition.ts";
 
+import { gitHubLinkPreview } from "./gitHubLinkPreview.ts";
 import * as GitHubMediaFetch from "./gitHubMediaFetch.ts";
 import * as GitHubPullRequestApi from "./GitHubPullRequestApi.ts";
 import * as GitHubPullRequestProvider from "./GitHubPullRequestProvider.ts";
@@ -24,6 +25,11 @@ const makeInstance = Effect.all({
   discovery: GitHubSourceControlProvider.makeDiscovery,
   pullRequests: GitHubPullRequestProvider.make,
   fetchMedia: GitHubMediaFetch.make,
+  linkPreview: Effect.map(
+    GitHubRest.GitHubRest,
+    (github) => (url: string) =>
+      gitHubLinkPreview(url).pipe(Effect.provideService(GitHubRest.GitHubRest, github)),
+  ),
 });
 
 export const driver = defineSourceControlDriver({

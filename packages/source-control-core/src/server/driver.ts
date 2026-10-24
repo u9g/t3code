@@ -1,4 +1,4 @@
-import type { SourceControlProviderKind } from "@t3tools/contracts";
+import type { GitHubLinkPreview, SourceControlProviderKind } from "@t3tools/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
@@ -37,6 +37,8 @@ export interface SourceControlDriverInstance {
     HttpClientError.HttpClientError,
     Scope.Scope
   >;
+  /** What a hover card shows for a link into this host; null when the link has no preview. */
+  readonly linkPreview?: (url: string) => Effect.Effect<GitHubLinkPreview | null>;
 }
 
 /** What the server gives every driver. A driver builds anything else it needs itself. */

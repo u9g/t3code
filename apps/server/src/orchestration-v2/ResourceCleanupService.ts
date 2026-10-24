@@ -3,17 +3,27 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { resolveAttachmentPathById } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as PreviewManager from "../preview/Manager.ts";
+import { removeClaudeCloudThreadFiles } from "../provider/claudeCloud/ClaudeCloudFiles.ts";
+import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 
 export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupError>()(
   "ResourceCleanupError",
   {
-    operation: Schema.Literals(["terminal", "preview", "attachment"]),
+    operation: Schema.Literals([
+      "terminal",
+      "preview",
+      "attachment",
+      "scheduled-tasks",
+      "provider-files",
+    ]),
     threadId: Schema.optional(Schema.String),
     attachmentId: Schema.optional(Schema.String),
     cause: Schema.Defect(),
@@ -21,16 +31,21 @@ export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupErro
 ) {}
 
 export class ResourceCleanupService extends Context.Reference<{
+  readonly cleanupScheduledTasks: (threadId: ThreadId) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupTerminals: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupPreviews: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
   ) => Effect.Effect<void, ResourceCleanupError>;
+  /** Removes the files providers downloaded for the thread, such as Claude Cloud's sent files. */
+  readonly cleanupProviderFiles: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
 }>("t3/orchestration-v2/ResourceCleanupService", {
   defaultValue: () => ({
+    cleanupScheduledTasks: () => Effect.void,
     cleanupTerminals: () => Effect.void,
     cleanupPreviews: () => Effect.void,
     cleanupAttachments: () => Effect.void,
+    cleanupProviderFiles: () => Effect.void,
   }),
 }) {}
 
@@ -41,7 +56,20 @@ export const layer = Layer.effect(
     const previews = yield* PreviewManager.PreviewManager;
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
+    const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+    const providerFilesContext = yield* Effect.context<
+      FileSystem.FileSystem | Path.Path | SqlClient.SqlClient | ServerConfig.ServerConfig
+    >();
     return {
+      cleanupScheduledTasks: (threadId: ThreadId) =>
+        scheduledTasks
+          .deleteForThread(threadId)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ResourceCleanupError({ operation: "scheduled-tasks", threadId, cause }),
+            ),
+          ),
       cleanupTerminals: (threadId: string) =>
         terminals
           .close({ threadId, deleteHistory: true })
@@ -78,6 +106,13 @@ export const layer = Layer.effect(
                   );
           },
           { discard: true, concurrency: 4 },
+        ),
+      cleanupProviderFiles: (threadId: string) =>
+        removeClaudeCloudThreadFiles(threadId).pipe(
+          Effect.provideContext(providerFilesContext),
+          Effect.mapError(
+            (cause) => new ResourceCleanupError({ operation: "provider-files", threadId, cause }),
+          ),
         ),
     };
   }),

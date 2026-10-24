@@ -28,12 +28,21 @@ to you for approval.
 Muse Code offers only **Supervised** and **Full access**. A Muse thread already set to another mode
 runs in **Supervised**.
 
+Claude Cloud offers only **Full access**. Its cloud sessions run commands and edits in their own
+sandbox without asking. Requests the cloud session raises itself, such as publishing an artifact,
+MCP tools that require approval, or actions matched by `ask` permission rules, are approved too.
+
 Grok offers no **Auto-accept edits**. A Grok thread already set to it runs in **Supervised**. Grok
 file-change approvals offer **Allow all edits this session**. Its command approvals have no
 session-wide choice, because Grok would remember that command for the whole project.
 
 ACP Registry agents run their own tools in their own mode; T3 Code answers their approval requests
 by the permission mode. See [ACP Registry permissions](./providers-acp.md#permissions-and-terminals).
+
+Claude can still ask in **Full access** when its settings disable bypass permissions or require
+approval for an action.
+While a Claude approval is pending, type a text reply to decline that request and give feedback
+directly to the agent that asked, including a subagent. Other pending requests stay unanswered.
 
 Antigravity can still send native approval requests in **Full access**. It only offers remembered
 approvals for actions that support them.

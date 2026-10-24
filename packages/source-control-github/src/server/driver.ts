@@ -11,6 +11,7 @@ import { definition } from "../shared/definition.ts";
 
 import * as GitHubAppAccess from "./GitHubAppAccess.ts";
 import * as GitHubAppSignIn from "./GitHubAppSignIn.ts";
+import { gitHubLinkPreview } from "./gitHubLinkPreview.ts";
 import * as GitHubMediaFetch from "./gitHubMediaFetch.ts";
 import * as GitHubPullRequestApi from "./GitHubPullRequestApi.ts";
 import * as GitHubPullRequestProvider from "./GitHubPullRequestProvider.ts";
@@ -79,6 +80,11 @@ const makeInstance = Effect.all({
   fetchMedia: GitHubMediaFetch.make,
   signIn: makeSignIn,
   isRepositoryStarred: makeIsRepositoryStarred,
+  linkPreview: Effect.map(
+    GitHubRest.GitHubRest,
+    (github) => (url: string) =>
+      gitHubLinkPreview(url).pipe(Effect.provideService(GitHubRest.GitHubRest, github)),
+  ),
 });
 
 export const driver = defineSourceControlDriver({

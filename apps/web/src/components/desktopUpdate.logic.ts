@@ -2,6 +2,11 @@ import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/con
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
+// Callers pass the repository the desktop app reports it updates from, because
+// T3CODE_DESKTOP_UPDATE_REPOSITORY can redirect an installed app at startup. Older
+// desktop builds and builds without a GitHub update feed report none, and that
+// `undefined` takes the parameter default: the repository this bundle was built for.
+// Anything that is not a usable `owner/repo` links to official releases.
 const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "pingdotgg/t3code";
 const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
 
@@ -147,4 +152,20 @@ export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
   return (
     state.status !== "checking" && state.status !== "downloading" && state.status !== "disabled"
   );
+}
+
+export function getDesktopUpdateDisabledReason(
+  state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
+): string | null {
+  if (!state || (state.enabled && state.status !== "disabled")) return null;
+  return state.message?.trim() || "Automatic updates are not available in this build.";
+}
+
+export function getDesktopUpdateIdleTooltip(
+  state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
+) {
+  const disabledReason = getDesktopUpdateDisabledReason(state);
+  return disabledReason
+    ? { title: "Updates unavailable", detail: disabledReason }
+    : { title: "Check for updates", detail: null };
 }

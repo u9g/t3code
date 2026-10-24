@@ -1,4 +1,8 @@
 import {
+  capitalizeTerm,
+  sourceControlClients,
+} from "@t3tools/client-runtime/source-control-clients";
+import {
   COMPOSER_CONTEXT_REVIEW_DIFF_MAX_CHARS,
   COMPOSER_CONTEXT_REVIEW_TEXT_MAX_CHARS,
 } from "@t3tools/contracts";
@@ -99,9 +103,12 @@ export function pullRequestContextDisplayState(
 }
 
 export function pullRequestContextKindLabel(comment: ReviewCommentPresentation): string {
+  const url = comment.pullRequest?.url;
+  const host = url === undefined ? null : sourceControlClients.findByChangeRequestUrl(url);
+  const term = (host ?? sourceControlClients.get(undefined)).changeRequest.singular;
   const state = pullRequestContextDisplayState(comment);
-  if (state === null) return "Pull request";
-  return `${state[0]!.toUpperCase()}${state.slice(1)} pull request`;
+  if (state === null) return capitalizeTerm(term);
+  return `${capitalizeTerm(state)} ${term}`;
 }
 
 export function previewAnnotationContextLabel(annotation: PreviewAnnotationPayload): string {
@@ -276,7 +283,7 @@ export interface BoundComposerAttachment {
   attachmentId: string;
 }
 
-/** Clipboard payloads may only point at attachments that already exist on the server. */
+/** Returns null until the attachment has a server id. */
 export function uploadedAttachmentContextRecord(
   attachment: ComposerImageAttachment | ComposerFileAttachment,
   upload: AttachmentUploadState | undefined,

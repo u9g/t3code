@@ -113,7 +113,10 @@ const resolveDesktopSshCliRunner = (
       nodeEngineRange: serverPackageJson.engines.node,
     };
   }
-  return { archiveVersion: environment.appVersion };
+  // The bundled server's version, not the app's: a fork's desktop shell can
+  // carry its own version while shipping an upstream server, and remote hosts
+  // download upstream's CLI archive by that server version.
+  return { archiveVersion: serverPackageJson.version };
 };
 
 const layerDesktopSshEnvironment = Layer.unwrap(

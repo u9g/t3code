@@ -52,6 +52,7 @@ import {
   useEnvironmentModelPreferences,
   useToggleEnvironmentModelFavorite,
 } from "~/hooks/useSettings";
+import { announce } from "~/lib/announce";
 import { cn } from "~/lib/utils";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import { TooltipProvider } from "../ui/tooltip";
@@ -97,7 +98,7 @@ export function resolveModelPickerSelectedModel(input: {
   return input.options.find((option) => option.slug === input.model);
 }
 
-export function shouldIncludeModelPickerOption(input: {
+function shouldIncludeModelPickerOption(input: {
   readonly entry: ProviderInstanceEntry;
   readonly option: ModelEsque;
   readonly activeInstanceId: ProviderInstanceId;
@@ -116,7 +117,7 @@ export function shouldIncludeModelPickerOption(input: {
   );
 }
 
-export function shouldOfferModelPickerSetup(
+function shouldOfferModelPickerSetup(
   entry: ProviderInstanceEntry,
   options: ReadonlyArray<ModelEsque>,
 ): boolean {
@@ -131,7 +132,7 @@ export function shouldOfferModelPickerSetup(
   );
 }
 
-export function adjacentModelPickerProvider(input: {
+function adjacentModelPickerProvider(input: {
   entries: ReadonlyArray<ProviderInstanceEntry>;
   selectedInstanceId: ProviderInstanceId | "favorites";
   direction: 1 | -1;
@@ -429,12 +430,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       return favorites.length > 0 ? "favorites" : props.activeInstanceId;
     },
   );
+  const favoritesSet = new Set(favorites.map((fav) => providerModelKey(fav.provider, fav.model)));
   const [expandedLegacyInstances, setExpandedLegacyInstances] = useState(
     () =>
       new Set<ProviderInstanceId>(
-        modelOptionsByInstance
-          .get(props.activeInstanceId)
-          ?.some((model) => model.slug === activeModelSlug && model.isLegacy)
+        activeModel?.isLegacy &&
+          !favoritesSet.has(providerModelKey(props.activeInstanceId, activeModelSlug))
           ? [props.activeInstanceId]
           : [],
       ),
@@ -485,26 +486,26 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     modelSlug: string,
     instanceId: ProviderInstanceId,
     additive = false,
-  ) => {
+  ): string | null => {
     if (getModelDisabledReason?.(instanceId, modelSlug)) {
-      return;
+      return null;
     }
     const options = modelOptionsByInstance.get(instanceId);
     if (!options) {
-      return;
+      return null;
     }
     const entry = instanceEntries.find((candidate) => candidate.instanceId === instanceId);
     if (!entry) {
-      return;
+      return null;
     }
     const resolvedModel = resolveSelectableModel(entry.driverKind, modelSlug, options);
-    if (resolvedModel) {
-      if (additive && onToggleModel) {
-        onToggleModel(instanceId, resolvedModel);
-      } else {
-        onInstanceModelChange(instanceId, resolvedModel);
-      }
+    if (!resolvedModel) return null;
+    if (additive && onToggleModel) {
+      onToggleModel(instanceId, resolvedModel);
+    } else {
+      onInstanceModelChange(instanceId, resolvedModel);
     }
+    return resolvedModel;
   };
 
   const modelJumpShortcutContext = {
@@ -515,9 +516,6 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const lockedProvider = props.lockedProvider;
   const lockedContinuationGroupKey = props.lockedContinuationGroupKey;
   const canOpenProviderSetup = onOpenProviderSetup !== undefined;
-  const favoritesSet = (() => {
-    return new Set(favorites.map((fav) => providerModelKey(fav.provider, fav.model)));
-  })();
 
   const entryByInstanceId = new Map(instanceEntries.map((entry) => [entry.instanceId, entry]));
   const matchesLockedProvider = (
@@ -660,8 +658,13 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (isSearching || selectedInstanceId === "favorites") {
       return null;
     }
-    const currentModels = filteredModels.filter((model) => !model.isLegacy);
-    const legacyModels = filteredModels.filter((model) => model.isLegacy);
+    const currentModels: ModelPickerItem[] = [];
+    const legacyModels: ModelPickerItem[] = [];
+    for (const model of filteredModels) {
+      const isLegacy =
+        model.isLegacy && !favoritesSet.has(providerModelKey(model.instanceId, model.slug));
+      (isLegacy ? legacyModels : currentModels).push(model);
+    }
     if (legacyModels.length === 0) {
       return null;
     }
@@ -771,6 +774,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       });
       setSearchQuery("");
       handleSelectInstance(next);
+      announce(
+        next === "favorites" ? "Favorites" : (entryByInstanceId.get(next)?.displayName ?? next),
+        "model-picker",
+      );
       return;
     }
     const jumpIndex = modelPickerJumpIndexFromCommand(command ?? "");
@@ -788,7 +795,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (!model) {
       return;
     }
-    handleModelSelect(model.slug, model.instanceId);
+    const selectedSlug = handleModelSelect(model.slug, model.instanceId);
+    if (selectedSlug === null) return;
+    const name = flatModels.find(
+      (item) => item.slug === selectedSlug && item.instanceId === model.instanceId,
+    )?.name;
+    announce(`Model: ${name ?? selectedSlug}`, "model-picker");
   };
 
   return (

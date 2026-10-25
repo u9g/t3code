@@ -69,8 +69,8 @@ const MAINTENANCE = makeManualOnlyProviderMaintenanceCapabilities({
 
 /**
  * A cloud session keeps its transcript and checkout in Anthropic's cloud, so
- * nothing here can rewind or fork it, and T3's MCP server on this machine is
- * out of its reach.
+ * nothing here can rewind or fork it. T3's MCP server on this machine is out of
+ * its reach, but its tools reach the session through an in-process relay.
  */
 export const ClaudeCloudCapabilitiesV2 = {
   ...ClaudeProviderCapabilitiesV2,
@@ -83,7 +83,6 @@ export const ClaudeCloudCapabilitiesV2 = {
   },
   tools: {
     ...ClaudeProviderCapabilitiesV2.tools,
-    supportsMcpTools: false,
     supportsDynamicToolCallbacks: false,
   },
   checkpointing: {

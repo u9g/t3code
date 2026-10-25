@@ -50,6 +50,7 @@ import {
   claudeCloudPartialFileName,
   claudeCloudThreadFolder,
 } from "../../provider/claudeCloud/ClaudeCloudFiles.ts";
+import { relayedClaudeCloudMcpServers } from "../../provider/claudeCloud/ClaudeCloudMcpServers.ts";
 import { resolveClaudeCloudRepository } from "../../provider/claudeCloud/ClaudeCloudRepository.ts";
 import {
   type ChooseClaudeCloudRepository,
@@ -645,7 +646,9 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
         Stream.toAsyncIterable,
       );
       // The browser query has no cwd, env, executable, system prompt or resume
-      // point, and it throws on MCP servers other than in-process ones.
+      // point, and it throws on MCP servers other than in-process ones, so
+      // T3's own reaches the session through one that relays to it.
+      const mcpServers = yield* relayedClaudeCloudMcpServers(queryOptions.mcpServers);
       const query = yield* Effect.try({
         try: () =>
           sdk.query({
@@ -658,6 +661,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
               fromSequenceNum: cursor,
             },
             ...(canUseTool === undefined ? {} : { canUseTool }),
+            ...(mcpServers === undefined ? {} : { mcpServers }),
             ...(queryOptions.onUserDialog === undefined
               ? {}
               : { onUserDialog: queryOptions.onUserDialog }),

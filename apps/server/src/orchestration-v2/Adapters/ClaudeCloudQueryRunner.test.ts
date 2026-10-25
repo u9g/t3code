@@ -791,33 +791,37 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
       }),
     );
 
-    it.effect("attaches after the newest stored event with fresh headers and no MCP servers", () =>
-      Effect.gen(function* () {
-        const fake = makeFakeApi({ latestSequenceNum: 140 });
-        const sdk = makeFakeSdk();
-        const runner = yield* makeRunner({ api: fake.api, sdk: sdk.sdk });
+    it.effect(
+      "attaches after the newest stored event with fresh headers and T3's MCP server relayed",
+      () =>
+        Effect.gen(function* () {
+          const fake = makeFakeApi({ latestSequenceNum: 140 });
+          const sdk = makeFakeSdk();
+          const runner = yield* makeRunner({ api: fake.api, sdk: sdk.sdk });
 
-        yield* runner.open(openInput());
+          yield* runner.open(openInput());
 
-        const options = sdk.queries[0]?.options;
-        assert.deepEqual(options?.sse, {
-          streamUrl: `https://cloud.test/v1/code/sessions/${SESSION_ID}/events/stream`,
-          sendUrl: `https://cloud.test/v1/code/sessions/${SESSION_ID}/events`,
-          sessionId: SESSION_ID,
-          headers: { authorization: "Bearer token-1" },
-          fromSequenceNum: 140,
-        });
-        assert.isUndefined(options?.mcpServers);
-        assert.deepEqual(sdk.queries[0]?.controls, [
-          { method: "initialize" },
-          { method: "setPermissionMode", argument: "default" },
-          { method: "setModel", argument: "claude-opus-5-5" },
-          {
-            method: "applyFlagSettings",
-            argument: { effortLevel: "xhigh", fastMode: false, ultracode: null },
-          },
-        ]);
-      }),
+          const options = sdk.queries[0]?.options;
+          assert.deepEqual(options?.sse, {
+            streamUrl: `https://cloud.test/v1/code/sessions/${SESSION_ID}/events/stream`,
+            sendUrl: `https://cloud.test/v1/code/sessions/${SESSION_ID}/events`,
+            sessionId: SESSION_ID,
+            headers: { authorization: "Bearer token-1" },
+            fromSequenceNum: 140,
+          });
+          // The cloud cannot reach T3's HTTP server, so an in-process one relays to it.
+          assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["t3-code"]);
+          assert.include(options?.mcpServers?.["t3-code"], { type: "sdk", name: "t3-code" });
+          assert.deepEqual(sdk.queries[0]?.controls, [
+            { method: "initialize" },
+            { method: "setPermissionMode", argument: "default" },
+            { method: "setModel", argument: "claude-opus-5-5" },
+            {
+              method: "applyFlagSettings",
+              argument: { effortLevel: "xhigh", fastMode: false, ultracode: null },
+            },
+          ]);
+        }),
     );
 
     it.effect("keeps the worker out of bypassPermissions and skips unchanged modes", () =>

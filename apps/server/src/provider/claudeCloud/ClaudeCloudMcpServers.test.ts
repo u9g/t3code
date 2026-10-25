@@ -21,7 +21,8 @@ const httpMcpServer = Effect.acquireRelease(
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => NodeCrypto.randomUUID(),
     });
-    await server.connect(transport);
+    // The SDK types its own transport looser than `Transport` under exactOptionalPropertyTypes.
+    await server.connect(transport as Parameters<McpServer["connect"]>[0]);
     const http = NodeHttp.createServer((request, response) => {
       void transport.handleRequest(request, response);
     });

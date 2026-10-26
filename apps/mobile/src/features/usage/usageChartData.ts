@@ -8,12 +8,16 @@ export type UsageChartMetric = "cost" | "tokens" | "turns";
 
 /** Scheduled turns stack above the providers in a neutral gray. */
 export const SCHEDULED_COLOR = "#9ca3af";
+/** Delegated turns stack above scheduled ones in a darker gray. */
+export const DELEGATED_COLOR = "#6b7280";
 
 export interface UsageChartDay {
   readonly day: string;
   readonly values: readonly { readonly provider: UsageProviderKind; readonly value: number }[];
   /** Turns scheduled tasks sent; on the turns metric they leave the provider values. */
   readonly scheduled: number;
+  /** Turns another thread's agent sent; on the turns metric they leave the provider values. */
+  readonly delegated: number;
   readonly total: number;
 }
 
@@ -34,21 +38,24 @@ export function buildChartDays(
             ? entry.costUsd
             : metric === "tokens"
               ? entry.totalTokens
-              : Math.max(0, entry.prompts - entry.scheduledPrompts);
+              : Math.max(0, entry.prompts - entry.scheduledPrompts - entry.delegatedPrompts);
       return { provider, value };
     });
-    const scheduled =
+    const acrossProviders = (kind: "scheduledPrompts" | "delegatedPrompts") =>
       metric === "turns"
         ? PROVIDER_ORDER.reduce(
-            (sum, provider) => sum + (totals?.byProvider.get(provider)?.scheduledPrompts ?? 0),
+            (sum, provider) => sum + (totals?.byProvider.get(provider)?.[kind] ?? 0),
             0,
           )
         : 0;
+    const scheduled = acrossProviders("scheduledPrompts");
+    const delegated = acrossProviders("delegatedPrompts");
     return {
       day,
       values,
       scheduled,
-      total: values.reduce((sum, entry) => sum + entry.value, scheduled),
+      delegated,
+      total: values.reduce((sum, entry) => sum + entry.value, scheduled + delegated),
     };
   });
 }

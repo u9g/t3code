@@ -230,8 +230,8 @@ describe("resolveModelAliases", () => {
   });
 });
 
-describe("scheduled prompts", () => {
-  it("counts them by day, provider and aliased model, inside the window only", () => {
+describe("server prompts", () => {
+  it("counts each kind by day, provider and aliased model, inside the window only", () => {
     const aggregator = new UsageAggregator({
       timeZone: "UTC",
       sinceDay: "2026-08-01",
@@ -258,12 +258,19 @@ describe("scheduled prompts", () => {
       "claude",
       "claude-fable-5",
     );
+    aggregator.addServerPrompt(
+      "delegatedPrompts",
+      Date.parse("2026-08-02T12:00:00Z"),
+      "codex",
+      "gpt-6-sol",
+    );
 
     const result = aggregator.finish();
     expect(result.serverPrompts).toEqual({
       scheduledPrompts: [
         { day: "2026-08-02", provider: "claude", model: "claude-fable-5", count: 2 },
       ],
+      delegatedPrompts: [{ day: "2026-08-02", provider: "codex", model: "gpt-6-sol", count: 1 }],
     });
     expect(result.buckets).toEqual([]);
   });

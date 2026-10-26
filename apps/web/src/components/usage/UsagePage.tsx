@@ -715,7 +715,8 @@ function UsageOverview({
               <span>
                 <span className={figureClass(loadingPartial)}>
                   {formatCount(merged.sessions)} sessions
-                  {metric === "turns" && ` · ${formatCount(merged.scheduledPrompts)} scheduled`}
+                  {metric === "turns" &&
+                    ` · ${formatCount(merged.scheduledPrompts)} scheduled · ${formatCount(merged.delegatedPrompts)} delegated`}
                 </span>
                 {metric === "cost" && " · API estimate"}
               </span>
@@ -819,7 +820,7 @@ function UsageOverview({
                     ? `${formatPercent(share)} of cost · ${formatTokens(totals?.totalTokens ?? 0)} tokens`
                     : metric === "tokens"
                       ? `${formatPercent(share)} of tokens · ${formatUsd(totals?.costUsd ?? 0)}`
-                      : `${formatPercent(share)} of turns · ${formatCount(totals?.scheduledPrompts ?? 0)} scheduled · ${formatTokens(totals?.totalTokens ?? 0)} tokens`}
+                      : `${formatPercent(share)} of turns · ${formatCount(totals?.scheduledPrompts ?? 0)} scheduled · ${formatCount(totals?.delegatedPrompts ?? 0)} delegated · ${formatTokens(totals?.totalTokens ?? 0)} tokens`}
                 </span>
               </div>
             );
@@ -943,12 +944,13 @@ function UsageOverview({
                 <th className="py-2 pl-6 font-normal">Tokens</th>
                 <th className="py-2 pl-6 font-normal">Turns</th>
                 <th className="py-2 pl-6 font-normal">Scheduled</th>
+                <th className="py-2 pl-6 font-normal">Delegated</th>
               </tr>
             </thead>
             <tbody>
               {breakdownModels.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={8} className="py-6 text-center text-muted-foreground">
                     No activity in this window.
                   </td>
                 </tr>
@@ -1009,6 +1011,9 @@ function UsageOverview({
                       <td className={cn("py-2.5 pl-6", rowFigures)}>
                         {formatCount(model.scheduledPrompts)}
                       </td>
+                      <td className={cn("py-2.5 pl-6", rowFigures)}>
+                        {formatCount(model.delegatedPrompts)}
+                      </td>
                     </tr>
                   );
                 })
@@ -1038,13 +1043,14 @@ function UsageOverview({
                   <th className="py-2 pl-4 text-right font-normal">Tokens</th>
                   <th className="py-2 pl-4 text-right font-normal">Turns</th>
                   <th className="py-2 pl-4 text-right font-normal">Scheduled</th>
+                  <th className="py-2 pl-4 text-right font-normal">Delegated</th>
                 </tr>
               </thead>
               <tbody>
                 {breakdownPeriods.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={activeProviders.length + 5}
+                      colSpan={activeProviders.length + 6}
                       className="py-6 text-center text-muted-foreground"
                     >
                       No activity in this window.
@@ -1103,6 +1109,14 @@ function UsageOverview({
                         )}
                       >
                         {formatCount(period.scheduledPrompts)}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-2 pl-4 text-right text-muted-foreground tabular-nums",
+                          figureClass(loadingPartial),
+                        )}
+                      >
+                        {formatCount(period.delegatedPrompts)}
                       </td>
                     </tr>
                   ))

@@ -24,6 +24,7 @@ export interface ProviderTotals {
   readonly records: number;
   readonly prompts: number;
   readonly scheduledPrompts: number;
+  readonly delegatedPrompts: number;
   readonly sessions: number;
   readonly costShare: number;
   readonly tokenShare: number;
@@ -38,6 +39,7 @@ export interface ModelTotals {
   readonly records: number;
   readonly prompts: number;
   readonly scheduledPrompts: number;
+  readonly delegatedPrompts: number;
   readonly unpricedRecords: number;
   readonly unpricedTokens: number;
   readonly costShare: number;
@@ -55,6 +57,8 @@ export interface PeriodProviderTotals {
   prompts: number;
   /** The share of `prompts` that scheduled tasks sent. */
   scheduledPrompts: number;
+  /** The share of `prompts` that another thread's agent sent. */
+  delegatedPrompts: number;
 }
 
 export interface DailyTotals {
@@ -64,6 +68,7 @@ export interface DailyTotals {
   /** Prompts the user sent. */
   readonly prompts: number;
   readonly scheduledPrompts: number;
+  readonly delegatedPrompts: number;
   readonly byProvider: ReadonlyMap<UsageProviderKind, PeriodProviderTotals>;
 }
 
@@ -75,6 +80,7 @@ export interface HourlyTotals {
   /** Prompts the user sent. */
   readonly prompts: number;
   readonly scheduledPrompts: number;
+  readonly delegatedPrompts: number;
   readonly byProvider: ReadonlyMap<UsageProviderKind, PeriodProviderTotals>;
 }
 
@@ -117,6 +123,7 @@ export interface MergedUsage {
   readonly records: number;
   readonly prompts: number;
   readonly scheduledPrompts: number;
+  readonly delegatedPrompts: number;
   readonly sessions: number;
   readonly providers: readonly ProviderTotals[];
   readonly models: readonly ModelTotals[];
@@ -310,6 +317,7 @@ const EMPTY_MERGED: MergedUsage = {
   records: 0,
   prompts: 0,
   scheduledPrompts: 0,
+  delegatedPrompts: 0,
   sessions: 0,
   providers: [],
   models: [],
@@ -368,7 +376,10 @@ export function mergeUsage(
   let reasoningTokens = 0;
   let records = 0;
   let prompts = 0;
-  const serverPrompts: Record<UsageServerPromptKind, number> = { scheduledPrompts: 0 };
+  const serverPrompts: Record<UsageServerPromptKind, number> = {
+    scheduledPrompts: 0,
+    delegatedPrompts: 0,
+  };
   let sessions = 0;
   let cacheSavingsUsd = 0;
   let providerReportedRecords = 0;
@@ -384,6 +395,7 @@ export function mergeUsage(
       records: number;
       prompts: number;
       scheduledPrompts: number;
+      delegatedPrompts: number;
       sessions: number;
     }
   >();
@@ -397,6 +409,7 @@ export function mergeUsage(
       records: number;
       prompts: number;
       scheduledPrompts: number;
+      delegatedPrompts: number;
       unpricedRecords: number;
       unpricedTokens: number;
     }
@@ -408,6 +421,7 @@ export function mergeUsage(
       totalTokens: number;
       prompts: number;
       scheduledPrompts: number;
+      delegatedPrompts: number;
       byProvider: Map<UsageProviderKind, PeriodProviderTotals>;
     }
   >();
@@ -420,6 +434,7 @@ export function mergeUsage(
       totalTokens: number;
       prompts: number;
       scheduledPrompts: number;
+      delegatedPrompts: number;
       byProvider: Map<UsageProviderKind, PeriodProviderTotals>;
     }
   >();
@@ -444,6 +459,7 @@ export function mergeUsage(
           records: 0,
           prompts: 0,
           scheduledPrompts: 0,
+          delegatedPrompts: 0,
           sessions: 0,
         };
         provider[kind] += entry.count;
@@ -458,6 +474,7 @@ export function mergeUsage(
           records: 0,
           prompts: 0,
           scheduledPrompts: 0,
+          delegatedPrompts: 0,
           unpricedRecords: 0,
           unpricedTokens: 0,
         };
@@ -469,6 +486,7 @@ export function mergeUsage(
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
+          delegatedPrompts: 0,
           byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
         };
         day[kind] += entry.count;
@@ -477,6 +495,7 @@ export function mergeUsage(
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
+          delegatedPrompts: 0,
         };
         dayProvider[kind] += entry.count;
         day.byProvider.set(entry.provider, dayProvider);
@@ -490,6 +509,7 @@ export function mergeUsage(
             totalTokens: 0,
             prompts: 0,
             scheduledPrompts: 0,
+            delegatedPrompts: 0,
             byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
           };
           hour[kind] += entry.count;
@@ -498,6 +518,7 @@ export function mergeUsage(
             totalTokens: 0,
             prompts: 0,
             scheduledPrompts: 0,
+            delegatedPrompts: 0,
           };
           hourProvider[kind] += entry.count;
           hour.byProvider.set(entry.provider, hourProvider);
@@ -515,6 +536,7 @@ export function mergeUsage(
         records: 0,
         prompts: 0,
         scheduledPrompts: 0,
+        delegatedPrompts: 0,
         sessions: 0,
       };
       provider.sessions += providerSessions;
@@ -551,6 +573,7 @@ export function mergeUsage(
         records: 0,
         prompts: 0,
         scheduledPrompts: 0,
+        delegatedPrompts: 0,
         sessions: 0,
       };
       provider.costUsd += bucket.costUsd;
@@ -574,6 +597,7 @@ export function mergeUsage(
         records: 0,
         prompts: 0,
         scheduledPrompts: 0,
+        delegatedPrompts: 0,
         unpricedRecords: 0,
         unpricedTokens: 0,
       };
@@ -599,6 +623,7 @@ export function mergeUsage(
         totalTokens: 0,
         prompts: 0,
         scheduledPrompts: 0,
+        delegatedPrompts: 0,
         byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
       };
       day.costUsd += bucket.costUsd;
@@ -609,6 +634,7 @@ export function mergeUsage(
         totalTokens: 0,
         prompts: 0,
         scheduledPrompts: 0,
+        delegatedPrompts: 0,
       };
       dayProvider.costUsd += bucket.costUsd;
       dayProvider.totalTokens += tokens;
@@ -624,6 +650,7 @@ export function mergeUsage(
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
+          delegatedPrompts: 0,
           byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
         };
         hour.costUsd += bucket.costUsd;
@@ -634,6 +661,7 @@ export function mergeUsage(
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
+          delegatedPrompts: 0,
         };
         hourProvider.costUsd += bucket.costUsd;
         hourProvider.totalTokens += tokens;
@@ -654,6 +682,7 @@ export function mergeUsage(
       records: totals.records,
       prompts: totals.prompts,
       scheduledPrompts: totals.scheduledPrompts,
+      delegatedPrompts: totals.delegatedPrompts,
       sessions: totals.sessions,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
       tokenShare: totalTokens === 0 ? 0 : totals.totalTokens / totalTokens,
@@ -670,6 +699,7 @@ export function mergeUsage(
       records: totals.records,
       prompts: totals.prompts,
       scheduledPrompts: totals.scheduledPrompts,
+      delegatedPrompts: totals.delegatedPrompts,
       unpricedRecords: totals.unpricedRecords,
       unpricedTokens: totals.unpricedTokens,
       costShare: costUsd === 0 ? 0 : totals.costUsd / costUsd,
@@ -684,6 +714,7 @@ export function mergeUsage(
       totalTokens: totals.totalTokens,
       prompts: totals.prompts,
       scheduledPrompts: totals.scheduledPrompts,
+      delegatedPrompts: totals.delegatedPrompts,
       byProvider: totals.byProvider,
     }))
     .sort((a, b) => a.day.localeCompare(b.day));

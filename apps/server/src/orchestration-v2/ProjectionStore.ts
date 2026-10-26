@@ -1277,6 +1277,7 @@ type ShellThreadRow = {
   readonly blocking_run_completed_at: string | null;
   readonly blocking_run_stop_requested: number;
   readonly blocking_run_background_wake: number;
+  readonly blocking_run_automated: number;
   readonly blocking_failure_payload_json: string | null;
   readonly pending_request_payload_json: string | null;
   readonly pending_secret_request_payload_json: string | null;
@@ -8492,6 +8493,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                   AND stop_request.type = 'run_interrupt_request'
               ) AS blocking_run_stop_requested,
               ${isBackgroundWakeShellRun("blocked")} AS blocking_run_background_wake,
+              ${isAutomatedShellRun("blocked")} AS blocking_run_automated,
               (
                 SELECT item.payload_json
                 FROM orchestration_v2_projection_turn_items item
@@ -9128,6 +9130,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             : DateTime.makeUnsafe(row.latest_run_completed_at);
         let latestRunStopRequested = row.latest_run_stop_requested === 1;
         let latestRunBackgroundWake = row.latest_run_background_wake === 1;
+        let latestRunAutomated = row.latest_run_automated === 1;
         if (row.blocking_run_id !== null && row.blocking_failure_payload_json !== null) {
           const blockingFailure = yield* decodeTurnItemPayload(
             row.blocking_failure_payload_json,
@@ -9142,6 +9145,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             latestRunId = RunId.make(row.blocking_run_id);
             latestRunStopRequested = row.blocking_run_stop_requested === 1;
             latestRunBackgroundWake = row.blocking_run_background_wake === 1;
+            latestRunAutomated = row.blocking_run_automated === 1;
             latestRunStatus = "failed";
             latestRunRequestedAt =
               row.blocking_run_requested_at === null
@@ -9184,7 +9188,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           latestRunStopRequested,
           latestRunBackgroundWake,
           activeRunId: row.active_run_id === null ? null : RunId.make(row.active_run_id),
-          latestRunAutomated: row.latest_run_automated === 1,
+          latestRunAutomated,
           blockedOnThreadWait: deriveBlockedOnThreadWait({
             activeRun:
               row.active_run_id === null || row.active_run_status !== "running"

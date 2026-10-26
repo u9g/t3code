@@ -20,6 +20,7 @@ import {
   type RuntimeMode,
   type ScheduledTaskId,
   ThreadId,
+  type ThreadMcpServers as ThreadMcpServersSchema,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -57,6 +58,7 @@ import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
 import { DispatchModeLimit } from "./DispatchModeLimit.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 
 export type ThreadLaunchWorkspaceStrategy =
   | { readonly type: "root"; readonly branch?: string | undefined }
@@ -93,6 +95,7 @@ export interface ThreadLaunchInput {
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
+  readonly mcpServers?: ThreadMcpServersSchema;
   readonly importedNativeThread?: {
     readonly ref: {
       readonly driver: ProviderDriverKind;
@@ -258,6 +261,7 @@ const make = Effect.gen(function* () {
     strategy.type === "root" && strategy.branch === undefined
       ? git.currentBranch(workspaceRoot).pipe(Effect.orElseSucceed(() => null))
       : Effect.succeed(strategy.branch ?? null);
+  const threadMcpServers = yield* ThreadMcpServers.ThreadMcpServers;
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -1133,6 +1137,12 @@ const make = Effect.gen(function* () {
         const initialBranch = yield* launchBranch(workspaceStrategy, project.workspaceRoot);
         const initialWorktreePath =
           workspaceStrategy.type === "existing_worktree" ? workspaceStrategy.worktreePath : null;
+        // Saved before the thread exists, so no session of it can start without them.
+        if (input.mcpServers !== undefined && input.reuseExistingThread !== true) {
+          yield* threadMcpServers
+            .save(candidateThreadId, input.mcpServers)
+            .pipe(Effect.mapError(mapError(input, "create-thread", candidateThreadId)));
+        }
         const claimDispatch =
           input.reuseExistingThread === true
             ? threads.dispatch({

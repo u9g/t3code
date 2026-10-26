@@ -1,4 +1,4 @@
-import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
+import type { OrchestrationV2HistoricalMessage, ThreadMcpServers } from "@t3tools/contracts";
 import {
   type AgentFeedbackMode,
   ChatAttachment,
@@ -610,6 +610,8 @@ export interface ProviderAdapterV2TurnInput {
     /** ISO time the note was last set, so a resent note reads as earlier state, not news. */
     readonly updatedAt?: string;
   }>;
+  /** Servers the thread was started with, beside T3 Code's own. Only Claude adapters take them. */
+  readonly mcpServers?: ThreadMcpServers;
 }
 
 export type ProviderAdapterV2ResumeTurnInput = Omit<

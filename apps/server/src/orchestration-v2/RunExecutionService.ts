@@ -60,6 +60,7 @@ import {
 import { makeInterruptResultTurnItem } from "./runInterruptResult.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ThreadCommandExecutor from "./ThreadCommandExecutor.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import { userFacingDatabaseErrorMessage } from "./UserFacingErrors.ts";
 
@@ -740,6 +741,7 @@ export const layer: Layer.Layer<
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const threadCommands = yield* ThreadCommandExecutor.ThreadCommandExecutor;
+    const threadMcpServers = yield* ThreadMcpServers.ThreadMcpServers;
 
     const writeFinalRunEvents = Effect.fn("RunExecutionService.writeFinalRunEvents")(
       function* (input: {
@@ -2324,53 +2326,71 @@ export const layer: Layer.Layer<
         const compact =
           input.message.attachments.length === 0 &&
           input.message.text.trim().toLowerCase() === "/compact";
-        const { message: _message, ...resumeInput } = turnInput;
-        const startTurn =
-          input.resume === true
-            ? (input.session.resumeTurn?.({ ...resumeInput, messageId: input.message.messageId }) ??
-              Effect.fail(
-                new ProviderAdapter.ProviderAdapterTurnStartError({
-                  driver: input.session.driver,
-                  threadId: input.run.threadId,
-                  providerThreadId: input.providerThread.id,
-                  runId: input.run.id,
-                  cause: new ProviderAdapter.ProviderResumeUnsupportedError({
+        const turnStartError = (cause: unknown) =>
+          new ProviderAdapter.ProviderAdapterTurnStartError({
+            driver: input.session.driver,
+            threadId: input.run.threadId,
+            providerThreadId: input.providerThread.id,
+            runId: input.run.id,
+            cause,
+          });
+        // Read for every turn, so restarts, resumes and provider switches keep them.
+        const startTurn = threadMcpServers.read(input.run.threadId).pipe(
+          Effect.mapError((error) => turnStartError(error.message)),
+          Effect.flatMap((mcpServers) => {
+            if (
+              mcpServers !== undefined &&
+              !ThreadMcpServers.driverTakesThreadMcpServers(input.session.driver)
+            ) {
+              return Effect.fail(
+                turnStartError(
+                  new ThreadMcpServers.ThreadMcpServersUnsupportedError({
                     driver: input.session.driver,
-                    providerThreadId: input.providerThread.id,
                   }),
-                }),
-              ))
-            : compact
-              ? (input.session.compactThread?.(turnInput) ??
-                Effect.fail(
-                  new ProviderAdapter.ProviderAdapterTurnStartError({
-                    driver: input.session.driver,
-                    threadId: input.run.threadId,
-                    providerThreadId: input.providerThread.id,
-                    runId: input.run.id,
-                    cause: new ProviderAdapter.ProviderCompactionUnsupportedError({
-                      driver: input.session.driver,
-                      providerThreadId: input.providerThread.id,
-                    }),
-                  }),
-                ))
-              : input.session
-                  .startTurn(turnInput)
-                  .pipe(
-                    Effect.catch((error) =>
-                      input.recoverLostNativeSession === undefined
-                        ? Effect.fail(error)
-                        : input
-                            .recoverLostNativeSession(turnInput, error)
-                            .pipe(
-                              Effect.flatMap((recovered) =>
-                                recovered === undefined
-                                  ? Effect.fail(error)
-                                  : Ref.set(latestProviderThread, recovered),
-                              ),
-                            ),
+                ),
+              );
+            }
+            const startInput = mcpServers === undefined ? turnInput : { ...turnInput, mcpServers };
+            const { message: _message, ...resumeInput } = startInput;
+            return input.resume === true
+              ? (input.session.resumeTurn?.({ ...resumeInput, messageId: input.message.messageId }) ??
+                  Effect.fail(
+                    turnStartError(
+                      new ProviderAdapter.ProviderResumeUnsupportedError({
+                        driver: input.session.driver,
+                        providerThreadId: input.providerThread.id,
+                      }),
                     ),
-                  );
+                  ))
+              : compact
+                ? (input.session.compactThread?.(startInput) ??
+                    Effect.fail(
+                      turnStartError(
+                        new ProviderAdapter.ProviderCompactionUnsupportedError({
+                          driver: input.session.driver,
+                          providerThreadId: input.providerThread.id,
+                        }),
+                      ),
+                    ))
+                : input.session
+                    .startTurn(startInput)
+                    .pipe(
+                      Effect.catch((error) =>
+                        input.recoverLostNativeSession === undefined
+                          ? Effect.fail(error)
+                          : input
+                              .recoverLostNativeSession(startInput, error)
+                              .pipe(
+                                Effect.flatMap((recovered) =>
+                                  recovered === undefined
+                                    ? Effect.fail(error)
+                                    : Ref.set(latestProviderThread, recovered),
+                                ),
+                              ),
+                      ),
+                    );
+          }),
+        );
         yield* Effect.andThen(shouldStart, startTurn).pipe(
           // Wait for acceptance so abandoned startup cannot leave a refresher
           // on the already-detached ingestion fiber.

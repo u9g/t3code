@@ -3635,122 +3635,223 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
     }),
   );
 
-  it.effect("marks the shell while a scheduled task requested the latest run", () =>
-    Effect.gen(function* () {
-      const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
-      const now = yield* DateTime.now;
-      const threadId = ThreadId.make("thread:projection-shell-automated");
-      const runId = RunId.make("run:projection-shell-automated");
-      const rootNodeId = NodeId.make("node:projection-shell-automated");
-      const userMessageId = MessageId.make("message:projection-shell-automated");
+  for (const [index, [requester, prompt, reply, automated]] of (
+    [
+      [
+        "a scheduled task",
+        { createdBy: "user", scheduledTaskId: "scheduled-task:projection-shell-automated" },
+        null,
+        true,
+      ],
+      ["an agent", { createdBy: "agent" }, null, true],
+      [
+        "an agent, then its provider echoed a user message,",
+        { createdBy: "agent" },
+        { source: "provider", afterRequestMs: 1_000 },
+        true,
+      ],
+      [
+        "an agent, after a person's earlier message,",
+        { createdBy: "agent" },
+        { source: "web", afterRequestMs: -60_000 },
+        true,
+      ],
+      [
+        "an agent, then a person replied into another run,",
+        { createdBy: "agent" },
+        { source: "web", afterRequestMs: 1_000 },
+        false,
+      ],
+      [
+        "an agent, then a person answered its question,",
+        { createdBy: "agent" },
+        { source: "server", afterRequestMs: 1_000 },
+        false,
+      ],
+      ["the user", { createdBy: "user" }, null, false],
+    ] as const
+  ).entries()) {
+    it.effect(
+      `marks the shell automated=${automated} when ${requester} requested the latest run`,
+      () =>
+        Effect.gen(function* () {
+          const projectionStore = yield* ProjectionStore.ProjectionStoreV2;
+          const now = yield* DateTime.now;
+          const threadId = ThreadId.make(`thread:projection-shell-automated:${index}`);
+          const runId = RunId.make(`run:projection-shell-automated:${index}`);
+          const rootNodeId = NodeId.make(`node:projection-shell-automated:${index}`);
+          const userMessageId = MessageId.make(`message:projection-shell-automated:${index}`);
 
-      yield* projectionStore.apply({
-        id: EventId.make("event:projection-shell-automated:thread"),
-        type: "thread.created",
-        threadId,
-        occurredAt: now,
-        payload: {
-          createdBy: "user",
-          creationSource: "web",
-          id: threadId,
-          projectId: ProjectId.make("project:projection-shell-automated"),
-          title: "Automated shell run",
-          providerInstanceId,
-          modelSelection,
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          branch: null,
-          worktreePath: null,
-          activeProviderThreadId: null,
-          lineage: {
-            parentThreadId: null,
-            relationshipToParent: null,
-            rootThreadId: threadId,
-          },
-          forkedFrom: null,
-          createdAt: now,
-          updatedAt: now,
-          archivedAt: null,
-          settledOverride: null,
-          settledAt: null,
-          lastVisitedAt: null,
-          deletedAt: null,
-        },
-      });
-      yield* projectionStore.apply({
-        id: EventId.make("event:projection-shell-automated:message"),
-        type: "message.updated",
-        threadId,
-        occurredAt: now,
-        payload: {
-          createdBy: "agent",
-          creationSource: "server",
-          id: userMessageId,
-          threadId,
-          runId,
-          nodeId: rootNodeId,
-          role: "user",
-          text: "Scheduled prompt",
-          attachments: [],
-          scheduledTaskId: ScheduledTaskId.make("scheduled-task:projection-shell-automated"),
-          streaming: false,
-          createdAt: now,
-          updatedAt: now,
-        },
-      });
-      yield* projectionStore.apply({
-        id: EventId.make("event:projection-shell-automated:running"),
-        type: "run.created",
-        threadId,
-        runId,
-        nodeId: rootNodeId,
-        driver,
-        occurredAt: now,
-        payload: {
-          id: runId,
-          threadId,
-          ordinal: 1,
-          providerInstanceId,
-          modelSelection,
-          providerThreadId: null,
-          userMessageId,
-          rootNodeId,
-          activeAttemptId: null,
-          status: "running",
-          requestedAt: now,
-          startedAt: now,
-          completedAt: null,
-          checkpointId: null,
-          contextHandoffId: null,
-        },
-      });
+          yield* projectionStore.apply({
+            id: EventId.make(`event:projection-shell-automated:${index}:thread`),
+            type: "thread.created",
+            threadId,
+            occurredAt: now,
+            payload: {
+              createdBy: "user",
+              creationSource: "web",
+              id: threadId,
+              projectId: ProjectId.make(`project:projection-shell-automated:${index}`),
+              title: "Automated shell run",
+              providerInstanceId,
+              modelSelection,
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              activeProviderThreadId: null,
+              lineage: {
+                parentThreadId: null,
+                relationshipToParent: null,
+                rootThreadId: threadId,
+              },
+              forkedFrom: null,
+              createdAt: now,
+              updatedAt: now,
+              archivedAt: null,
+              settledOverride: null,
+              settledAt: null,
+              lastVisitedAt: null,
+              deletedAt: null,
+            },
+          });
+          yield* projectionStore.apply({
+            id: EventId.make(`event:projection-shell-automated:${index}:message`),
+            type: "message.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              createdBy: prompt.createdBy,
+              creationSource: "server",
+              id: userMessageId,
+              threadId,
+              runId,
+              nodeId: rootNodeId,
+              role: "user",
+              text: "Scheduled prompt",
+              attachments: [],
+              ...("scheduledTaskId" in prompt
+                ? { scheduledTaskId: ScheduledTaskId.make(prompt.scheduledTaskId) }
+                : {}),
+              streaming: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          });
+          yield* projectionStore.apply({
+            id: EventId.make(`event:projection-shell-automated:${index}:running`),
+            type: "run.created",
+            threadId,
+            runId,
+            nodeId: rootNodeId,
+            driver,
+            occurredAt: now,
+            payload: {
+              id: runId,
+              threadId,
+              ordinal: 2,
+              providerInstanceId,
+              modelSelection,
+              providerThreadId: null,
+              userMessageId,
+              rootNodeId,
+              activeAttemptId: null,
+              status: "running",
+              requestedAt: now,
+              startedAt: now,
+              completedAt: null,
+              checkpointId: null,
+              contextHandoffId: null,
+            },
+          });
 
-      const projection = yield* projectionStore.getThreadProjection(threadId);
-      const sqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
-        (row) => row.id === threadId,
-      )!;
-      for (const shell of [sqlShell, ProjectionStore.threadShellFromProjection(projection)]) {
-        assert.equal(shell.activeRunId, runId);
-        assert.isTrue(shell.latestRunAutomated);
-      }
+          if (reply !== null) {
+            const earlierRunId = RunId.make(`run:projection-shell-automated:${index}:earlier`);
+            const repliedAt = DateTime.add(now, { milliseconds: reply.afterRequestMs });
+            yield* projectionStore.apply({
+              id: EventId.make(`event:projection-shell-automated:${index}:earlier`),
+              type: "run.created",
+              threadId,
+              runId: earlierRunId,
+              nodeId: rootNodeId,
+              driver,
+              occurredAt: now,
+              payload: {
+                id: earlierRunId,
+                threadId,
+                ordinal: 1,
+                providerInstanceId,
+                modelSelection,
+                providerThreadId: null,
+                userMessageId: MessageId.make(
+                  `message:projection-shell-automated:${index}:earlier`,
+                ),
+                rootNodeId,
+                activeAttemptId: null,
+                status: "completed",
+                requestedAt: DateTime.subtract(now, { minutes: 5 }),
+                startedAt: DateTime.subtract(now, { minutes: 5 }),
+                completedAt: DateTime.subtract(now, { minutes: 4 }),
+                checkpointId: null,
+                contextHandoffId: null,
+              },
+            });
+            yield* projectionStore.apply({
+              id: EventId.make(`event:projection-shell-automated:${index}:reply`),
+              type: "message.updated",
+              threadId,
+              occurredAt: repliedAt,
+              payload: {
+                createdBy: "user",
+                creationSource: reply.source,
+                id: MessageId.make(`message:projection-shell-automated:${index}:reply`),
+                threadId,
+                runId: earlierRunId,
+                nodeId: rootNodeId,
+                role: "user",
+                text: "Reply",
+                attachments: [],
+                streaming: false,
+                createdAt: repliedAt,
+                updatedAt: repliedAt,
+              },
+            });
+          }
 
-      yield* projectionStore.apply({
-        id: EventId.make("event:projection-shell-automated:completed"),
-        type: "run.updated",
-        threadId,
-        occurredAt: now,
-        payload: { ...projection.runs[0]!, status: "completed", completedAt: now },
-      });
-      const settled = yield* projectionStore.getThreadProjection(threadId);
-      const settledSqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
-        (row) => row.id === threadId,
-      )!;
-      for (const shell of [settledSqlShell, ProjectionStore.threadShellFromProjection(settled)]) {
-        assert.equal(shell.activeRunId, null);
-        assert.isTrue(shell.latestRunAutomated);
-      }
-    }),
-  );
+          const projection = yield* projectionStore.getThreadProjection(threadId);
+          const sqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
+            (row) => row.id === threadId,
+          )!;
+          for (const shell of [sqlShell, ProjectionStore.threadShellFromProjection(projection)]) {
+            assert.equal(shell.activeRunId, runId);
+            assert.equal(shell.latestRunAutomated, automated);
+          }
+
+          yield* projectionStore.apply({
+            id: EventId.make(`event:projection-shell-automated:${index}:completed`),
+            type: "run.updated",
+            threadId,
+            occurredAt: now,
+            payload: {
+              ...projection.runs.find((run) => run.id === runId)!,
+              status: "completed",
+              completedAt: now,
+            },
+          });
+          const settled = yield* projectionStore.getThreadProjection(threadId);
+          const settledSqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
+            (row) => row.id === threadId,
+          )!;
+          for (const shell of [
+            settledSqlShell,
+            ProjectionStore.threadShellFromProjection(settled),
+          ]) {
+            assert.equal(shell.activeRunId, null);
+            assert.equal(shell.latestRunAutomated, automated);
+          }
+        }),
+    );
+  }
 
   it.effect("selects only threads with runtime state that needs recovery", () =>
     Effect.gen(function* () {

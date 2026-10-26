@@ -109,6 +109,7 @@ function curatedCauseMessages(cause: unknown): {
         case "ClaudeMcpRegistrationTimeoutError":
         case "CursorModelUnavailableError":
         case "ProviderSetupError":
+        case "ThreadMcpServersUnsupportedError":
           return { known: stringField(cause, "message"), category: categoryMessage() };
         case "ContextHandoffDeliveryUncertainError":
           return {

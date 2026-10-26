@@ -875,3 +875,34 @@ export class OrchestratorMcpFailure extends Schema.TaggedError<OrchestratorMcpFa
     message: Schema.String,
   },
 ) {}
+
+/** T3 Code's own MCP server, which every thread already has. */
+export const T3_CODE_MCP_SERVER_NAME = "t3-code";
+
+// Claude names a server's tools `mcp__<server>__<tool>`, so its name must survive that unchanged.
+export const ThreadMcpServerName = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{1,64}$/u),
+  Schema.makeFilter(
+    (name) =>
+      name !== T3_CODE_MCP_SERVER_NAME ||
+      `${T3_CODE_MCP_SERVER_NAME} is T3 Code's own MCP server; give yours another name.`,
+  ),
+);
+
+export const ThreadMcpHttpServer = Schema.Struct({
+  type: Schema.Literal("http"),
+  url: Schema.String.check(Schema.isPattern(/^https?:\/\/\S+$/iu)),
+  headers: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+});
+export type ThreadMcpHttpServer = typeof ThreadMcpHttpServer.Type;
+
+/**
+ * MCP servers a thread's agent gets next to T3 Code's own, keyed by name, in the
+ * shape of Claude Code's `--mcp-config` `mcpServers`. Header values are
+ * credentials: the server keeps them to itself and never sends them to clients.
+ */
+export const ThreadMcpServers = Schema.Record(ThreadMcpServerName, ThreadMcpHttpServer).check(
+  Schema.isMinProperties(1),
+  Schema.isMaxProperties(16),
+);
+export type ThreadMcpServers = typeof ThreadMcpServers.Type;

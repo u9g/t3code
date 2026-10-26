@@ -61,6 +61,7 @@ import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 import * as ThreadTitleRegeneration from "./ThreadTitleRegenerationService.ts";
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import * as RemoteDelegation from "../peer/RemoteDelegation.ts";
@@ -1451,6 +1452,58 @@ it.effect.each(["failed", "interrupted"] as const)(
     }).pipe(Effect.provide(harness.layer));
   },
 );
+
+const gemMcpServers = {
+  gem: {
+    type: "http" as const,
+    url: "http://127.0.0.1:7341/mcp",
+    headers: { Authorization: "Bearer gem-token" },
+  },
+};
+
+it.effect("keeps a launch's MCP servers for its thread, out of the thread's events", () => {
+  const saved = new Map<ThreadId, unknown>();
+  const harness = makeHarness();
+  const layerStore = Layer.succeed(ThreadMcpServers.ThreadMcpServers, {
+    save: (threadId, servers) => Effect.sync(() => void saved.set(threadId, servers)),
+    read: () => Effect.die("unused"),
+    remove: () => Effect.die("unused"),
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch({
+      ...launchInput({ command: "command:launch:mcp", thread: "thread:mcp", message: "Go" }),
+      mcpServers: gemMcpServers,
+    });
+
+    assert.deepStrictEqual([...saved], [[launched.threadId, gemMcpServers]]);
+    const events = yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+      Stream.takeUntil((stored) => stored.event.type === "run.created"),
+      Stream.runCollect,
+    );
+    assert.notInclude(JSON.stringify(events), "gem-token");
+  }).pipe(Effect.provide(harness.layer.pipe(Layer.provide(layerStore))));
+});
+
+it.effect("creates no thread when its MCP servers cannot be kept", () => {
+  // The default store keeps nothing, as when the server has no secret store.
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const threadId = ThreadId.make("thread:mcp-unsaved");
+    const exit = yield* launches
+      .launch({
+        ...launchInput({ command: "command:launch:mcp-unsaved", thread: threadId, message: "Go" }),
+        mcpServers: gemMcpServers,
+      })
+      .pipe(Effect.exit);
+
+    assert.isTrue(Exit.isFailure(exit));
+    assert.isNull(yield* threads.getThreadShell(threadId));
+  }).pipe(Effect.provide(harness.layer));
+});
 
 it.effect("replays a server-allocated launch", () =>
   Effect.gen(function* () {

@@ -166,6 +166,7 @@ export const make = Effect.gen(function* () {
   const readerContext = yield* Effect.context<BuiltInUsageReadersEnv>();
   const sql = yield* SqlClient.SqlClient;
   // Prompts this server sent on its own. A database without the tables yet has none.
+  // Provider-native subagent prompts have no run, so the join leaves them out.
   const readServerPrompts = (sinceMs: number) =>
     sql<{
       readonly kind: UsageServerPromptKind;
@@ -173,14 +174,18 @@ export const make = Effect.gen(function* () {
       readonly provider: string;
       readonly model: string | null;
     }>`
-      SELECT 'scheduledPrompts' AS kind,
+      SELECT CASE
+          WHEN json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+          THEN 'scheduledPrompts' ELSE 'delegatedPrompts'
+        END AS kind,
         message.created_at AS created_at,
         run.provider AS provider,
         json_extract(run.payload_json, '$.modelSelection.model') AS model
       FROM orchestration_v2_projection_messages AS message
       JOIN orchestration_v2_projection_runs AS run ON run.run_id = message.run_id
       WHERE message.role = 'user'
-        AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+        AND (json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+          OR json_extract(message.payload_json, '$.senderThreadId') IS NOT NULL)
         AND message.created_at >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
     `.pipe(Effect.orElseSucceed(() => []));
 

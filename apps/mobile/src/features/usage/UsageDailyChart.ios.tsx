@@ -3,7 +3,12 @@ import { frame } from "@expo/ui/swift-ui/modifiers";
 
 import type { DailyTotals } from "@t3tools/shared/usageMerge";
 
-import { buildChartDays, SCHEDULED_COLOR, type UsageChartMetric } from "./usageChartData";
+import {
+  buildChartDays,
+  DELEGATED_COLOR,
+  SCHEDULED_COLOR,
+  type UsageChartMetric,
+} from "./usageChartData";
 import { useProviderColors } from "./usageProviders";
 
 export interface UsageDailyChartProps {
@@ -23,6 +28,7 @@ export function UsageDailyChart({ days, daily, metric, height }: UsageDailyChart
       color: colors[entry.provider],
     })),
     { x: day.day, y: day.scheduled, color: SCHEDULED_COLOR },
+    { x: day.day, y: day.delegated, color: DELEGATED_COLOR },
   ]);
 
   return (

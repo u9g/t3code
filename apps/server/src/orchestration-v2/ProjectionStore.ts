@@ -1630,8 +1630,24 @@ function isAutomatedRunForShell(
   run: OrchestrationV2ThreadProjection["runs"][number],
   projection: Pick<OrchestrationV2ThreadProjection, "messages">,
 ): boolean {
-  return projection.messages.some(
-    (message) => message.id === run.userMessageId && message.scheduledTaskId !== undefined,
+  const prompt = projection.messages.find((message) => message.id === run.userMessageId);
+  if (
+    prompt === undefined ||
+    (prompt.scheduledTaskId === undefined && prompt.createdBy !== "agent")
+  ) {
+    return false;
+  }
+  // Steers and queue promotions can attach a person's reply to a run other than the presented
+  // one, so any message from a person since the run was requested releases the thread. Promotion
+  // restamps the prompt, so the run's request time is the stable reference.
+  const requestedAt = DateTime.toEpochMillis(run.requestedAt);
+  return !projection.messages.some(
+    (message) =>
+      message.role === "user" &&
+      message.createdBy === "user" &&
+      message.scheduledTaskId === undefined &&
+      message.creationSource !== "provider" &&
+      DateTime.toEpochMillis(message.createdAt) >= requestedAt,
   );
 }
 
@@ -5882,9 +5898,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     const isAutomatedShellRun = (alias: string) => {
       const run = sql.literal(alias);
       return sql`EXISTS (
-        SELECT 1 FROM orchestration_v2_projection_messages message
-        WHERE message.message_id = json_extract(${run}.payload_json, '$.userMessageId')
-          AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+        SELECT 1 FROM orchestration_v2_projection_messages prompt
+        WHERE prompt.message_id = json_extract(${run}.payload_json, '$.userMessageId')
+          AND (
+            json_extract(prompt.payload_json, '$.scheduledTaskId') IS NOT NULL
+            OR json_extract(prompt.payload_json, '$.createdBy') IS 'agent'
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM orchestration_v2_projection_messages reply
+            WHERE reply.thread_id = prompt.thread_id AND reply.role = 'user'
+              AND reply.created_at >= ${run}.requested_at
+              AND json_extract(reply.payload_json, '$.createdBy') IS 'user'
+              AND json_extract(reply.payload_json, '$.scheduledTaskId') IS NULL
+              AND json_extract(reply.payload_json, '$.creationSource') IS NOT 'provider'
+          )
       )`;
     };
 

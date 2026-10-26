@@ -240,18 +240,31 @@ describe("scheduled prompts", () => {
       rates,
       modelAliases: resolveModelAliases({ "claude-fable-5-preview": "claude-fable-5" }),
     });
-    aggregator.addScheduledPrompt(
+    aggregator.addServerPrompt(
+      "scheduledPrompts",
       Date.parse("2026-08-02T10:00:00Z"),
       "claude",
       "claude-fable-5-preview",
     );
-    aggregator.addScheduledPrompt(Date.parse("2026-08-02T11:00:00Z"), "claude", "claude-fable-5");
-    aggregator.addScheduledPrompt(Date.parse("2026-09-02T10:00:00Z"), "claude", "claude-fable-5");
+    aggregator.addServerPrompt(
+      "scheduledPrompts",
+      Date.parse("2026-08-02T11:00:00Z"),
+      "claude",
+      "claude-fable-5",
+    );
+    aggregator.addServerPrompt(
+      "scheduledPrompts",
+      Date.parse("2026-09-02T10:00:00Z"),
+      "claude",
+      "claude-fable-5",
+    );
 
     const result = aggregator.finish();
-    expect(result.scheduledPrompts).toEqual([
-      { day: "2026-08-02", provider: "claude", model: "claude-fable-5", count: 2 },
-    ]);
+    expect(result.serverPrompts).toEqual({
+      scheduledPrompts: [
+        { day: "2026-08-02", provider: "claude", model: "claude-fable-5", count: 2 },
+      ],
+    });
     expect(result.buckets).toEqual([]);
   });
 });

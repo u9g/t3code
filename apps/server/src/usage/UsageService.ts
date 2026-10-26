@@ -4,6 +4,7 @@ import {
   USAGE_CONTRACT_VERSION,
   type ServerSettings as ServerSettingsValue,
   UsageProviderKind,
+  type UsageServerPromptKind,
   type UsageSource,
   type UsagePricing,
   type UsageSummary,
@@ -164,14 +165,16 @@ export const make = Effect.gen(function* () {
   const hostname = yield* HostProcess.Hostname;
   const readerContext = yield* Effect.context<BuiltInUsageReadersEnv>();
   const sql = yield* SqlClient.SqlClient;
-  // Prompts this server's scheduled tasks sent. A database without the tables yet has none.
-  const readScheduledPrompts = (sinceMs: number) =>
+  // Prompts this server sent on its own. A database without the tables yet has none.
+  const readServerPrompts = (sinceMs: number) =>
     sql<{
+      readonly kind: UsageServerPromptKind;
       readonly created_at: string;
       readonly provider: string;
       readonly model: string | null;
     }>`
-      SELECT message.created_at AS created_at,
+      SELECT 'scheduledPrompts' AS kind,
+        message.created_at AS created_at,
         run.provider AS provider,
         json_extract(run.payload_json, '$.modelSelection.model') AS model
       FROM orchestration_v2_projection_messages AS message
@@ -896,11 +899,11 @@ export const make = Effect.gen(function* () {
     const pruned = pruneScanCache(fileCache, retentionCutoffMs);
     if (pruned > 0) cacheDirty = true;
 
-    for (const row of yield* readScheduledPrompts(windowStartMs)) {
+    for (const row of yield* readServerPrompts(windowStartMs)) {
       const provider = usageProviderForDriver(row.provider);
       const timestampMs = Date.parse(row.created_at);
       if (provider === null || row.model === null || Number.isNaN(timestampMs)) continue;
-      aggregator.addScheduledPrompt(timestampMs, provider, row.model);
+      aggregator.addServerPrompt(row.kind, timestampMs, provider, row.model);
     }
     const aggregated = aggregator.finish();
     const readAt = yield* DateTime.now;
@@ -917,9 +920,7 @@ export const make = Effect.gen(function* () {
       pricing: pricing(),
       scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),
       ...(input.modelFilter === undefined ? {} : { modelFilter: input.modelFilter }),
-      ...(aggregated.scheduledPrompts.length === 0
-        ? {}
-        : { scheduledPrompts: aggregated.scheduledPrompts }),
+      ...aggregated.serverPrompts,
     } satisfies UsageSummary;
   });
 

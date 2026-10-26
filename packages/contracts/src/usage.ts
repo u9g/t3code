@@ -73,7 +73,7 @@ export const UsageBucket = Schema.Struct({
 export type UsageBucket = typeof UsageBucket.Type;
 
 /** The summary keys of prompts a server counts from its own records rather than transcripts. */
-export const USAGE_SERVER_PROMPT_KINDS = ["scheduledPrompts"] as const;
+export const USAGE_SERVER_PROMPT_KINDS = ["scheduledPrompts", "delegatedPrompts"] as const;
 export type UsageServerPromptKind = (typeof USAGE_SERVER_PROMPT_KINDS)[number];
 
 export const UsageServerPrompts = Schema.Struct({
@@ -147,6 +147,8 @@ export const UsageSummary = Schema.Struct({
   scanDurationMs: NonNegativeInt,
   /** Prompts a T3 Code scheduled task sent. */
   scheduledPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageServerPrompts)),
+  /** Prompts another thread's agent sent, as `delegate_task` and `t3_thread_send` do. */
+  delegatedPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageServerPrompts)),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 

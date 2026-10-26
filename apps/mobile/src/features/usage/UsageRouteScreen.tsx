@@ -151,6 +151,7 @@ function UsageScreen(props: {
         totalTokens: hour.totalTokens,
         prompts: hour.prompts,
         scheduledPrompts: hour.scheduledPrompts,
+        delegatedPrompts: hour.delegatedPrompts,
         byProvider: hour.byProvider,
       }))
     : merged.daily;
@@ -565,7 +566,7 @@ function ChartCard(props: {
           {metric === "cost"
             ? "* if billed at full API rate"
             : metric === "turns"
-              ? `${formatCount(merged.scheduledPrompts)} scheduled · across ${formatCount(merged.sessions)} sessions`
+              ? `${formatCount(merged.scheduledPrompts)} scheduled · ${formatCount(merged.delegatedPrompts)} delegated · across ${formatCount(merged.sessions)} sessions`
               : `Across ${formatCount(merged.sessions)} sessions`}
         </Text>
       </View>
@@ -708,7 +709,7 @@ function ProviderSection(props: {
                 ? `${formatPercent(share)} of cost · ${formatTokens(provider.totalTokens)} tokens`
                 : metric === "tokens"
                   ? `${formatPercent(share)} of tokens · ${formatUsd(provider.costUsd)}`
-                  : `${formatPercent(share)} of turns · ${formatCount(provider.scheduledPrompts)} scheduled · ${formatTokens(provider.totalTokens)} tokens`}
+                  : `${formatPercent(share)} of turns · ${formatCount(provider.scheduledPrompts)} scheduled · ${formatCount(provider.delegatedPrompts)} delegated · ${formatTokens(provider.totalTokens)} tokens`}
             </Text>
           </View>
         );
@@ -894,7 +895,7 @@ function ModelsSection(props: { readonly merged: MergedUsage; readonly metric: U
             </Text>
             <Text className="text-sm text-foreground-muted">
               {metric === "turns"
-                ? `${formatPercent(merged.prompts > 0 ? model.prompts / merged.prompts : 0)} of turns · ${formatCount(model.scheduledPrompts)} scheduled`
+                ? `${formatPercent(merged.prompts > 0 ? model.prompts / merged.prompts : 0)} of turns · ${formatCount(model.scheduledPrompts)} scheduled · ${formatCount(model.delegatedPrompts)} delegated`
                 : metric === "tokens"
                   ? `${formatPercent(model.tokenShare)} of tokens · ${
                       isModelCostUnknown(model) ? "no known rates" : formatUsd(model.costUsd)

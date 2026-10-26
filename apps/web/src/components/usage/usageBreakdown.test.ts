@@ -23,6 +23,7 @@ const model = (
   records: 1,
   prompts: 0,
   scheduledPrompts: 0,
+  delegatedPrompts: 0,
   unpricedRecords: 0,
   unpricedTokens: 0,
   costShare: 0,

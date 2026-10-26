@@ -562,7 +562,7 @@ describe("mergeUsage", () => {
   });
 });
 
-describe("mergeUsage scheduled prompts", () => {
+describe("mergeUsage server prompts", () => {
   it("adds each server's scheduled prompts to the totals, providers, models and days", () => {
     const source = { provider: "claude" as const, hostId: "mac", homePath: "/Users/me/.claude" };
     const withScheduled = (count: number): UsageSummary => ({
@@ -587,5 +587,24 @@ describe("mergeUsage scheduled prompts", () => {
     expect(merged.providers.find((entry) => entry.provider === "claude")?.scheduledPrompts).toBe(5);
     expect(merged.models[0]?.scheduledPrompts).toBe(5);
     expect(merged.daily[0]?.scheduledPrompts).toBe(5);
+  });
+
+  it("keeps delegated prompts apart from scheduled ones", () => {
+    const source = { provider: "codex" as const, hostId: "mac", homePath: "/Users/me/.codex" };
+    const merged = mergeUsage(
+      [
+        environment("mac", {
+          ...summary([bucket({ provider: "codex", prompts: 6 })], [source]),
+          delegatedPrompts: [
+            { day: "2026-08-07" as UsageDay, provider: "codex", model: "gpt-6-sol", count: 4 },
+          ],
+        }),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+    expect(merged.delegatedPrompts).toBe(4);
+    expect(merged.scheduledPrompts).toBe(0);
+    expect(merged.providers.find((entry) => entry.provider === "codex")?.delegatedPrompts).toBe(4);
+    expect(merged.daily[0]?.byProvider.get("codex")?.delegatedPrompts).toBe(4);
   });
 });

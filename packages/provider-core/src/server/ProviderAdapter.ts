@@ -1,4 +1,4 @@
-import type { OrchestrationV2HistoricalMessage } from "@t3tools/contracts";
+import type { OrchestrationV2HistoricalMessage, ThreadMcpServers } from "@t3tools/contracts";
 import {
   ChatAttachment,
   CheckpointId,
@@ -453,6 +453,8 @@ export interface ProviderAdapterV2TurnInput {
   readonly modelSelection: ModelSelection;
   readonly runtimePolicy: ProviderAdapterV2RuntimePolicy;
   readonly appContext?: ReadonlyArray<{ readonly key: string; readonly text: string }>;
+  /** Servers the thread was started with, beside T3 Code's own. Only Claude adapters take them. */
+  readonly mcpServers?: ThreadMcpServers;
 }
 
 export interface ProviderAdapterV2SteerInput {

@@ -1,8 +1,10 @@
 import {
   USAGE_MERGE_COMPATIBLE_SINCE,
+  USAGE_SERVER_PROMPT_KINDS,
   type EnvironmentId,
   type UsageBucket,
   type UsageProviderKind,
+  type UsageServerPromptKind,
   type UsageSource,
   type UsageSourceFingerprint,
   type UsageSummary,
@@ -366,7 +368,7 @@ export function mergeUsage(
   let reasoningTokens = 0;
   let records = 0;
   let prompts = 0;
-  let scheduledPrompts = 0;
+  const serverPrompts: Record<UsageServerPromptKind, number> = { scheduledPrompts: 0 };
   let sessions = 0;
   let cacheSavingsUsd = 0;
   let providerReportedRecords = 0;
@@ -432,73 +434,75 @@ export function mergeUsage(
     );
     if (buckets.length > 0) contributingEnvironments.push(environment.environmentId);
 
-    // Each server reports only its own scheduled tasks, so these never overlap across environments.
-    for (const entry of environment.summary.scheduledPrompts ?? []) {
-      scheduledPrompts += entry.count;
-      const provider = providerAccumulator.get(entry.provider) ?? {
-        costUsd: 0,
-        totalTokens: 0,
-        records: 0,
-        prompts: 0,
-        scheduledPrompts: 0,
-        sessions: 0,
-      };
-      provider.scheduledPrompts += entry.count;
-      providerAccumulator.set(entry.provider, provider);
+    // Each server reports only the prompts it sent, so these never overlap across environments.
+    for (const kind of USAGE_SERVER_PROMPT_KINDS) {
+      for (const entry of environment.summary[kind] ?? []) {
+        serverPrompts[kind] += entry.count;
+        const provider = providerAccumulator.get(entry.provider) ?? {
+          costUsd: 0,
+          totalTokens: 0,
+          records: 0,
+          prompts: 0,
+          scheduledPrompts: 0,
+          sessions: 0,
+        };
+        provider[kind] += entry.count;
+        providerAccumulator.set(entry.provider, provider);
 
-      const modelKey = `${entry.provider} ${entry.model}`;
-      const model = modelAccumulator.get(modelKey) ?? {
-        provider: entry.provider,
-        costUsd: 0,
-        totalTokens: 0,
-        tokens: { ...EMPTY_TOKEN_TOTALS },
-        records: 0,
-        prompts: 0,
-        scheduledPrompts: 0,
-        unpricedRecords: 0,
-        unpricedTokens: 0,
-      };
-      model.scheduledPrompts += entry.count;
-      modelAccumulator.set(modelKey, model);
+        const modelKey = `${entry.provider} ${entry.model}`;
+        const model = modelAccumulator.get(modelKey) ?? {
+          provider: entry.provider,
+          costUsd: 0,
+          totalTokens: 0,
+          tokens: { ...EMPTY_TOKEN_TOTALS },
+          records: 0,
+          prompts: 0,
+          scheduledPrompts: 0,
+          unpricedRecords: 0,
+          unpricedTokens: 0,
+        };
+        model[kind] += entry.count;
+        modelAccumulator.set(modelKey, model);
 
-      const day = dailyAccumulator.get(entry.day) ?? {
-        costUsd: 0,
-        totalTokens: 0,
-        prompts: 0,
-        scheduledPrompts: 0,
-        byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
-      };
-      day.scheduledPrompts += entry.count;
-      const dayProvider = day.byProvider.get(entry.provider) ?? {
-        costUsd: 0,
-        totalTokens: 0,
-        prompts: 0,
-        scheduledPrompts: 0,
-      };
-      dayProvider.scheduledPrompts += entry.count;
-      day.byProvider.set(entry.provider, dayProvider);
-      dailyAccumulator.set(entry.day, day);
-
-      if (entry.hourStart !== undefined) {
-        const hour = hourlyAccumulator.get(entry.hourStart) ?? {
-          day: entry.day,
-          hourStart: entry.hourStart,
+        const day = dailyAccumulator.get(entry.day) ?? {
           costUsd: 0,
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
           byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
         };
-        hour.scheduledPrompts += entry.count;
-        const hourProvider = hour.byProvider.get(entry.provider) ?? {
+        day[kind] += entry.count;
+        const dayProvider = day.byProvider.get(entry.provider) ?? {
           costUsd: 0,
           totalTokens: 0,
           prompts: 0,
           scheduledPrompts: 0,
         };
-        hourProvider.scheduledPrompts += entry.count;
-        hour.byProvider.set(entry.provider, hourProvider);
-        hourlyAccumulator.set(entry.hourStart, hour);
+        dayProvider[kind] += entry.count;
+        day.byProvider.set(entry.provider, dayProvider);
+        dailyAccumulator.set(entry.day, day);
+
+        if (entry.hourStart !== undefined) {
+          const hour = hourlyAccumulator.get(entry.hourStart) ?? {
+            day: entry.day,
+            hourStart: entry.hourStart,
+            costUsd: 0,
+            totalTokens: 0,
+            prompts: 0,
+            scheduledPrompts: 0,
+            byProvider: new Map<UsageProviderKind, PeriodProviderTotals>(),
+          };
+          hour[kind] += entry.count;
+          const hourProvider = hour.byProvider.get(entry.provider) ?? {
+            costUsd: 0,
+            totalTokens: 0,
+            prompts: 0,
+            scheduledPrompts: 0,
+          };
+          hourProvider[kind] += entry.count;
+          hour.byProvider.set(entry.provider, hourProvider);
+          hourlyAccumulator.set(entry.hourStart, hour);
+        }
       }
     }
 
@@ -698,7 +702,7 @@ export function mergeUsage(
     totalTokens,
     records,
     prompts,
-    scheduledPrompts,
+    ...serverPrompts,
     sessions,
     providers,
     models,

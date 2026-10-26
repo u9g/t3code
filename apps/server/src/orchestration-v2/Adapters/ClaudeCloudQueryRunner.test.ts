@@ -679,7 +679,7 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
           const session = yield* restarted.open(openInput({ resume: false }));
           assert.include(
             session.startupNotices ?? [],
-            "This thread has no project, so its cloud session starts from `pnpm/pnpm`, which Claude chose when the thread began.",
+            "This thread has no project, so its cloud session starts from `pnpm/pnpm`, as chosen when the thread began.",
           );
           yield* session.close;
         }),
@@ -728,6 +728,77 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
             reason: "repository_not_chosen",
             asked: 0,
           });
+        }),
+      );
+
+      it.effect("starts from the fallback repository when Claude cannot tell or cannot run", () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const sourceFor = (
+            answer: Effect.Effect<ClaudeCloudRepositoryChoice, ClaudeCloudRepositoryChoiceError>,
+            // null: the thread is started without a message.
+            messageText: string | null = REBASE_MESSAGE,
+          ) =>
+            Effect.gen(function* () {
+              const scratch = yield* makeScratchThread(answer);
+              const filesDir = yield* fileSystem.makeTempDirectoryScoped({
+                prefix: "t3-claude-cloud-files-",
+              });
+              const fake = makeFakeApi();
+              const withoutProject = {
+                ...scratch.withoutProject,
+                fallbackRepository: "u9g/scratch",
+              };
+              const runner = yield* makeRunner({
+                api: fake.api,
+                sdk: makeFakeSdk().sdk,
+                filesDir,
+                withoutProject,
+              });
+              yield* allocate(runner, {
+                ...allocateInput(scratch.cwd),
+                ...(messageText === null ? {} : { messageText }),
+              });
+              const session = yield* runner.open(openInput({ resume: false }));
+              const notices = session.startupNotices ?? [];
+              yield* session.close;
+
+              // A later session keeps the fallback rather than asking Claude again.
+              const restarted = yield* makeRunner({
+                api: fake.api,
+                sdk: makeFakeSdk().sdk,
+                filesDir,
+                withoutProject,
+              });
+              yield* allocate(restarted, { ...allocateInput(scratch.cwd), messageText: "go on" });
+              return {
+                sources: fake.created.map((created) => created.source),
+                asked: scratch.requests.length,
+                notices,
+              };
+            });
+
+          const notChosen = yield* sourceFor(
+            Effect.fail(
+              new ClaudeCloudRepositoryChoiceError({ reason: "not_chosen", detail: "Unclear." }),
+            ),
+          );
+          const fallback = { repoUrl: "https://github.com/u9g/scratch", revision: null };
+          assert.deepEqual(notChosen.sources, [fallback, fallback]);
+          assert.equal(notChosen.asked, 1);
+          assert.include(
+            notChosen.notices,
+            "This thread has no project, and Claude on this machine could not choose a repository for it, so its cloud session starts from the fallback repository `u9g/scratch`.",
+          );
+          const failed = yield* sourceFor(
+            Effect.fail(
+              new ClaudeCloudRepositoryChoiceError({ reason: "failed", detail: "Not logged in" }),
+            ),
+          );
+          assert.deepEqual(failed.sources, [fallback, fallback]);
+          const noMessage = yield* sourceFor(Effect.die("unused"), null);
+          assert.deepEqual(noMessage.sources, [fallback, fallback]);
+          assert.equal(noMessage.asked, 0);
         }),
       );
 

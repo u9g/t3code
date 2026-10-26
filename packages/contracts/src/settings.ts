@@ -742,6 +742,15 @@ export const ClaudeCloudSettings = makeProviderSettingsSchema(
         providerSettingsForm: { placeholder: "env_…", clearWhenEmpty: "omit" },
       }),
     ),
+    fallbackRepository: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.annotateKey({
+        title: "Fallback repository",
+        description:
+          "GitHub repository (owner/name) that threads without a project start from when Claude cannot tell which repository they are for. Leave empty to fail those threads instead.",
+        providerSettingsForm: { placeholder: "owner/name", clearWhenEmpty: "omit" },
+      }),
+    ),
     homePath: TrimmedString.pipe(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
@@ -765,7 +774,7 @@ export const ClaudeCloudSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["environmentId", "homePath", "binaryPath"],
+    order: ["environmentId", "fallbackRepository", "homePath", "binaryPath"],
   },
 );
 export type ClaudeCloudSettings = typeof ClaudeCloudSettings.Type;

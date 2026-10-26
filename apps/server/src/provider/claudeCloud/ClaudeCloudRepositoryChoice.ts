@@ -209,8 +209,8 @@ const listGitHubCheckouts = Effect.fn("listGitHubCheckouts")(function* (homeDire
   return lines;
 });
 
-/** `owner/name` from Claude's answer, which may be a github.com URL, else null. */
-const normalizeRepository = (answer: string): string | null => {
+/** `owner/name` from Claude's answer or a setting, which may be a github.com URL, else null. */
+export const normalizeRepository = (answer: string): string | null => {
   const value = answer.trim().replace(/^(?:www\.)?github\.com\//iu, "");
   const repository = parseGitHubRepository(
     value.includes(":") ? value : `https://github.com/${value}`,

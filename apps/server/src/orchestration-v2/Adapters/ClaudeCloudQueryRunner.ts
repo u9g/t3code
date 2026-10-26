@@ -158,6 +158,11 @@ export interface ClaudeCloudQueryRunnerOptions {
   readonly withoutProject?: {
     readonly scratchRoot: string;
     readonly chooseRepository: ChooseClaudeCloudRepository;
+    /**
+     * `owner/name` of the repository such a thread starts from, on its default
+     * branch, when Claude cannot choose one. Without it, the thread fails.
+     */
+    readonly fallbackRepository?: string | undefined;
   };
   /** The browser Agent SDK. Tests replace it. */
   readonly sdk?: {
@@ -380,13 +385,12 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
   };
 
   /**
-   * The repository of a thread under "No project". Claude on this machine
-   * chooses it from the thread's first message, and the choice is kept beside
-   * the thread's downloads, so a later session for the thread, such as one
-   * replacing a session archived on claude.ai, starts from the same place.
+   * The repository of a thread under "No project": Claude's choice from the
+   * first message, else the fallback repository. It is saved beside the
+   * thread's downloads, so a replacement session starts from the same place.
    */
   const chosenRepository = Effect.fn("ClaudeCloudQueryRunner.chosenRepository")(function* (
-    chooseRepository: ChooseClaudeCloudRepository,
+    { chooseRepository, fallbackRepository }: NonNullable<typeof withoutProject>,
     input: ClaudeAgentSdkSessionAllocateInput,
     cwd: string,
     model: { readonly model: string; readonly effortLevel: EffortLevel | undefined },
@@ -407,28 +411,49 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
     if (Option.isSome(saved)) {
       return {
         choice: saved.value,
-        notice: `This thread has no project, so its cloud session starts from ${startingPoint(saved.value)}, which Claude chose when the thread began.`,
+        notice: `This thread has no project, so its cloud session starts from ${startingPoint(saved.value)}, as chosen when the thread began.`,
       };
     }
     const messageText = input.messageText?.trim() ?? "";
-    if (messageText === "") {
-      return yield* new ClaudeAgentSdkQueryRunnerError({
-        method: "chooseRepository",
-        cause: "The thread has no message to choose a repository from.",
-        reason: "repository_not_chosen",
-      });
-    }
-    const choice = yield* chooseRepository({ cwd, messageText, ...model }).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ClaudeAgentSdkQueryRunnerError({
-            method: "chooseRepository",
-            cause,
-            reason:
-              cause.reason === "not_chosen" ? "repository_not_chosen" : "repository_choice_failed",
-          }),
+    const chosen = yield* (
+      messageText === ""
+        ? Effect.fail(
+            new ClaudeAgentSdkQueryRunnerError({
+              method: "chooseRepository",
+              cause: "The thread has no message to choose a repository from.",
+              reason: "repository_not_chosen",
+            }),
+          )
+        : chooseRepository({ cwd, messageText, ...model }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ClaudeAgentSdkQueryRunnerError({
+                  method: "chooseRepository",
+                  cause,
+                  reason:
+                    cause.reason === "not_chosen"
+                      ? "repository_not_chosen"
+                      : "repository_choice_failed",
+                }),
+            ),
+          )
+    ).pipe(
+      Effect.map((choice) => ({ choice, fallback: false })),
+      Effect.catch((error) =>
+        fallbackRepository === undefined
+          ? Effect.fail(error)
+          : Effect.logWarning(
+              "Claude Cloud starts a thread without a project from the fallback repository.",
+              { reason: error.reason },
+            ).pipe(
+              Effect.as({
+                choice: { repository: fallbackRepository, branch: null, reason: "" },
+                fallback: true,
+              }),
+            ),
       ),
     );
+    const { choice } = chosen;
     if (choiceFile !== null) {
       // Without it, a replacement session asks Claude again, from its own message.
       yield* fileSystem.makeDirectory(path.dirname(choiceFile), { recursive: true }).pipe(
@@ -443,7 +468,9 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
     }
     return {
       choice,
-      notice: `This thread has no project, so Claude on this machine chose ${startingPoint(choice)}${choice.reason === "" ? "." : `: ${choice.reason}`}`,
+      notice: chosen.fallback
+        ? `This thread has no project, and Claude on this machine could not choose a repository for it, so its cloud session starts from the fallback repository ${startingPoint(choice)}.`
+        : `This thread has no project, so Claude on this machine chose ${startingPoint(choice)}${choice.reason === "" ? "." : `: ${choice.reason}`}`,
     };
   });
 
@@ -469,12 +496,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
       cause.reason === "not_a_repository" &&
       isScratchFolder(withoutProject.scratchRoot, cwd)
     ) {
-      const { choice, notice } = yield* chosenRepository(
-        withoutProject.chooseRepository,
-        input,
-        cwd,
-        model,
-      );
+      const { choice, notice } = yield* chosenRepository(withoutProject, input, cwd, model);
       return {
         repoUrl: `https://github.com/${choice.repository}`,
         revision: choice.branch,

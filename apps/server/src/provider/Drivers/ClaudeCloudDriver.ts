@@ -50,7 +50,10 @@ import * as ClaudeCloudApi from "../claudeCloud/ClaudeCloudApi.ts";
 import * as ClaudeCloudCredentials from "../claudeCloud/ClaudeCloudCredentials.ts";
 import { claudeCloudFilesDir } from "../claudeCloud/ClaudeCloudFiles.ts";
 import { makeRefreshingClaudeCloudLogin } from "../claudeCloud/ClaudeCloudLoginRefresh.ts";
-import { makeClaudeCloudRepositoryChooser } from "../claudeCloud/ClaudeCloudRepositoryChoice.ts";
+import {
+  makeClaudeCloudRepositoryChooser,
+  normalizeRepository,
+} from "../claudeCloud/ClaudeCloudRepositoryChoice.ts";
 import {
   checkClaudeCloudProviderStatus,
   makePendingClaudeCloudProvider,
@@ -181,6 +184,15 @@ export const ClaudeCloudDriver: ProviderDriver<ClaudeCloudSettings, ClaudeCloudD
       binaryPath: effectiveConfig.binaryPath,
       environment: claudeEnvironment,
     });
+    const fallbackRepository =
+      effectiveConfig.fallbackRepository === ""
+        ? null
+        : normalizeRepository(effectiveConfig.fallbackRepository);
+    if (fallbackRepository === null && effectiveConfig.fallbackRepository !== "") {
+      yield* Effect.logWarning(
+        "Claude Cloud ignores its fallback repository setting, which is not a GitHub owner/name.",
+      );
+    }
 
     const queryRunner = yield* makeClaudeCloudQueryRunner({
       api,
@@ -188,7 +200,11 @@ export const ClaudeCloudDriver: ProviderDriver<ClaudeCloudSettings, ClaudeCloudD
       configDir: loginLocation.configDir,
       filesDir: yield* claudeCloudFilesDir,
       // Where ManagedProjectFolders makes the folders of "No project" threads.
-      withoutProject: { scratchRoot: path.resolve(baseDir, "scratch"), chooseRepository },
+      withoutProject: {
+        scratchRoot: path.resolve(baseDir, "scratch"),
+        chooseRepository,
+        fallbackRepository: fallbackRepository ?? undefined,
+      },
     }).pipe(Effect.provide(VcsProcess.layer));
 
     // The adapter reads Claude settings; only the custom models and the

@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   AuthDiagnosticsReadScope,
   USAGE_CONTRACT_VERSION,
+  USAGE_SERVER_PROMPT_KINDS,
   type EnvironmentId,
   type UsageBucket,
   type UsageSummary,
@@ -88,7 +89,7 @@ export interface UsageView {
 
 export function mergeAnsweredUsage(
   environments: readonly EnvironmentUsageStatus[],
-  keepBucket?: (bucket: UsageBucket) => boolean,
+  keep?: (entry: Pick<UsageBucket, "provider" | "model">) => boolean,
 ): MergedUsage {
   const answered: EnvironmentUsage[] = environments.flatMap(({ environmentId, label, summary }) =>
     summary === null
@@ -97,14 +98,27 @@ export function mergeAnsweredUsage(
           {
             environmentId,
             label,
-            summary:
-              keepBucket === undefined
-                ? summary
-                : { ...summary, buckets: summary.buckets.filter(keepBucket) },
+            summary: keep === undefined ? summary : keepUsage(summary, keep),
           },
         ],
   );
   return mergeUsage(answered, USAGE_CONTRACT_VERSION);
+}
+
+/** Keeps the buckets and server prompts `keep` accepts, so both describe the same usage. */
+function keepUsage(
+  summary: UsageSummary,
+  keep: (entry: Pick<UsageBucket, "provider" | "model">) => boolean,
+): UsageSummary {
+  const kept: { -readonly [Key in keyof UsageSummary]: UsageSummary[Key] } = {
+    ...summary,
+    buckets: summary.buckets.filter(keep),
+  };
+  for (const kind of USAGE_SERVER_PROMPT_KINDS) {
+    const prompts = summary[kind];
+    if (prompts !== undefined) kept[kind] = prompts.filter(keep);
+  }
+  return kept;
 }
 
 const NO_HIDDEN_PROVIDERS: ReadonlySet<UsageProviderKind> = new Set();
@@ -120,10 +134,7 @@ function withoutProviders(
       : {
           ...environment,
           summary: {
-            ...environment.summary,
-            buckets: environment.summary.buckets.filter(
-              (bucket) => !hiddenProviders.has(bucket.provider),
-            ),
+            ...keepUsage(environment.summary, (entry) => !hiddenProviders.has(entry.provider)),
             sources: environment.summary.sources.filter(
               (source) => !hiddenProviders.has(source.fingerprint.provider),
             ),

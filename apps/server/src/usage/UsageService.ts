@@ -165,13 +165,13 @@ export const make = Effect.gen(function* () {
   const hostname = yield* HostProcess.Hostname;
   const readerContext = yield* Effect.context<BuiltInUsageReadersEnv>();
   const sql = yield* SqlClient.SqlClient;
-  // Prompts this server sent on its own, one per started run, as transcripts count turns.
+  // Prompts this server sent on its own, one per started run at its start, as transcripts count turns.
   // Steers join a run without starting one, and provider-native subagent prompts start no run.
   // A database without the tables yet has none.
   const readServerPrompts = (sinceMs: number) =>
     sql<{
       readonly kind: UsageServerPromptKind;
-      readonly created_at: string;
+      readonly started_at: string;
       readonly provider: string;
       readonly model: string | null;
     }>`
@@ -179,16 +179,15 @@ export const make = Effect.gen(function* () {
           WHEN json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
           THEN 'scheduledPrompts' ELSE 'delegatedPrompts'
         END AS kind,
-        message.created_at AS created_at,
+        json_extract(run.payload_json, '$.startedAt') AS started_at,
         run.provider AS provider,
         json_extract(run.payload_json, '$.modelSelection.model') AS model
       FROM orchestration_v2_projection_runs AS run
       JOIN orchestration_v2_projection_messages AS message
         ON message.message_id = json_extract(run.payload_json, '$.userMessageId')
-      WHERE json_extract(run.payload_json, '$.startedAt') IS NOT NULL
-        AND (json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+      WHERE (json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
           OR json_extract(message.payload_json, '$.senderThreadId') IS NOT NULL)
-        AND message.created_at >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
+        AND json_extract(run.payload_json, '$.startedAt') >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
     `.pipe(Effect.orElseSucceed(() => []));
 
   const fileCache: ScanCache = new Map();
@@ -904,7 +903,7 @@ export const make = Effect.gen(function* () {
 
     for (const row of yield* readServerPrompts(windowStartMs)) {
       const provider = usageProviderForDriver(row.provider);
-      const timestampMs = Date.parse(row.created_at);
+      const timestampMs = Date.parse(row.started_at);
       if (provider === null || row.model === null || Number.isNaN(timestampMs)) continue;
       aggregator.addServerPrompt(row.kind, timestampMs, provider, row.model);
     }

@@ -713,7 +713,10 @@ function UsageOverview({
                     formatted: formatCount(merged.sessions, locale),
                   })}
                   {metric === "turns" &&
-                    ` · ${gt("{count} scheduled", { count: formatCount(merged.scheduledPrompts, locale) })}`}
+                    ` · ${gt("{scheduled} scheduled · {delegated} delegated", {
+                      scheduled: formatCount(merged.scheduledPrompts, locale),
+                      delegated: formatCount(merged.delegatedPrompts, locale),
+                    })}`}
                 </span>
                 {metric === "cost" && ` · ${gt("API estimate")}`}
               </span>
@@ -816,9 +819,10 @@ function UsageOverview({
                           share: formatPercent(share),
                           cost: formatUsd(totals?.costUsd ?? 0, locale),
                         })
-                      : gt("{share} of turns · {scheduled} scheduled · {tokens} tokens", {
+                      : gt("{share} of turns · {scheduled} scheduled · {delegated} delegated · {tokens} tokens", {
                           share: formatPercent(share),
                           scheduled: formatCount(totals?.scheduledPrompts ?? 0, locale),
+                          delegated: formatCount(totals?.delegatedPrompts ?? 0, locale),
                           tokens: formatTokens(totals?.totalTokens ?? 0),
                         })}
                 </p>
@@ -967,15 +971,18 @@ function UsageOverview({
                 <th className="py-2 pl-6 font-normal">
                   <T>Turns</T>
                 </th>
-                <th className="py-2 pr-2 pl-6 font-normal">
+                <th className="py-2 pl-6 font-normal">
                   <T>Scheduled</T>
+                </th>
+                <th className="py-2 pr-2 pl-6 font-normal">
+                  <T>Delegated</T>
                 </th>
               </tr>
             </thead>
             <tbody>
               {breakdownModels.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                  <td colSpan={8} className="py-6 text-center text-muted-foreground">
                     <T>No activity in this window.</T>
                   </td>
                 </tr>
@@ -1035,8 +1042,11 @@ function UsageOverview({
                       <td className={cn("py-2.5 pl-6", rowFigures)}>
                         {formatCount(model.prompts, locale)}
                       </td>
-                      <td className={cn("py-2.5 pr-2 pl-6", rowFigures)}>
+                      <td className={cn("py-2.5 pl-6", rowFigures)}>
                         {formatCount(model.scheduledPrompts, locale)}
+                      </td>
+                      <td className={cn("py-2.5 pr-2 pl-6", rowFigures)}>
+                        {formatCount(model.delegatedPrompts, locale)}
                       </td>
                     </tr>
                   );
@@ -1072,8 +1082,11 @@ function UsageOverview({
                   <th className="py-2 pl-4 text-right font-normal">
                     <T>Turns</T>
                   </th>
-                  <th className="py-2 pr-2 pl-4 text-right font-normal">
+                  <th className="py-2 pl-4 text-right font-normal">
                     <T>Scheduled</T>
+                  </th>
+                  <th className="py-2 pr-2 pl-4 text-right font-normal">
+                    <T>Delegated</T>
                   </th>
                 </tr>
               </thead>
@@ -1081,7 +1094,7 @@ function UsageOverview({
                 {breakdownPeriods.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={activeProviders.length + 5}
+                      colSpan={activeProviders.length + 6}
                       className="py-6 text-center text-muted-foreground"
                     >
                       <T>No activity in this window.</T>
@@ -1135,11 +1148,19 @@ function UsageOverview({
                       </td>
                       <td
                         className={cn(
-                          "py-2 pr-2 pl-4 text-right text-muted-foreground tabular-nums",
+                          "py-2 pl-4 text-right text-muted-foreground tabular-nums",
                           figureClass(loadingPartial),
                         )}
                       >
                         {formatCount(period.scheduledPrompts, locale)}
+                      </td>
+                      <td
+                        className={cn(
+                          "py-2 pr-2 pl-4 text-right text-muted-foreground tabular-nums",
+                          figureClass(loadingPartial),
+                        )}
+                      >
+                        {formatCount(period.delegatedPrompts, locale)}
                       </td>
                     </tr>
                   ))

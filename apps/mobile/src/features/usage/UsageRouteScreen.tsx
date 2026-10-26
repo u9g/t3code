@@ -160,6 +160,7 @@ function UsageScreen(props: {
         totalTokens: hour.totalTokens,
         prompts: hour.prompts,
         scheduledPrompts: hour.scheduledPrompts,
+        delegatedPrompts: hour.delegatedPrompts,
         byProvider: hour.byProvider,
       }))
     : merged.daily;
@@ -561,10 +562,11 @@ function UsageSummary(props: { readonly merged: MergedUsage; readonly metric: Us
           ? gt("* if billed at full API rate")
           : metric === "turns"
             ? gt(
-                "{count, plural, one {{scheduled} scheduled · across {sessions} session} other {{scheduled} scheduled · across {sessions} sessions}}",
+                "{count, plural, one {{scheduled} scheduled · {delegated} delegated · across {sessions} session} other {{scheduled} scheduled · {delegated} delegated · across {sessions} sessions}}",
                 {
                   count: merged.sessions,
                   scheduled: formatCount(merged.scheduledPrompts),
+                  delegated: formatCount(merged.delegatedPrompts),
                   sessions: formatCount(merged.sessions),
                 },
               )
@@ -667,9 +669,10 @@ function ProviderSection(props: {
                       share: formatPercent(share),
                       cost: formatUsd(provider.costUsd),
                     })
-                  : gt("{share} of turns · {scheduled} scheduled · {tokens} tokens", {
+                  : gt("{share} of turns · {scheduled} scheduled · {delegated} delegated · {tokens} tokens", {
                       share: formatPercent(share),
                       scheduled: formatCount(provider.scheduledPrompts),
+                      delegated: formatCount(provider.delegatedPrompts),
                       tokens: formatTokens(provider.totalTokens),
                     })}
             </Text>
@@ -918,9 +921,10 @@ function ModelsSection(props: {
               </Text>
               <Text className="text-sm text-foreground-muted">
                 {metric === "turns"
-                  ? gt("{share} of turns · {scheduled} scheduled", {
+                  ? gt("{share} of turns · {scheduled} scheduled · {delegated} delegated", {
                       share: formatPercent(merged.prompts > 0 ? model.prompts / merged.prompts : 0),
                       scheduled: formatCount(model.scheduledPrompts),
+                      delegated: formatCount(model.delegatedPrompts),
                     })
                   : metric === "tokens"
                     ? isModelCostUnknown(model)

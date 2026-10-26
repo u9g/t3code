@@ -25,6 +25,7 @@ import {
   ScheduledTaskId,
   ThreadId,
   TurnItemId,
+  type OrchestrationV2ConversationMessage,
   type ThreadPullRequestLink,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -4055,6 +4056,27 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           completedAt: null,
         },
       });
+      yield* store.apply({
+        id: EventId.make("event:limit-shell:queued-message"),
+        type: "message.updated",
+        threadId,
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "server",
+          id: MessageId.make("message:limit-shell:queued"),
+          threadId,
+          runId: queuedRunId,
+          nodeId: NodeId.make("node:limit-shell:queued"),
+          role: "user",
+          text: "Scheduled prompt",
+          attachments: [],
+          scheduledTaskId: ScheduledTaskId.make("scheduled-task:limit-shell:queued"),
+          streaming: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
       yield* assertSummary("Plan limit reached.", "usage_limit");
       const queuedProjection = yield* store.getThreadProjection(threadId);
       const queuedMemoryShell = ProjectionStore.threadShellFromProjection(queuedProjection);
@@ -4065,6 +4087,52 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       assert.equal(queuedMemoryShell.latestRunId, original.id);
       assert.equal(queuedSqlShell.status, "failed");
       assert.equal(queuedSqlShell.latestRunId, original.id);
+      assert.isFalse(queuedMemoryShell.latestRunAutomated);
+      assert.isFalse(queuedSqlShell.latestRunAutomated);
+      const applyLimitMessage = (
+        id: string,
+        runId: RunId,
+        fields: Pick<
+          OrchestrationV2ConversationMessage,
+          "createdBy" | "creationSource" | "scheduledTaskId"
+        >,
+      ) =>
+        store.apply({
+          id: EventId.make(`event:limit-shell:automated:${id}`),
+          type: "message.updated",
+          threadId,
+          occurredAt: now,
+          payload: {
+            ...fields,
+            id: MessageId.make(id),
+            threadId,
+            runId,
+            nodeId: null,
+            role: "user",
+            text: "Prompt",
+            attachments: [],
+            streaming: false,
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+      yield* applyLimitMessage(original.userMessageId, original.id, {
+        createdBy: "user",
+        creationSource: "server",
+        scheduledTaskId: ScheduledTaskId.make("scheduled-task:limit-shell:original"),
+      });
+      yield* applyLimitMessage("message:limit-shell:queued", queuedRunId, {
+        createdBy: "user",
+        creationSource: "provider",
+      });
+      const automatedBlockerShells = [
+        ProjectionStore.threadShellFromProjection(yield* store.getThreadProjection(threadId)),
+        (yield* store.getShellSnapshot()).threads.find((row) => row.id === threadId)!,
+      ];
+      for (const shell of automatedBlockerShells) {
+        assert.equal(shell.latestRunId, original.id);
+        assert.isTrue(shell.latestRunAutomated);
+      }
       assert.equal(queuedProjection.runs.find((run) => run.id === queuedRunId)?.status, "queued");
       const cancelledRunId = RunId.make("run:limit-shell:cancelled-queued");
       yield* store.apply({

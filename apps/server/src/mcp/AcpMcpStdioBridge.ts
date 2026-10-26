@@ -64,6 +64,8 @@ export interface McpToolSession {
     tool: string,
     args: Readonly<Record<string, unknown>>,
   ) => Effect.Effect<unknown, AcpMcpBridgeError>;
+  /** Resolves to one page of `tools/list`. */
+  readonly listTools: (cursor?: string) => Effect.Effect<unknown, AcpMcpBridgeError>;
 }
 
 /**
@@ -150,6 +152,10 @@ export const mcpToolSession = (
     return {
       call: (tool, args) =>
         request("tools/call", { name: tool, arguments: args }).pipe(
+          Effect.map((envelope) => envelope.result),
+        ),
+      listTools: (cursor) =>
+        request("tools/list", cursor === undefined ? {} : { cursor }).pipe(
           Effect.map((envelope) => envelope.result),
         ),
     } satisfies McpToolSession;

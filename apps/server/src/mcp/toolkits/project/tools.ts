@@ -19,6 +19,7 @@ import {
   OrchestratorMcpFailure,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
+  ThreadMcpServers,
 } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as DocumentText from "../../../provider/DocumentText.ts";
@@ -152,6 +153,12 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
     /** Set by a linked environment launching its agent's delegated task here; ignored otherwise. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    mcpServers: Schema.optional(
+      ThreadMcpServers.annotate({
+        description:
+          'HTTP MCP servers the new agent gets beside T3 Code\'s own, in Claude Code\'s mcpServers shape: {"<name>":{"type":"http","url":"...","headers":{...}}}. Every session of the thread gets them, and their tools need no approval, so this needs full access. Claude providers only. Header values stay on this server.',
+      }),
+    ),
   }),
   success: Schema.Struct({
     threadId: ThreadId,

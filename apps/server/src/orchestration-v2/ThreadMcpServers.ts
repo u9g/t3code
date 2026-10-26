@@ -70,7 +70,7 @@ export class ThreadMcpServers extends Context.Reference<{
           cause: "No store for thread MCP servers.",
         }),
       ),
-    read: () => Effect.succeed(undefined),
+    read: () => Effect.undefined,
     remove: () => Effect.void,
   }),
 }) {}

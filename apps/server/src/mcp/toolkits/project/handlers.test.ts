@@ -385,8 +385,12 @@ it.effect("a launch with MCP servers starts only on a provider that gives them t
     const launch = (modelSelection: ModelSelection) =>
       toolkit
         .handle("t3_thread_launch", { title: "Fix", projectId, modelSelection, mcpServers })
-        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies))
-        .pipe(Effect.map((results) => results.at(-1)?.result));
+        .pipe(
+          Stream.unwrap,
+          Stream.runCollect,
+          Effect.provide(dependencies),
+          Effect.map((results) => results.at(-1)?.result),
+        );
 
     yield* launch({ instanceId: ProviderInstanceId.make("claudeCloud"), model: "claude-opus-5-5" });
     expect(launched.map((entry) => entry.mcpServers)).toEqual([mcpServers]);

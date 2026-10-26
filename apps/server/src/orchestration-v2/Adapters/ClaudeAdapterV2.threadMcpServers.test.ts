@@ -284,7 +284,11 @@ describe.each(["local", "remote"] as const)(
               options.canUseTool!(
                 "mcp__gem__propose",
                 { summary: "Fix" },
-                { signal: new AbortController().signal, toolUseID: "toolu_gem_propose" },
+                {
+                  signal: new AbortController().signal,
+                  toolUseID: "toolu_gem_propose",
+                  requestId: "request_gem_propose",
+                },
               ),
             );
             assert.deepInclude(decision, { behavior: "allow", toolUseID: "toolu_gem_propose" });

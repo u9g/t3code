@@ -997,6 +997,7 @@ describe("thread MCP servers", () => {
               }),
             ),
           ),
+          Layer.provideMerge(PreviewAgentActivity.layer),
         ),
       ),
     );

@@ -92,6 +92,7 @@ function curatedCauseMessages(cause: unknown): {
         case "ClaudeAppendSystemPromptFileError":
         case "ClaudeAppendSystemPromptMissingValueError":
         case "CursorModelUnavailableError":
+        case "ThreadMcpServersUnsupportedError":
           return { known: stringField(cause, "message"), category: categoryMessage() };
         case "ClaudeAgentSdkQueryRunnerError":
           // Only the Claude Cloud runner classifies its failures, and its

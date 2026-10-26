@@ -47,6 +47,9 @@ export const relayedClaudeCloudMcpServers = Effect.fn("relayedClaudeCloudMcpServ
   const relayed: Record<string, McpSdkServerConfigWithInstance> = {};
   for (const [name, server] of Object.entries(servers ?? {})) {
     if (server.type !== "http") continue;
+    const headers = Object.entries(server.headers ?? {});
+    const isAuthorization = ([header]: readonly [string, string]) =>
+      header.toLowerCase() === "authorization";
     // The SDK only connects its instance to a transport, and the relay passes
     // the endpoint's own `initialize` answer through, so no McpServer is needed.
     // The SDK closes the transport when its query closes, which ends the relay.
@@ -73,7 +76,8 @@ export const relayedClaudeCloudMcpServers = Effect.fn("relayedClaudeCloudMcpServ
       yield* Effect.forkDetach(
         runMcpHttpRelay({
           endpoint: server.url,
-          authorization: server.headers?.Authorization ?? "",
+          authorization: headers.find(isAuthorization)?.[1] ?? "",
+          headers: Object.fromEntries(headers.filter((header) => !isAuthorization(header))),
           messages: Stream.fromQueue(messages),
           // An answer that comes after the query closed has no one to take it.
           deliver: (message) =>

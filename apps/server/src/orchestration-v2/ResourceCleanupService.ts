@@ -14,6 +14,7 @@ import * as PreviewManager from "../preview/Manager.ts";
 import { removeClaudeCloudThreadFiles } from "../provider/claudeCloud/ClaudeCloudFiles.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 
 export class ResourceCleanupError extends Schema.TaggedError<ResourceCleanupError>()(
   "ResourceCleanupError",
@@ -38,7 +39,10 @@ export class ResourceCleanupService extends Context.Reference<{
   readonly cleanupAttachments: (
     attachmentIds: ReadonlyArray<string>,
   ) => Effect.Effect<void, ResourceCleanupError>;
-  /** Removes the files providers downloaded for the thread, such as Claude Cloud's sent files. */
+  /**
+   * Removes what providers keep for the thread: the files they downloaded, such as
+   * Claude Cloud's sent files, and the MCP servers it was started with.
+   */
   readonly cleanupProviderFiles: (threadId: string) => Effect.Effect<void, ResourceCleanupError>;
 }>("t3/orchestration-v2/ResourceCleanupService", {
   defaultValue: () => ({
@@ -58,6 +62,7 @@ export const layer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem;
     const config = yield* ServerConfig.ServerConfig;
     const scheduledTasks = yield* ScheduledTaskService.ScheduledTaskService;
+    const threadMcpServers = yield* ThreadMcpServers.ThreadMcpServers;
     const providerFilesContext = yield* Effect.context<
       FileSystem.FileSystem | Path.Path | SqlClient.SqlClient | ServerConfig.ServerConfig
     >();
@@ -118,6 +123,7 @@ export const layer = Layer.effect(
       cleanupProviderFiles: (threadId: string) =>
         removeClaudeCloudThreadFiles(threadId).pipe(
           Effect.provideContext(providerFilesContext),
+          Effect.andThen(threadMcpServers.remove(ThreadId.make(threadId))),
           Effect.mapError(
             (cause) => new ResourceCleanupError({ operation: "provider-files", threadId, cause }),
           ),

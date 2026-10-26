@@ -103,6 +103,7 @@ import {
   type ProviderThreadId,
   type RunId,
   type ThreadId,
+  type ThreadMcpServers,
   resolveIdleCompaction,
 } from "@t3tools/contracts";
 
@@ -1676,6 +1677,7 @@ export const CLAUDE_T3_MCP_TOOL_TIMEOUT_MS = 65 * 60 * 1_000;
 
 export function claudeMcpQueryOverrides(input: {
   readonly mcpSession: McpProviderSession.McpProviderSessionConfig | undefined;
+  readonly threadMcpServers?: ThreadMcpServers | undefined;
   readonly readOnlySandbox: boolean;
   readonly allowedTools?: ReadonlyArray<string>;
 }): {
@@ -1683,25 +1685,61 @@ export function claudeMcpQueryOverrides(input: {
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
 } {
   const session = input.mcpSession;
-  if (session === undefined) {
+  const threadServers = Object.entries(input.threadMcpServers ?? {});
+  if (session === undefined && threadServers.length === 0) {
     return input.allowedTools === undefined ? {} : { allowedTools: input.allowedTools };
   }
-  const mcpAllowedTools = input.readOnlySandbox
-    ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
-    : [CLAUDE_T3_MCP_TOOL_WILDCARD];
+  const t3AllowedTools =
+    session === undefined
+      ? []
+      : input.readOnlySandbox
+        ? CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS
+        : [CLAUDE_T3_MCP_TOOL_WILDCARD];
+  // Nothing marks which of a thread server's tools only read, so a read-only sandbox asks for each.
+  const threadAllowedTools = input.readOnlySandbox
+    ? []
+    : threadServers.map(([name]) => `mcp__${name}__*`);
   return {
-    allowedTools: Array.from(new Set([...(input.allowedTools ?? []), ...mcpAllowedTools])),
+    allowedTools: Array.from(
+      new Set([...(input.allowedTools ?? []), ...t3AllowedTools, ...threadAllowedTools]),
+    ),
     mcpServers: {
-      "t3-code": {
-        type: "http",
-        url: session.endpoint,
-        headers: {
-          Authorization: session.authorizationHeader,
-        },
-        timeout: CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
-      },
+      ...Object.fromEntries(
+        threadServers.map(([name, server]) => [
+          name,
+          {
+            type: "http" as const,
+            url: server.url,
+            ...(server.headers === undefined ? {} : { headers: { ...server.headers } }),
+          },
+        ]),
+      ),
+      ...(session === undefined
+        ? {}
+        : {
+            "t3-code": {
+              type: "http" as const,
+              url: session.endpoint,
+              headers: {
+                Authorization: session.authorizationHeader,
+              },
+              timeout: CLAUDE_T3_MCP_TOOL_TIMEOUT_MS,
+            },
+          }),
     },
   };
+}
+
+/** Matches allowedTools' MCP entries: an exact tool name or a server's `mcp__<server>__*`. */
+export function claudeMcpToolPreApproved(
+  toolName: string,
+  allowedTools: ReadonlyArray<string> | undefined,
+): boolean {
+  return (allowedTools ?? []).some(
+    (entry) =>
+      entry.startsWith("mcp__") &&
+      (entry === toolName || (entry.endsWith("__*") && toolName.startsWith(entry.slice(0, -1)))),
+  );
 }
 
 function providerSession(input: {
@@ -9847,7 +9885,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           // the asks bypass keeps, which a person answers.
           const needsApproval =
             transport === "remote"
-              ? context.queryPolicy.installPermissionCallback
+              ? context.queryPolicy.installPermissionCallback &&
+                // The cloud never sees allowedTools, so its MCP pre-approvals apply here.
+                !claudeMcpToolPreApproved(toolName, context.queryPolicy.allowedTools)
               : requiresClaudeApproval(context);
           const nativeRequestId = callbackOptions.toolUseID;
           const nativeToolInput = claudeNativeToolInputFromRecord(toolInput);
@@ -10224,6 +10264,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const queryPolicy = yield* queryPolicyForTurn(turnInput);
           const mcpOverrides = claudeMcpQueryOverrides({
             mcpSession: yield* mcpSessions.read(turnInput.threadId),
+            threadMcpServers: turnInput.mcpServers,
             readOnlySandbox:
               sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
             ...(queryPolicy.allowedTools === undefined
@@ -10407,7 +10448,12 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           }
           const closed = yield* Deferred.make<void, never>();
           const context: ClaudeLiveQueryContext = {
-            queryPolicy,
+            queryPolicy: {
+              ...queryPolicy,
+              ...(mcpOverrides.allowedTools === undefined
+                ? {}
+                : { allowedTools: mcpOverrides.allowedTools }),
+            },
             nativeThreadId,
             query: querySession,
             queryPolicyKey,

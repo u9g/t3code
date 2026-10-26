@@ -64,6 +64,8 @@ export interface McpToolSession {
     tool: string,
     args: Readonly<Record<string, unknown>>,
   ) => Effect.Effect<unknown, AcpMcpBridgeError>;
+  /** Resolves to one page of `tools/list`. */
+  readonly listTools: (cursor?: string) => Effect.Effect<unknown, AcpMcpBridgeError>;
 }
 
 /**
@@ -152,6 +154,10 @@ export const mcpToolSession = (
         request("tools/call", { name: tool, arguments: args }).pipe(
           Effect.map((envelope) => envelope.result),
         ),
+      listTools: (cursor) =>
+        request("tools/list", cursor === undefined ? {} : { cursor }).pipe(
+          Effect.map((envelope) => envelope.result),
+        ),
     } satisfies McpToolSession;
   });
 };
@@ -196,6 +202,8 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
 export interface McpHttpRelayOptions {
   readonly endpoint: string;
   readonly authorization: string;
+  /** Sent with every request, beside the protocol's own headers. */
+  readonly headers?: Readonly<Record<string, string>>;
   /** The client's JSON-RPC messages, each serialized; the relay ends with them. */
   readonly messages: Stream.Stream<string, AcpMcpBridgeError>;
   /** Hands a JSON-RPC message from T3 Code's endpoint to the client. */
@@ -247,6 +255,7 @@ export function runMcpHttpRelay(options: McpHttpRelayOptions): Effect.Effect<voi
             fetchImplementation(options.endpoint, {
               method: "POST",
               headers: {
+                ...options.headers,
                 "content-type": "application/json",
                 accept: "application/json, text/event-stream",
                 authorization: options.authorization,

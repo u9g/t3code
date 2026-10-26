@@ -23,6 +23,9 @@ const httpMcpServer = Effect.acquireRelease(
       calls.requestSecret += 1;
       return { content: [{ type: "text", text: "secretRef" }] };
     });
+    server.registerTool("thread", { description: "Says which thread called." }, async (extra) => ({
+      content: [{ type: "text", text: String(extra.requestInfo?.headers["x-gem-thread"]) }],
+    }));
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => NodeCrypto.randomUUID(),
     });
@@ -66,7 +69,7 @@ describe("relayedClaudeCloudMcpServers", () => {
       yield* Effect.promise(() => client.connect(clientSide));
 
       const { tools } = yield* Effect.promise(() => client.listTools());
-      expect(tools.map((tool) => tool.name)).toEqual(["whoami", "request_secret"]);
+      expect(tools.map((tool) => tool.name)).toEqual(["whoami", "request_secret", "thread"]);
       const result = yield* Effect.promise(() => client.callTool({ name: "whoami" }));
       expect(result.content).toEqual([{ type: "text", text: "Bearer relay-test" }]);
 
@@ -96,6 +99,30 @@ describe("relayedClaudeCloudMcpServers", () => {
       );
       expect(asked.content).toEqual([{ type: "text", text: "secretRef" }]);
       expect(endpoint.calls.requestSecret).toBe(1);
+
+      yield* Effect.promise(() => client.close());
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("sends a thread server's own headers, whatever their case", () =>
+    Effect.gen(function* () {
+      const endpoint = yield* httpMcpServer;
+      const relayed = yield* relayedClaudeCloudMcpServers({
+        gem: {
+          type: "http",
+          url: endpoint.url,
+          headers: { authorization: "Bearer gem-token", "X-Gem-Thread": "thread-1" },
+        },
+      });
+      const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+      yield* Effect.promise(() => relayed!.gem!.instance.connect(serverSide));
+      const client = new Client({ name: "cloud-session", version: "1.0.0" });
+      yield* Effect.promise(() => client.connect(clientSide));
+
+      const whoami = yield* Effect.promise(() => client.callTool({ name: "whoami" }));
+      expect(whoami.content).toEqual([{ type: "text", text: "Bearer gem-token" }]);
+      const thread = yield* Effect.promise(() => client.callTool({ name: "thread" }));
+      expect(thread.content).toEqual([{ type: "text", text: "thread-1" }]);
 
       yield* Effect.promise(() => client.close());
     }).pipe(Effect.scoped),

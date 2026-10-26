@@ -66,6 +66,8 @@ export interface DayColumn {
   }[];
   /** Turns scheduled tasks sent; on the turns metric they leave the provider bands. */
   readonly scheduled: number;
+  /** Turns another thread's agent sent; on the turns metric they leave the provider bands. */
+  readonly delegated: number;
   readonly total: number;
 }
 
@@ -82,7 +84,7 @@ function valueFor(
   const entry = totals?.byProvider.get(provider);
   if (entry === undefined) return 0;
   return metric === "turns"
-    ? Math.max(0, entry.prompts - entry.scheduledPrompts)
+    ? Math.max(0, entry.prompts - entry.scheduledPrompts - entry.delegatedPrompts)
     : usageMetricValue(entry, metric);
 }
 
@@ -97,17 +99,20 @@ export function buildPeriodColumns(
       provider,
       value: valueFor(entry, provider, metric),
     }));
-    const scheduled =
+    const acrossProviders = (kind: "scheduledPrompts" | "delegatedPrompts") =>
       metric === "turns"
         ? PROVIDER_ORDER.reduce(
-            (sum, provider) => sum + (entry?.byProvider.get(provider)?.scheduledPrompts ?? 0),
+            (sum, provider) => sum + (entry?.byProvider.get(provider)?.[kind] ?? 0),
             0,
           )
         : 0;
+    const scheduled = acrossProviders("scheduledPrompts");
+    const delegated = acrossProviders("delegatedPrompts");
     return {
       bands,
       scheduled,
-      total: bands.reduce((sum, band) => sum + band.value, scheduled),
+      delegated,
+      total: bands.reduce((sum, band) => sum + band.value, scheduled + delegated),
     };
   });
 }
@@ -218,7 +223,7 @@ function chartScale(
     (max, column) =>
       column.bands.reduce(
         (inner, band) => Math.max(inner, band.value),
-        Math.max(max, column.scheduled),
+        Math.max(max, column.scheduled, column.delegated),
       ),
     0,
   );
@@ -260,23 +265,25 @@ function buildChart(
     };
   });
 
-  const scheduledLine = columns.some((column) => column.scheduled > 0)
-    ? curvePath(
-        smoothCurve(
-          columns.map((column, periodIndex) => ({
-            x: periodIndex * stepX,
-            y: valueToY(column.scheduled, scale.max),
-          })),
-        ),
-      )
-    : null;
+  const seriesLine = (value: (column: DayColumn) => number) =>
+    columns.some((column) => value(column) > 0)
+      ? curvePath(
+          smoothCurve(
+            columns.map((column, periodIndex) => ({
+              x: periodIndex * stepX,
+              y: valueToY(value(column), scale.max),
+            })),
+          ),
+        )
+      : null;
 
   return {
     columns,
     scale,
     stepX,
     paths: paths.toSorted((a, b) => b.total - a.total),
-    scheduledLine,
+    scheduledLine: seriesLine((column) => column.scheduled),
+    delegatedLine: seriesLine((column) => column.delegated),
   };
 }
 
@@ -288,6 +295,7 @@ function UsageChartTooltip({
   loadingProviders,
   format,
   showScheduled,
+  showDelegated,
 }: {
   readonly tooltipRef: React.Ref<HTMLDivElement>;
   readonly label: string;
@@ -296,6 +304,7 @@ function UsageChartTooltip({
   readonly loadingProviders: ReadonlySet<UsageProviderKind>;
   readonly format: (value: number) => string;
   readonly showScheduled: boolean;
+  readonly showDelegated: boolean;
 }) {
   const partial = providers.some((provider) => loadingProviders.has(provider));
   return (
@@ -337,6 +346,12 @@ function UsageChartTooltip({
           <span className="text-foreground tabular-nums">{format(column?.scheduled ?? 0)}</span>
         </div>
       ) : null}
+      {showDelegated ? (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-muted-foreground">Delegated</span>
+          <span className="text-foreground tabular-nums">{format(column?.delegated ?? 0)}</span>
+        </div>
+      ) : null}
       <div className="mt-1 flex items-center justify-between gap-3 border-t border-border pt-1">
         <span className="text-muted-foreground">
           <T>Total</T>
@@ -358,6 +373,7 @@ function UsageChartPlot({
   format,
   formatTooltipPeriod,
   showScheduled,
+  showDelegated,
   children,
 }: {
   readonly periods: readonly string[];
@@ -368,6 +384,7 @@ function UsageChartPlot({
   readonly format: (value: number) => string;
   readonly formatTooltipPeriod: (period: string) => string;
   readonly showScheduled: boolean;
+  readonly showDelegated: boolean;
   readonly children: React.ReactNode;
 }) {
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -468,6 +485,7 @@ function UsageChartPlot({
           loadingProviders={loadingProviders}
           format={format}
           showScheduled={showScheduled}
+          showDelegated={showDelegated}
         />
       )}
     </div>
@@ -495,7 +513,7 @@ export function UsageProviderChart({
   const byPeriod = new Map(
     totals.map((entry) => ["hourStart" in entry ? entry.hourStart : entry.day, entry]),
   );
-  const { columns, scale, paths, stepX, scheduledLine } = buildChart(
+  const { columns, scale, paths, stepX, scheduledLine, delegatedLine } = buildChart(
     periods,
     byPeriod,
     metric,
@@ -542,6 +560,7 @@ export function UsageProviderChart({
           format={format}
           formatTooltipPeriod={formatTooltipPeriod}
           showScheduled={scheduledLine !== null}
+          showDelegated={delegatedLine !== null}
         >
           {scale.ticks.map((tick) => {
             const y = toY(tick);
@@ -587,6 +606,18 @@ export function UsageProviderChart({
               stroke="currentColor"
               strokeWidth={2}
               strokeDasharray="4 3"
+              className="text-muted-foreground"
+              vectorEffect="non-scaling-stroke"
+            />
+          )}
+          {delegatedLine === null ? null : (
+            <path
+              d={delegatedLine}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeDasharray="1 3"
+              strokeLinecap="round"
               className="text-muted-foreground"
               vectorEffect="non-scaling-stroke"
             />

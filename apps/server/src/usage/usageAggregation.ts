@@ -7,7 +7,8 @@ import type {
   UsageModelSelector,
   UsageProviderKind,
   UsageResolution,
-  UsageScheduledPrompts,
+  UsageServerPromptKind,
+  UsageServerPrompts,
   UsageTokenTotals,
 } from "@t3tools/contracts";
 
@@ -129,7 +130,8 @@ export function canonicalModelFilter(
 
 export interface AggregateResult {
   readonly buckets: readonly UsageBucket[];
-  readonly scheduledPrompts: readonly UsageScheduledPrompts[];
+  /** Only the kinds with at least one prompt in the window. */
+  readonly serverPrompts: Partial<Record<UsageServerPromptKind, readonly UsageServerPrompts[]>>;
   readonly duplicatesDropped: number;
   readonly outOfWindow: number;
 }
@@ -183,7 +185,7 @@ interface Contribution {
 /** Deduplicates across the whole scan; Claude copies records into resumed/forked transcripts. */
 export class UsageAggregator {
   readonly #buckets = new Map<string, MutableBucket>();
-  readonly #scheduledPrompts = new Map<string, number>();
+  readonly #serverPrompts = new Map<UsageServerPromptKind, Map<string, number>>();
   readonly #seen = new Map<string, Contribution>();
   readonly #toDay: (timestampMs: number) => string;
   readonly #hourlyWindow: { readonly sinceTimeMs: number; readonly untilTimeMs: number } | null;
@@ -289,13 +291,20 @@ export class UsageAggregator {
     if (priced.costSource === "providerReported") bucket.providerReportedRecords += 1;
   }
 
-  /** A prompt a scheduled task sent; counted apart from usage records and their de-duplication. */
-  addScheduledPrompt(timestampMs: number, provider: UsageProviderKind, model: string): void {
+  /** A prompt from the server's own records; counted apart from usage records and their de-duplication. */
+  addServerPrompt(
+    kind: UsageServerPromptKind,
+    timestampMs: number,
+    provider: UsageProviderKind,
+    model: string,
+  ): void {
     const slot = this.#slotFor(timestampMs);
     if (slot === null) return;
     const mapped = this.#options.modelAliases?.get(model) ?? model;
     const key = `${slot.day}\u0000${this.#hourStartFor(slot.hourIndex)}\u0000${provider}\u0000${mapped}`;
-    this.#scheduledPrompts.set(key, (this.#scheduledPrompts.get(key) ?? 0) + 1);
+    const counts = this.#serverPrompts.get(kind) ?? new Map<string, number>();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+    this.#serverPrompts.set(kind, counts);
   }
 
   /** The day and hour a timestamp falls in, or null outside the requested window. */
@@ -429,21 +438,23 @@ export class UsageAggregator {
         a.model.localeCompare(b.model),
     );
 
-    const scheduledPrompts: UsageScheduledPrompts[] = [];
-    for (const [key, count] of this.#scheduledPrompts) {
-      const [day = "", hourStart = "", provider = "", model = ""] = key.split("\u0000");
-      scheduledPrompts.push({
-        day: day as UsageDay,
-        ...(hourStart === "" ? {} : { hourStart }),
-        provider: provider as UsageProviderKind,
-        model,
-        count,
+    const serverPrompts: Partial<Record<UsageServerPromptKind, UsageServerPrompts[]>> = {};
+    for (const [kind, counts] of this.#serverPrompts) {
+      serverPrompts[kind] = [...counts].map(([key, count]) => {
+        const [day = "", hourStart = "", provider = "", model = ""] = key.split("\u0000");
+        return {
+          day: day as UsageDay,
+          ...(hourStart === "" ? {} : { hourStart }),
+          provider: provider as UsageProviderKind,
+          model,
+          count,
+        };
       });
     }
 
     return {
       buckets,
-      scheduledPrompts,
+      serverPrompts,
       duplicatesDropped: this.#duplicatesDropped,
       outOfWindow: this.#outOfWindow,
     };

@@ -74,15 +74,18 @@ export const UsageBucket = Schema.Struct({
 });
 export type UsageBucket = typeof UsageBucket.Type;
 
-/** Prompts a T3 Code scheduled task sent, from the server's own records rather than transcripts. */
-export const UsageScheduledPrompts = Schema.Struct({
+/** The summary keys of prompts a server counts from its own records rather than transcripts. */
+export const USAGE_SERVER_PROMPT_KINDS = ["scheduledPrompts"] as const;
+export type UsageServerPromptKind = (typeof USAGE_SERVER_PROMPT_KINDS)[number];
+
+export const UsageServerPrompts = Schema.Struct({
   day: UsageDay,
   hourStart: Schema.optional(TrimmedNonEmptyString),
   provider: UsageProviderKind,
   model: TrimmedNonEmptyString,
   count: NonNegativeInt,
 });
-export type UsageScheduledPrompts = typeof UsageScheduledPrompts.Type;
+export type UsageServerPrompts = typeof UsageServerPrompts.Type;
 
 export const UsageSourceFingerprint = Schema.Struct({
   hostId: TrimmedNonEmptyString,
@@ -172,7 +175,8 @@ export const UsageSummary = Schema.Struct({
   scanDurationMs: NonNegativeInt,
   /** The filter the server applied; absent means unfiltered, including servers that predate filters. */
   modelFilter: Schema.optional(UsageModelFilter),
-  scheduledPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageScheduledPrompts)),
+  /** Prompts a T3 Code scheduled task sent. */
+  scheduledPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageServerPrompts)),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 

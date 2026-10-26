@@ -1,11 +1,19 @@
-import { MessageId, ThreadId, OrchestratorMcpFailure, ProjectId } from "@t3tools/contracts";
+import {
+  MessageId,
+  ThreadId,
+  OrchestratorMcpFailure,
+  ProjectId,
+  type ProviderInstanceId,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadMcpServers from "../../../orchestration-v2/ThreadMcpServers.ts";
 import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
 import * as Claims from "../../../orchestration-v2/AttachmentClaims.ts";
 import * as Project from "../../../project/ProjectService.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
@@ -14,7 +22,13 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import { resolveRuntimeMode } from "../../OrchestratorMcpService.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
+import {
+  assertFullAccess,
+  newCommandId,
+  readCaller,
+  resolveProjectId,
+  unavailable,
+} from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
 
 function projectFailure(error: Project.ProjectServiceError) {
@@ -45,6 +59,26 @@ const assertProjectWorktree = Effect.fn("mcp.assertProjectWorktree")(function* (
       code: "invalid_request",
       message:
         "worktreePath must be one of the project's git worktrees. t3_worktree_list shows them.",
+    });
+});
+
+/** Fails before anything is created, rather than starting an agent without the servers. */
+const assertTakesThreadMcpServers = Effect.fn("mcp.assertTakesThreadMcpServers")(function* (
+  instanceId: ProviderInstanceId,
+) {
+  const providers = yield* ProviderRegistry.ProviderRegistry.pipe(
+    Effect.flatMap((registry) => registry.getProviders),
+  );
+  const provider = providers.find((candidate) => candidate.instanceId === instanceId);
+  if (provider === undefined)
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message: `Provider instance ${instanceId} is not registered. orchestrator_capabilities lists providers.`,
+    });
+  if (!ThreadMcpServers.driverTakesThreadMcpServers(provider.driver))
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message: ThreadMcpServers.unsupportedThreadMcpServersMessage(provider.driver),
     });
 });
 
@@ -150,6 +184,14 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             message:
               "Pass modelSelection: the project has no default model. orchestrator_capabilities lists providers and models.",
           });
+        if (input.mcpServers !== undefined) {
+          // Their tools run without approval, so only a caller that needs none may add them.
+          yield* assertFullAccess(
+            context,
+            "Giving a thread MCP servers needs a full-access calling thread or client.",
+          );
+          yield* assertTakesThreadMcpServers(modelSelection.instanceId);
+        }
         const startedRuntimeMode =
           projectDefaults !== undefined && input.runtimeMode === undefined
             ? yield* resolveRuntimeMode(runtimeMode, projectDefaults.defaultRuntimeMode).pipe(
@@ -165,6 +207,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           runtimeMode: startedRuntimeMode,
           interactionMode,
           workspaceStrategy: input.workspaceStrategy ?? { type: "root" },
+          ...(input.mcpServers === undefined ? {} : { mcpServers: input.mcpServers }),
           ...(input.message === undefined && attachments.length === 0
             ? {}
             : {

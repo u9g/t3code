@@ -1,4 +1,4 @@
-import { assert, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import {
   CheckpointScopeId,
   ChatAttachmentId,
@@ -49,6 +49,7 @@ import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 
 const driver = ProviderDriverKind.make("codex");
@@ -908,6 +909,138 @@ it.effect("passes the thread's MCP app context to the provider under a safe key"
     ),
   ),
 );
+
+describe("thread MCP servers", () => {
+  const gem = {
+    gem: {
+      type: "http" as const,
+      url: "http://127.0.0.1:7341/mcp",
+      headers: { Authorization: "Bearer gem-token" },
+    },
+  };
+  const startWithServers = (input: {
+    readonly key: string;
+    readonly driver: ProviderDriverKind;
+    readonly startTurn: ProviderAdapter.ProviderAdapterV2SessionRuntime["startTurn"];
+    readonly writes: Ref.Ref<ReadonlyArray<OrchestrationV2DomainEvent>>;
+  }) => {
+    const threadId = ThreadId.make(`thread:${input.key}`);
+    const attemptId = RunAttemptId.make(`attempt:${input.key}`);
+    const providerInstanceId = ProviderInstanceId.make(input.driver);
+    return Effect.gen(function* () {
+      const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
+      yield* runExecution.startRootRun({
+        commandId: CommandId.make(`command:${input.key}`),
+        appThread: rootAppThread(threadId),
+        providerSessionId: ProviderSessionId.make(`session:${input.key}`),
+        session: {
+          driver: input.driver,
+          events: Stream.never,
+          startTurn: input.startTurn,
+        } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime,
+        run: {
+          id: RunId.make(`run:${input.key}`),
+          threadId,
+          ordinal: 1,
+          providerInstanceId,
+        } as OrchestrationV2Run,
+        rootNode: { id: NodeId.make(`node:${input.key}`) } as OrchestrationV2ExecutionNode,
+        checkpointScope: {
+          id: CheckpointScopeId.make(`checkpoint-scope:${input.key}`),
+        } as OrchestrationV2CheckpointScope,
+        providerThread: {
+          id: ProviderThreadId.make(`provider-thread:${input.key}`),
+          driver: input.driver,
+        } as OrchestrationV2ProviderThread,
+        attempt: { id: attemptId, providerTurnId: null } as OrchestrationV2RunAttempt,
+        attemptId,
+        providerTurnOrdinal: 1,
+        message: {
+          messageId: MessageId.make(`message:${input.key}`),
+          text: "Propose the fix.",
+          attachments: [],
+          createdBy: "user",
+          creationSource: "web",
+        },
+        modelSelection: { instanceId: providerInstanceId, model: "model" },
+        runtimePolicy: {
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          cwd: process.cwd(),
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        RunExecutionService.layer.pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              McpAppModelContext.layerEmpty,
+              Layer.mock(CheckpointService.CheckpointServiceV2)({
+                captureBaseline: () => Effect.void,
+              }),
+              layerTurnItemPositionsTest,
+              Layer.mock(EventSink.EventSinkV2)({
+                writeIfRunCurrent: (write) =>
+                  Ref.update(input.writes, (current) => [...current, ...write.events]).pipe(
+                    Effect.as({ committed: true, storedEvents: [] }),
+                  ),
+              }),
+              IdAllocator.layer,
+              Layer.mock(ProviderEventIngestor.ProviderEventIngestorV2)({
+                ingestNormalized: () => Effect.succeed([]),
+              }),
+              ServerSettings.layerTest(),
+              Layer.succeed(ThreadMcpServers.ThreadMcpServers, {
+                save: () => Effect.die("unused"),
+                read: (id) => Effect.succeed(id === threadId ? gem : undefined),
+                remove: () => Effect.die("unused"),
+              }),
+            ),
+          ),
+          Layer.provideMerge(PreviewAgentActivity.layer),
+        ),
+      ),
+    );
+  };
+
+  it.effect("hands the thread's MCP servers to a Claude turn", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<ProviderAdapter.ProviderAdapterV2TurnInput>();
+      yield* startWithServers({
+        key: "thread-mcp-claude",
+        driver: ProviderDriverKind.make("claudeAgent"),
+        startTurn: (input) => Deferred.succeed(started, input),
+        writes: yield* Ref.make<ReadonlyArray<OrchestrationV2DomainEvent>>([]),
+      });
+
+      assert.deepEqual((yield* Deferred.await(started)).mcpServers, gem);
+    }),
+  );
+
+  it.effect("fails the run rather than start a provider that would drop them", () =>
+    Effect.gen(function* () {
+      const providerStarts = yield* Ref.make(0);
+      const writes = yield* Ref.make<ReadonlyArray<OrchestrationV2DomainEvent>>([]);
+      yield* startWithServers({
+        key: "thread-mcp-codex",
+        driver,
+        startTurn: () => Ref.update(providerStarts, (count) => count + 1),
+        writes,
+      });
+
+      assert.equal(yield* Ref.get(providerStarts), 0);
+      const written = yield* Ref.get(writes);
+      const runUpdate = written.find((event) => event.type === "run.updated");
+      assert.equal(
+        runUpdate?.type === "run.updated" ? runUpdate.payload.status : undefined,
+        "failed",
+      );
+      const shown = JSON.stringify(written);
+      assert.include(shown, ThreadMcpServers.unsupportedThreadMcpServersMessage(driver));
+      assert.notInclude(shown, "gem-token");
+    }),
+  );
+});
 
 it.effect("fails the run when its ownership check cannot be read before calling the provider", () =>
   Effect.gen(function* () {

@@ -16,6 +16,7 @@ import {
   OrchestratorMcpFailure,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
+  ThreadMcpServers,
 } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as DocumentText from "../../../provider/DocumentText.ts";
@@ -26,6 +27,7 @@ import * as Crypto from "effect/Crypto";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ProjectService from "../../../project/ProjectService.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as SourceControlRepositoryService from "../../../sourceControl/SourceControlRepositoryService.ts";
@@ -126,6 +128,12 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
       }),
     ),
     attachments: Schema.optional(Schema.Array(McpAttachmentInput).check(Schema.isMaxLength(8))),
+    mcpServers: Schema.optional(
+      ThreadMcpServers.annotate({
+        description:
+          'HTTP MCP servers the new agent gets beside T3 Code\'s own, in Claude Code\'s mcpServers shape: {"<name>":{"type":"http","url":"...","headers":{...}}}. Every session of the thread gets them, and their tools need no approval, so this needs full access. Claude providers only. Header values stay on this server.',
+      }),
+    ),
   }),
   success: Schema.Struct({
     threadId: ThreadId,
@@ -144,6 +152,7 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ServerConfig.ServerConfig,
     ServerSettings.ServerSettingsService,
     DocumentText.DocumentText,
+    ProviderRegistry.ProviderRegistry,
   ],
 })
   .annotate(Tool.Destructive, true)

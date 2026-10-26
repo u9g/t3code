@@ -6,6 +6,7 @@ import {
   type Project as ProjectRecord,
   type ModelSelection,
   type RuntimeMode,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -15,8 +16,10 @@ import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import { Tool } from "effect/ai";
 
 import * as DocumentText from "../../../provider/DocumentText.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ThreadLaunch from "../../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as ServerConfig from "../../../config.ts";
@@ -104,6 +107,12 @@ const clientLaunchHarness = (input: {
         ),
     }),
     Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/projects" }),
+    Layer.mock(ProviderRegistry.ProviderRegistry)({
+      getProviders: Effect.succeed([
+        { instanceId: ProviderInstanceId.make("claudeAgent"), driver: "claudeAgent", models: [] },
+        { instanceId: ProviderInstanceId.make("empty"), driver: "unknownDriver", models: [] },
+      ] as unknown as ReadonlyArray<ServerProvider>),
+    }),
     DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer)),
   ).pipe(
     Layer.provideMerge(GitVcsDriver.layer),
@@ -302,3 +311,75 @@ it.effect("a launch into a new worktree creates nothing when its base ref has no
     expect(launched).toHaveLength(1);
   }),
 );
+
+it.effect("a launch with MCP servers starts only on a provider that gives them to its agent", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const { projectId, dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "full-access",
+      launched,
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    const mcpServers = {
+      gem: {
+        type: "http" as const,
+        url: "http://127.0.0.1:7341/mcp",
+        headers: { Authorization: "Bearer gem-token" },
+      },
+    };
+    const launch = (modelSelection: ModelSelection) =>
+      toolkit
+        .handle("t3_thread_launch", { title: "Fix", projectId, modelSelection, mcpServers })
+        .pipe(
+          Stream.unwrap,
+          Stream.runCollect,
+          Effect.provide(dependencies),
+          Effect.map((results) => results.at(-1)?.result),
+        );
+
+    yield* launch({ instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5-5" });
+    expect(launched.map((entry) => entry.mcpServers)).toEqual([mcpServers]);
+
+    expect(
+      yield* launch({ instanceId: ProviderInstanceId.make("empty"), model: "model" }),
+    ).toMatchObject({
+      code: "invalid_request",
+      message:
+        "This thread has MCP servers of its own, which unknownDriver cannot use. Run it on Claude.",
+    });
+    expect(
+      yield* launch({ instanceId: ProviderInstanceId.make("missing"), model: "model" }),
+    ).toMatchObject({ code: "invalid_request" });
+    expect(launched).toHaveLength(1);
+
+    const limited = clientLaunchHarness({ runtimeModeCeiling: "auto-accept-edits", launched });
+    const limitedToolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+          Layer.provide(limited.dependencies),
+        ),
+      ),
+    );
+    const refused = yield* limitedToolkit
+      .handle("t3_thread_launch", {
+        title: "Fix",
+        projectId,
+        modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "m" },
+        mcpServers,
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(limited.dependencies));
+    expect(refused.at(-1)?.result).toMatchObject({ code: "capability_denied" });
+    expect(launched).toHaveLength(1);
+  }),
+);
+
+it("advertises mcpServers, which `t3 thread start --mcp-config` checks for before launching", () => {
+  const schema = Tool.getJsonSchema(ProjectToolkit.tools.t3_thread_launch) as {
+    readonly properties?: Readonly<Record<string, unknown>>;
+  };
+  expect(schema.properties?.mcpServers).toBeDefined();
+});

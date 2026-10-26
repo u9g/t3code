@@ -1804,12 +1804,7 @@ export function threadShellFromProjection(
     latestRunBackgroundWake:
       latestRun != null && isBackgroundWakeRunForShell(latestRun, projection),
     activeRunId: activeRun?.id ?? null,
-    latestRunAutomated:
-      latestRun != null &&
-      projection.messages.some(
-        (message) =>
-          message.id === latestRun.userMessageId && message.scheduledTaskId !== undefined,
-      ),
+    latestRunAutomated: latestRun != null && isAutomatedRunForShell(latestRun, projection),
     blockedOnThreadWait: deriveBlockedOnThreadWait({ activeRun, turnItems: projection.turnItems }),
     activityRunStatus: activityRun?.status ?? null,
     activityRunStartedAt:
@@ -1921,6 +1916,15 @@ function isBackgroundWakeRunForShell(
     !projection.messages.some(
       (candidate) => candidate.runId === run.id && candidate.createdBy === "user",
     )
+  );
+}
+
+function isAutomatedRunForShell(
+  run: OrchestrationV2ThreadProjection["runs"][number],
+  projection: Pick<OrchestrationV2ThreadProjection, "messages">,
+): boolean {
+  return projection.messages.some(
+    (message) => message.id === run.userMessageId && message.scheduledTaskId !== undefined,
   );
 }
 
@@ -7669,6 +7673,16 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       )`;
     };
 
+    // Mirrors isAutomatedRunForShell.
+    const isAutomatedShellRun = (alias: string) => {
+      const run = sql.literal(alias);
+      return sql`EXISTS (
+        SELECT 1 FROM orchestration_v2_projection_messages message
+        WHERE message.message_id = json_extract(${run}.payload_json, '$.userMessageId')
+          AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
+      )`;
+    };
+
     const selectShellThreadRows = (
       threadId?: ThreadId,
       {
@@ -7709,11 +7723,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               ${isBackgroundWakeShellRun("presented")} AS latest_run_background_wake,
               active.run_id AS active_run_id,
               active.status AS active_run_status,
-              EXISTS (
-                SELECT 1 FROM orchestration_v2_projection_messages message
-                WHERE message.message_id = json_extract(presented.payload_json, '$.userMessageId')
-                  AND json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
-              ) AS latest_run_automated,
+              ${isAutomatedShellRun("presented")} AS latest_run_automated,
               (
                 SELECT r.status
                 -- Read active runs by status. Walking the ordinal index to skip this sort

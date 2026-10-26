@@ -973,6 +973,7 @@ type ShellThreadRow = {
   readonly blocking_run_started_at: string | null;
   readonly blocking_run_completed_at: string | null;
   readonly blocking_run_stop_requested: number;
+  readonly blocking_run_automated: number;
   readonly blocking_failure_payload_json: string | null;
   readonly pending_request_payload_json: string | null;
   readonly pending_secret_request_payload_json: string | null;
@@ -5976,6 +5977,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 WHERE stop_request.thread_id = t.thread_id AND stop_request.run_id = blocked.run_id
                   AND stop_request.type = 'run_interrupt_request'
               ) AS blocking_run_stop_requested,
+              ${isAutomatedShellRun("blocked")} AS blocking_run_automated,
               (
                 SELECT item.payload_json
                 FROM orchestration_v2_projection_turn_items item
@@ -6525,6 +6527,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             ? null
             : DateTime.makeUnsafe(row.latest_run_completed_at);
         let latestRunStopRequested = row.latest_run_stop_requested === 1;
+        let latestRunAutomated = row.latest_run_automated === 1;
         if (row.blocking_run_id !== null && row.blocking_failure_payload_json !== null) {
           const blockingFailure = yield* decodeTurnItemPayload(
             row.blocking_failure_payload_json,
@@ -6538,6 +6541,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             terminalFailureItem = blockingFailure;
             latestRunId = RunId.make(row.blocking_run_id);
             latestRunStopRequested = row.blocking_run_stop_requested === 1;
+            latestRunAutomated = row.blocking_run_automated === 1;
             latestRunStatus = "failed";
             latestRunRequestedAt =
               row.blocking_run_requested_at === null
@@ -6579,7 +6583,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
           latestRunCompletedAt,
           latestRunStopRequested,
           activeRunId: row.active_run_id === null ? null : RunId.make(row.active_run_id),
-          latestRunAutomated: row.latest_run_automated === 1,
+          latestRunAutomated,
           blockedOnThreadWait: deriveBlockedOnThreadWait({
             activeRun:
               row.active_run_id === null || row.active_run_status !== "running"

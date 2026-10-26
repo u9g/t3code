@@ -52,6 +52,7 @@ import {
   makeProviderFailureTurnItem,
 } from "@t3tools/provider-core/server/failure";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
+import * as ThreadMcpServers from "./ThreadMcpServers.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 
 export interface ProviderEventRoutingState {
@@ -611,6 +612,7 @@ export const layer: Layer.Layer<
     const previewAgentActivity = yield* PreviewAgentActivity.PreviewAgentActivity;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
+    const threadMcpServers = yield* ThreadMcpServers.ThreadMcpServers;
 
     const writeFinalRunEvents = Effect.fn("RunExecutionService.writeFinalRunEvents")(
       function* (input: {
@@ -1659,18 +1661,37 @@ export const layer: Layer.Layer<
         const compact =
           input.message.attachments.length === 0 &&
           input.message.text.trim().toLowerCase() === "/compact";
-        const startTurn = compact
-          ? (input.session.compactThread?.(turnInput) ??
-            Effect.fail(
-              new ProviderAdapter.ProviderAdapterTurnStartError({
-                driver: input.session.driver,
-                threadId: input.run.threadId,
-                providerThreadId: input.providerThread.id,
-                runId: input.run.id,
-                cause: "This provider does not support context compaction.",
-              }),
-            ))
-          : input.session.startTurn(turnInput);
+        const turnStartError = (cause: unknown) =>
+          new ProviderAdapter.ProviderAdapterTurnStartError({
+            driver: input.session.driver,
+            threadId: input.run.threadId,
+            providerThreadId: input.providerThread.id,
+            runId: input.run.id,
+            cause,
+          });
+        // Read for every turn, so restarts, resumes and provider switches keep them.
+        const startTurn = threadMcpServers.read(input.run.threadId).pipe(
+          Effect.mapError((error) => turnStartError(error.message)),
+          Effect.flatMap((mcpServers) => {
+            if (
+              mcpServers !== undefined &&
+              !ThreadMcpServers.driverTakesThreadMcpServers(input.session.driver)
+            ) {
+              return Effect.fail(
+                turnStartError(
+                  new ThreadMcpServers.ThreadMcpServersUnsupportedError({
+                    driver: input.session.driver,
+                  }),
+                ),
+              );
+            }
+            const startInput = mcpServers === undefined ? turnInput : { ...turnInput, mcpServers };
+            return compact
+              ? (input.session.compactThread?.(startInput) ??
+                  Effect.fail(turnStartError("This provider does not support context compaction.")))
+              : input.session.startTurn(startInput);
+          }),
+        );
         yield* Effect.andThen(shouldStart, startTurn).pipe(
           // Wait for acceptance so abandoned startup cannot leave a refresher
           // on the already-detached ingestion fiber.

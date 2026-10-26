@@ -169,8 +169,9 @@ export const make = Effect.gen(function* () {
   const hostEnvironment = yield* HostProcess.Environment;
   const readerContext = yield* Effect.context<BuiltInUsageReadersEnv>();
   const sql = yield* SqlClient.SqlClient;
-  // Prompts this server sent on its own. A database without the tables yet has none.
-  // Provider-native subagent prompts have no run, so the join leaves them out.
+  // Prompts this server sent on its own, one per started run, as transcripts count turns.
+  // Steers join a run without starting one, and provider-native subagent prompts start no run.
+  // A database without the tables yet has none.
   const readServerPrompts = (sinceMs: number) =>
     sql<{
       readonly kind: UsageServerPromptKind;
@@ -185,9 +186,10 @@ export const make = Effect.gen(function* () {
         message.created_at AS created_at,
         run.provider AS provider,
         json_extract(run.payload_json, '$.modelSelection.model') AS model
-      FROM orchestration_v2_projection_messages AS message
-      JOIN orchestration_v2_projection_runs AS run ON run.run_id = message.run_id
-      WHERE message.role = 'user'
+      FROM orchestration_v2_projection_runs AS run
+      JOIN orchestration_v2_projection_messages AS message
+        ON message.message_id = json_extract(run.payload_json, '$.userMessageId')
+      WHERE json_extract(run.payload_json, '$.startedAt') IS NOT NULL
         AND (json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
           OR json_extract(message.payload_json, '$.senderThreadId') IS NOT NULL)
         AND message.created_at >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}

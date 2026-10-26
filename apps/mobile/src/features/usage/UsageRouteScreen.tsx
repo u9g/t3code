@@ -51,7 +51,7 @@ import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
-import type { UsageChartMetric } from "./usageChartData";
+import { DELEGATED_COLOR, SCHEDULED_COLOR, type UsageChartMetric } from "./usageChartData";
 import { PROVIDER_LABEL, useProviderColors, useUsageMixColors } from "./usageProviders";
 
 type UsageTab = "usage" | "limits";
@@ -609,6 +609,21 @@ function ChartCard(props: {
               </Text>
             </View>
           ))}
+          {metric === "turns"
+            ? (
+                [
+                  ["Scheduled", SCHEDULED_COLOR, merged.scheduledPrompts],
+                  ["Delegated", DELEGATED_COLOR, merged.delegatedPrompts],
+                ] as const
+              ).map(([label, color, count]) =>
+                count === 0 ? null : (
+                  <View key={label} className="flex-row items-center gap-1.5">
+                    <View className="size-2 rounded-full" style={{ backgroundColor: color }} />
+                    <Text className="text-xs text-foreground-muted">{label}</Text>
+                  </View>
+                ),
+              )
+            : null}
         </View>
       </View>
     </View>

@@ -63,6 +63,13 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const;
 const DESKTOP_APP_ID = "com.t3tools.t3code";
+// T3CODE_DESKTOP_VARIANT=<slug> builds an app that installs and runs beside the regular one:
+// its own bundle id, name (and so its own Safe Storage key), T3 home and Electron profile.
+const DesktopVariant = Config.String("T3CODE_DESKTOP_VARIANT").pipe(
+  Config.map((value) => value.trim()),
+  Config.option,
+  Config.map(Option.filter((value) => /^[a-z][a-z0-9-]*$/.test(value))),
+);
 const APPLE_TEAM_ID_PATTERN = /^[A-Z0-9]{10}$/u;
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
@@ -958,6 +965,7 @@ interface StagePackageJson {
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
   readonly t3codeWebAuthn?: MacWebAuthnEntitlements;
+  readonly t3codeVariant?: string;
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -2770,9 +2778,12 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   wslRuntimeBundled = false,
   arch?: typeof BuildArch.Type,
 ) {
+  const variant = Option.getOrUndefined(yield* DesktopVariant);
   const buildConfig: Record<string, unknown> = {
-    appId: DESKTOP_APP_ID,
-    productName: resolveDesktopProductName(version),
+    appId: variant ? `${DESKTOP_APP_ID}.${variant}` : DESKTOP_APP_ID,
+    productName: variant
+      ? `T3 Code (${variant[0]!.toUpperCase()}${variant.slice(1)})`
+      : resolveDesktopProductName(version),
     artifactName: "T3-Code-${version}-${arch}.${ext}",
     electronLanguages: [...DESKTOP_ELECTRON_LANGUAGES],
     files: [
@@ -3851,8 +3862,11 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     options.platform === "win"
       ? path.join(stageAppDir, WINDOWS_SERVER_RESOURCE_SOURCE_DIR, WINDOWS_SERVER_ASAR_RESOURCE)
       : undefined;
+  const variant = Option.getOrUndefined(yield* DesktopVariant);
   const stagePackageJson: StagePackageJson = {
-    name: "t3code",
+    name: variant ? `t3code-${variant}` : "t3code",
+    // Read by apps/desktop/src/boot.ts.
+    ...(variant ? { t3codeVariant: variant } : {}),
     version: appVersion,
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,

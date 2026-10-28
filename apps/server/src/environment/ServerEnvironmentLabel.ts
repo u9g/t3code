@@ -8,6 +8,8 @@ import * as ProcessRunner from "../processRunner.ts";
 
 interface ResolveServerEnvironmentLabelInput {
   readonly cwdBaseName: string;
+  /** T3CODE_DESKTOP_VARIANT, which a variant desktop build passes to its server. */
+  readonly desktopVariant?: string | undefined;
 }
 
 const ServerEnvironmentLabelCommandProbe = Schema.Literals([
@@ -179,7 +181,7 @@ const resolveFriendlyHostLabel = Effect.fn("resolveFriendlyHostLabel")(function*
   return null;
 });
 
-export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironmentLabel")(function* (
+const resolveHostLabel = Effect.fn("resolveHostLabel")(function* (
   input: ResolveServerEnvironmentLabelInput,
 ) {
   const friendlyHostLabel = yield* resolveFriendlyHostLabel();
@@ -193,4 +195,16 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
   }
 
   return normalizeLabel(input.cwdBaseName) ?? "T3 environment";
+});
+
+/**
+ * The host's name, followed by the desktop variant, if any, as its product name shows it, so a
+ * variant app running beside the regular one on the same machine is told apart from it.
+ */
+export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironmentLabel")(function* (
+  input: ResolveServerEnvironmentLabelInput,
+) {
+  const label = yield* resolveHostLabel(input);
+  const variant = normalizeLabel(input.desktopVariant);
+  return variant ? `${label} (${variant[0]!.toUpperCase()}${variant.slice(1)})` : label;
 });

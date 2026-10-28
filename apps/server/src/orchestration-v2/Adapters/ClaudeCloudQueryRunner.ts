@@ -51,6 +51,10 @@ import {
   claudeCloudThreadFolder,
 } from "../../provider/claudeCloud/ClaudeCloudFiles.ts";
 import { relayedClaudeCloudMcpServers } from "../../provider/claudeCloud/ClaudeCloudMcpServers.ts";
+import {
+  type ClaudeCloudSecrets,
+  claudeCloudSecretsServer,
+} from "../../provider/claudeCloud/ClaudeCloudSecrets.ts";
 import { resolveClaudeCloudRepository } from "../../provider/claudeCloud/ClaudeCloudRepository.ts";
 import {
   type ChooseClaudeCloudRepository,
@@ -164,6 +168,8 @@ export interface ClaudeCloudQueryRunnerOptions {
      */
     readonly fallbackRepository?: string | undefined;
   };
+  /** What every session's `secrets` MCP server serves, by name. */
+  readonly secrets: ClaudeCloudSecrets;
   /** The browser Agent SDK. Tests replace it. */
   readonly sdk?: {
     readonly query: typeof browserQuery;
@@ -175,6 +181,8 @@ export interface ClaudeCloudQueryRunnerOptions {
 /** What a session was created with, until this process first opens it. */
 interface CreatedSession {
   readonly startupNotices: ReadonlyArray<string>;
+  /** Where the session's work is, put before its first prompt. */
+  readonly briefing: string;
   readonly model: string;
   readonly effortLevel: EffortLevel | undefined;
   readonly permissionMode: PermissionMode;
@@ -327,6 +335,21 @@ const sentFileName = (containerPath: string) => {
     .replace(/^[.\s]+|[.\s]+$/gu, "")
     .slice(-120);
   return name.length > 0 ? name : "file";
+};
+
+const briefed = (message: SDKUserMessage, briefing: string | undefined): SDKUserMessage => {
+  if (briefing === undefined) return message;
+  const { content } = message.message;
+  return {
+    ...message,
+    message: {
+      ...message.message,
+      content:
+        typeof content === "string"
+          ? `${briefing}${content}`
+          : [{ type: "text", text: briefing }, ...content],
+    },
+  };
 };
 
 const userText = (message: SDKUserMessage["message"]) =>
@@ -538,20 +561,28 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
       claudeRuntimeQueryPolicyForRuntimePolicy(input.runtimePolicy).permissionMode,
     );
     const title = input.title ?? DEFAULT_TITLE;
+    // No repository source: the cloud clones one only with a GitHub login linked
+    // to the organization, so the session clones its own with the secrets server's token.
     const session = yield* api
       .createSession({
         title,
         environmentId,
-        source: { repoUrl: repository.repoUrl, revision: repository.revision },
         model: selection.apiModelId,
         effortLevel,
         permissionMode,
-        // Without an outcome branch the cloud checks out a detached HEAD and
-        // has nowhere to push. The server appends a random suffix.
-        outcomeBranch: `claude/${sanitizeBranchFragment(title).replaceAll("/", "-")}`,
       })
       .pipe(Effect.mapError(cloudError("createSession")));
+    const branch = `claude/${sanitizeBranchFragment(title).replaceAll("/", "-")}-${session.id.slice(-6).toLowerCase()}`;
+    const checkout =
+      repository.revision === null
+        ? repository.repoUrl
+        : `${repository.repoUrl} at ${repository.revision}`;
     createdSessions.set(session.id, {
+      briefing: [
+        `This session starts with no repository. The work is in ${checkout}: clone it with the GitHub token from the secrets MCP server's get_secret("GITHUB_TOKEN"), and push your changes to a new branch named ${branch}.`,
+        "",
+        "",
+      ].join("\n"),
       startupNotices: [
         `Running in a Claude Code cloud session: ${session.webUrl}`,
         ...repository.notices,
@@ -652,6 +683,8 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
     // The worker's mode as last reported or set, so an unchanged mode costs no
     // round trip; the adapter re-applies its mode before every prompt.
     let permissionMode: PermissionMode | undefined = created?.permissionMode;
+    // Put before the first prompt only: a new session has no other place to learn it.
+    let briefing = created?.briefing;
     // Done once the worker answers `initialize` or sends a frame of its own.
     const started = yield* Deferred.make<void>();
 
@@ -670,7 +703,10 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
       // The browser query has no cwd, env, executable, system prompt or resume
       // point, and it throws on MCP servers other than in-process ones, so
       // T3's own reaches the session through one that relays to it.
-      const mcpServers = yield* relayedClaudeCloudMcpServers(queryOptions.mcpServers);
+      const mcpServers = {
+        ...(yield* relayedClaudeCloudMcpServers(queryOptions.mcpServers)),
+        secrets: claudeCloudSecretsServer(options.secrets),
+      };
       const query = yield* Effect.try({
         try: () =>
           sdk.query({
@@ -683,7 +719,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
               fromSequenceNum: cursor,
             },
             ...(canUseTool === undefined ? {} : { canUseTool }),
-            ...(mcpServers === undefined ? {} : { mcpServers }),
+            mcpServers,
             ...(queryOptions.onUserDialog === undefined
               ? {}
               : { onUserDialog: queryOptions.onUserDialog }),
@@ -1281,8 +1317,10 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
       messages: attach(current, 0).pipe(
         Stream.merge(Stream.fromEffect(Deferred.await(startFailure)), { haltStrategy: "left" }),
       ),
-      offer: Effect.fn("ClaudeCloudQueryRunner.offer")(function* (message) {
+      offer: Effect.fn("ClaudeCloudQueryRunner.offer")(function* (input) {
         if (ended !== undefined) return yield* ended;
+        const message = briefed(input, briefing);
+        briefing = undefined;
         // The SDK stamps a uuid on a message that has none, after which its
         // echo could not be told apart from a prompt typed on claude.ai.
         const uuid =

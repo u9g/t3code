@@ -147,6 +147,7 @@ const makeCloudQueryRunner = Effect.gen(function* () {
     environmentId: process.env.T3_CLAUDE_CLOUD_ENVIRONMENT_ID?.trim() || undefined,
     configDir: location.configDir,
     filesDir: yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-cloud-files-" }),
+    secrets: {},
   }).pipe(
     Effect.provide(VcsProcess.layer),
     Effect.provideService(

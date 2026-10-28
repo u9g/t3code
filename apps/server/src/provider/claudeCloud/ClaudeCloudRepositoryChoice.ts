@@ -31,6 +31,10 @@ const CHECKOUT_DEPTH = 2;
 const MAX_LISTED_CHECKOUTS = 300;
 // A slow or huge home folder leaves the search to Claude instead.
 const CHECKOUT_LISTING_TIMEOUT = "5 seconds";
+// macOS holds an open() inside these home folders until the user answers a privacy prompt, and
+// the timeout cannot cancel it: each blocked read keeps one of libuv's four file threads, so a
+// few listings stall every file read in the server. ~/Library holds others, e.g. Mail.
+const GUARDED_HOME_FOLDERS = new Set(["Desktop", "Documents", "Downloads", "Library"]);
 
 /** The repository a cloud session for a thread without a project starts from. */
 export const ClaudeCloudRepositoryChoice = Schema.Struct({
@@ -194,6 +198,7 @@ const listGitHubCheckouts = Effect.fn("listGitHubCheckouts")(function* (homeDire
       for (const name of [...names].sort()) {
         if (lines.length >= MAX_LISTED_CHECKOUTS) return;
         if (name.startsWith(".") || name === "node_modules") continue;
+        if (depth === 1 && GUARDED_HOME_FOLDERS.has(name)) continue;
         const child = path.join(folder, name);
         const config = yield* configOf(child);
         if (Option.isSome(config)) {

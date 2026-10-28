@@ -212,6 +212,10 @@ it.layer(NodeServices.layer)("makeClaudeCloudRepositoryChooser", (it) => {
           ".cache/x/.git/config",
           '[remote "origin"]\n\turl = https://github.com/o/x\n',
         );
+        yield* writeFile(
+          "Documents/notes/.git/config",
+          '[remote "origin"]\n\turl = https://github.com/o/notes\n',
+        );
 
         const cli = fakeCli({
           stdout: resultWith({ repository: "octo/app", branch: null, reason: "Cloned." }),

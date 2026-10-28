@@ -41,7 +41,7 @@ export const claudeCloudSecretsServer = (
 ): McpSdkServerConfigWithInstance => {
   const server = new McpServer({ name: "secrets", version: "1.0.0" });
   server.registerTool(
-    "list_secrets",
+    "list_secret_names",
     {
       description: "The names of the secrets get_secret can read, as a JSON array of strings.",
     },
@@ -51,7 +51,7 @@ export const claudeCloudSecretsServer = (
     "get_secret",
     {
       description:
-        "A secret's value by its name from list_secrets, as a JSON string, or null when it has none. GITHUB_TOKEN can clone and push GitHub repositories, e.g. https://x-access-token:<token>@github.com/<owner>/<name>.git, and is GH_TOKEN for the gh CLI.",
+        "A secret's value by its name from list_secret_names, as a JSON string, or null when it has none. GITHUB_TOKEN can clone and push GitHub repositories, e.g. https://x-access-token:<token>@github.com/<owner>/<name>.git, and is GH_TOKEN for the gh CLI.",
       inputSchema: { name: z.string() },
     },
     async ({ name }) => {

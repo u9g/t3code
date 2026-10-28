@@ -363,6 +363,7 @@ const makeRunner = (input: {
       environmentId: input.environmentId,
       configDir,
       filesDir,
+      secrets: { GITHUB_TOKEN: Effect.succeed("ghp_test") },
       sdk: input.sdk,
       ...(input.withoutProject === undefined ? {} : { withoutProject: input.withoutProject }),
     }).pipe(
@@ -471,6 +472,26 @@ const allocate = (
   runner.allocateSessionIdFor?.(input) ??
   Effect.die("The cloud runner must create sessions for their thread.");
 
+/** The first prompt a new session sends, which starts with where its work is. */
+const firstPrompt = (
+  runner: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape,
+  sdk: ReturnType<typeof makeFakeSdk>,
+) =>
+  Effect.gen(function* () {
+    const session = yield* runner.open(openInput({ resume: false }));
+    yield* session.offer(FIRST_PROMPT);
+    const query = sdk.queries.at(-1)!;
+    yield* query.untilPosted(1);
+    yield* session.close;
+    const { content } = query.posted[0]!.message;
+    return typeof content === "string"
+      ? content
+      : content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+  });
+
+const briefing = (checkout: string, branch: string) =>
+  `This session starts with no repository. The work is in ${checkout}: clone it with the GitHub token from the secrets MCP server's get_secret("GITHUB_TOKEN"), and push your changes to a new branch named ${branch}.\n\n`;
+
 const openInput = (
   options: {
     readonly resume?: boolean;
@@ -517,11 +538,12 @@ const consume = (session: ClaudeAdapterV2.ClaudeAgentSdkQuerySession) =>
 
 it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
   describe("allocateSessionId", () => {
-    it.effect("creates a cloud session on the project's GitHub repository", () =>
+    it.effect("creates a cloud session that clones the project's GitHub repository", () =>
       Effect.gen(function* () {
         const cwd = yield* makeRepo();
         const fake = makeFakeApi();
-        const runner = yield* makeRunner({ api: fake.api, sdk: makeFakeSdk().sdk });
+        const sdk = makeFakeSdk();
+        const runner = yield* makeRunner({ api: fake.api, sdk: sdk.sdk });
 
         const sessionId = yield* allocate(runner, allocateInput(cwd, "Fix the flaky test!"));
 
@@ -530,13 +552,15 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
           {
             title: "Fix the flaky test!",
             environmentId: "env_cloud",
-            source: { repoUrl: "https://github.com/octo-org/octo-repo", revision: "main" },
             model: "claude-opus-5-5",
             effortLevel: "xhigh",
             permissionMode: "default",
-            outcomeBranch: "claude/fix-the-flaky-test",
           },
         ]);
+        assert.equal(
+          yield* firstPrompt(runner, sdk),
+          `${briefing("https://github.com/octo-org/octo-repo at main", "claude/fix-the-flaky-test-reated")}Hello`,
+        );
       }),
     );
 
@@ -544,9 +568,10 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
       Effect.gen(function* () {
         const cwd = yield* makeRepo();
         const fake = makeFakeApi();
+        const sdk = makeFakeSdk();
         const runner = yield* makeRunner({
           api: fake.api,
-          sdk: makeFakeSdk().sdk,
+          sdk: sdk.sdk,
           environmentId: "env_chosen",
         });
 
@@ -563,8 +588,11 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
           title: "T3 Code thread",
           environmentId: "env_chosen",
           permissionMode: "plan",
-          outcomeBranch: "claude/t3-code-thread",
         });
+        assert.include(
+          yield* firstPrompt(runner, sdk),
+          "branch named claude/t3-code-thread-reated.",
+        );
       }),
     );
 
@@ -603,9 +631,10 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
         Effect.gen(function* () {
           const scratch = yield* makeScratchThread();
           const fake = makeFakeApi();
+          const sdk = makeFakeSdk();
           const runner = yield* makeRunner({
             api: fake.api,
-            sdk: makeFakeSdk().sdk,
+            sdk: sdk.sdk,
             withoutProject: scratch.withoutProject,
           });
 
@@ -622,19 +651,20 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
               effortLevel: "xhigh",
             },
           ]);
-          assert.deepInclude(fake.created[0], {
-            source: {
-              repoUrl: "https://github.com/u9g/pnpm",
-              revision: "projects-graph-overrides",
-            },
-            outcomeBranch: "claude/rebase-pnpm-14673",
-          });
           const session = yield* runner.open(openInput({ resume: false }));
           assert.deepEqual(session.startupNotices, [
             `Running in a Claude Code cloud session: ${WEB_URL}`,
             "This thread has no project, so Claude on this machine chose `u9g/pnpm` at `projects-graph-overrides`: The pull request's head branch is on the u9g fork.",
           ]);
           yield* session.close;
+          yield* allocate(runner, { ...allocateInput(scratch.cwd, "Rebase pnpm#14673") });
+          assert.include(
+            yield* firstPrompt(runner, sdk),
+            briefing(
+              "https://github.com/u9g/pnpm at projects-graph-overrides",
+              "claude/rebase-pnpm-14673-reated",
+            ),
+          );
         }),
       );
 
@@ -648,18 +678,21 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
             prefix: "t3-claude-cloud-files-",
           });
           const fake = makeFakeApi();
+          const sdk = makeFakeSdk();
           const runner = yield* makeRunner({
             api: fake.api,
-            sdk: makeFakeSdk().sdk,
+            sdk: sdk.sdk,
             filesDir,
             withoutProject: scratch.withoutProject,
           });
           yield* allocate(runner, { ...allocateInput(scratch.cwd), messageText: REBASE_MESSAGE });
+          const first = yield* firstPrompt(runner, sdk);
 
           // As when a session archived on claude.ai is replaced, after a restart.
+          const restartedSdk = makeFakeSdk();
           const restarted = yield* makeRunner({
             api: fake.api,
-            sdk: makeFakeSdk().sdk,
+            sdk: restartedSdk.sdk,
             filesDir,
             withoutProject: scratch.withoutProject,
           });
@@ -669,19 +702,17 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
           });
 
           assert.lengthOf(scratch.requests, 1);
-          assert.deepEqual(
-            fake.created.map((created) => created.source),
-            [
-              { repoUrl: "https://github.com/pnpm/pnpm", revision: null },
-              { repoUrl: "https://github.com/pnpm/pnpm", revision: null },
-            ],
-          );
           const session = yield* restarted.open(openInput({ resume: false }));
           assert.include(
             session.startupNotices ?? [],
             "This thread has no project, so its cloud session starts from `pnpm/pnpm`, as chosen when the thread began.",
           );
           yield* session.close;
+          yield* allocate(restarted, { ...allocateInput(scratch.cwd), messageText: "go on" });
+          const later = yield* firstPrompt(restarted, restartedSdk);
+          for (const prompt of [first, later]) {
+            assert.include(prompt, "The work is in https://github.com/pnpm/pnpm: clone it");
+          }
         }),
       );
 
@@ -749,9 +780,10 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
                 ...scratch.withoutProject,
                 fallbackRepository: "u9g/scratch",
               };
+              const sdk = makeFakeSdk();
               const runner = yield* makeRunner({
                 api: fake.api,
-                sdk: makeFakeSdk().sdk,
+                sdk: sdk.sdk,
                 filesDir,
                 withoutProject,
               });
@@ -762,17 +794,25 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
               const session = yield* runner.open(openInput({ resume: false }));
               const notices = session.startupNotices ?? [];
               yield* session.close;
+              yield* allocate(runner, {
+                ...allocateInput(scratch.cwd),
+                ...(messageText === null ? {} : { messageText }),
+              });
+              const first = yield* firstPrompt(runner, sdk);
 
               // A later session keeps the fallback rather than asking Claude again.
+              const restartedSdk = makeFakeSdk();
               const restarted = yield* makeRunner({
                 api: fake.api,
-                sdk: makeFakeSdk().sdk,
+                sdk: restartedSdk.sdk,
                 filesDir,
                 withoutProject,
               });
               yield* allocate(restarted, { ...allocateInput(scratch.cwd), messageText: "go on" });
+              const later = yield* firstPrompt(restarted, restartedSdk);
+              const checkout = (prompt: string) => /The work is in (\S+):/u.exec(prompt)?.[1];
               return {
-                sources: fake.created.map((created) => created.source),
+                sources: [checkout(first), checkout(later)],
                 asked: scratch.requests.length,
                 notices,
               };
@@ -783,7 +823,7 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
               new ClaudeCloudRepositoryChoiceError({ reason: "not_chosen", detail: "Unclear." }),
             ),
           );
-          const fallback = { repoUrl: "https://github.com/u9g/scratch", revision: null };
+          const fallback = "https://github.com/u9g/scratch";
           assert.deepEqual(notChosen.sources, [fallback, fallback]);
           assert.equal(notChosen.asked, 1);
           assert.include(
@@ -881,8 +921,9 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
             fromSequenceNum: 140,
           });
           // The cloud cannot reach T3's HTTP server, so an in-process one relays to it.
-          assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["t3-code"]);
+          assert.deepEqual(Object.keys(options?.mcpServers ?? {}), ["t3-code", "secrets"]);
           assert.include(options?.mcpServers?.["t3-code"], { type: "sdk", name: "t3-code" });
+          assert.include(options?.mcpServers?.["secrets"], { type: "sdk", name: "secrets" });
           assert.deepEqual(sdk.queries[0]?.controls, [
             { method: "initialize" },
             { method: "setPermissionMode", argument: "default" },

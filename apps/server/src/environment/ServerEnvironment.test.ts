@@ -186,6 +186,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
                   env: {
                     T3CODE_ENVIRONMENT_LABEL: " MacBook ",
                     T3CODE_ENVIRONMENT_MACHINE_KIND: "laptop",
+                    T3CODE_DESKTOP_VARIANT: "cloud",
                   },
                 }),
               ),

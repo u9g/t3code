@@ -9,6 +9,8 @@ import * as ProcessRunner from "../processRunner.ts";
 
 interface ResolveServerEnvironmentLabelInput {
   readonly cwdBaseName: string;
+  /** T3CODE_DESKTOP_VARIANT, which a variant desktop build passes to its server. */
+  readonly desktopVariant?: string | undefined;
 }
 
 const ServerEnvironmentLabelCommandProbe = Schema.Literals([
@@ -199,14 +201,7 @@ const labelOverride = Config.String("T3CODE_ENVIRONMENT_LABEL").pipe(
   Config.map(Option.flatMap((label) => Option.fromNullishOr(normalizeLabel(label)))),
 );
 
-export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironmentLabel")(function* (
-  input: ResolveServerEnvironmentLabelInput,
-) {
-  const override = yield* labelOverride.pipe(Effect.orElseSucceed(() => Option.none<string>()));
-  if (Option.isSome(override)) {
-    return override.value;
-  }
-
+const resolveHostLabel = Effect.fn("resolveHostLabel")(function* (cwdBaseName: string) {
   const friendlyHostLabel = yield* resolveFriendlyHostLabel();
   if (friendlyHostLabel) {
     return friendlyHostLabel;
@@ -222,5 +217,22 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
     return hostname;
   }
 
-  return normalizeLabel(input.cwdBaseName) ?? "T3 environment";
+  return normalizeLabel(cwdBaseName) ?? "T3 environment";
+});
+
+/**
+ * The host's name, followed by the desktop variant, if any, as its product name shows it, so a
+ * variant app running beside the regular one on the same machine is told apart from it.
+ */
+export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironmentLabel")(function* (
+  input: ResolveServerEnvironmentLabelInput,
+) {
+  const override = yield* labelOverride.pipe(Effect.orElseSucceed(() => Option.none<string>()));
+  if (Option.isSome(override)) {
+    return override.value;
+  }
+
+  const label = yield* resolveHostLabel(input.cwdBaseName);
+  const variant = normalizeLabel(input.desktopVariant);
+  return variant ? `${label} (${variant[0]!.toUpperCase()}${variant.slice(1)})` : label;
 });

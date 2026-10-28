@@ -27,8 +27,11 @@ describe("claudeCloudSecretsServer", () => {
   it("lists the secrets by name", async () => {
     const { client, call } = await connect();
     const { tools } = await client.listTools();
-    assert.deepEqual(tools.map((tool) => tool.name).toSorted(), ["get_secret", "list_secrets"]);
-    assert.deepEqual(await call("list_secrets"), ["GITHUB_TOKEN", "EMPTY"]);
+    assert.deepEqual(tools.map((tool) => tool.name).toSorted(), [
+      "get_secret",
+      "list_secret_names",
+    ]);
+    assert.deepEqual(await call("list_secret_names"), ["GITHUB_TOKEN", "EMPTY"]);
   });
 
   it("reads a secret on each call, and answers null for one it lacks or that has no value", async () => {

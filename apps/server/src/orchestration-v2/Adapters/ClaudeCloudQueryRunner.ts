@@ -579,7 +579,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
         : `${repository.repoUrl} at ${repository.revision}`;
     createdSessions.set(session.id, {
       briefing: [
-        `This session starts with no repository. The work is in ${checkout}: clone it with the GitHub token from the secrets MCP server's get_secret("GITHUB_TOKEN"). This session's git proxy refuses git push, so push with the secrets MCP server's github_push_script, to a new branch named ${branch} unless you are asked to push to another.`,
+        `This session starts with no repository. The work is in ${checkout}: clone it with the GitHub token from the secrets MCP server's get_secret("GITHUB_TOKEN"), and push your changes to a new branch named ${branch}.`,
         "",
         "",
       ].join("\n"),

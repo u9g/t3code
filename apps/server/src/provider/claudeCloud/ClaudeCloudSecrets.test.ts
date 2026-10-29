@@ -3,7 +3,6 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 
-import { GITHUB_PUSH_SCRIPT } from "./ClaudeCloudGitHubPush.ts";
 import { claudeCloudSecretsServer } from "./ClaudeCloudSecrets.ts";
 
 const connect = async () => {
@@ -30,12 +29,9 @@ describe("claudeCloudSecretsServer", () => {
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map((tool) => tool.name).toSorted(), [
       "get_secret",
-      "github_push_script",
       "list_secret_names",
     ]);
     assert.deepEqual(await call("list_secret_names"), ["GITHUB_TOKEN", "EMPTY"]);
-    const script = await client.callTool({ name: "github_push_script", arguments: {} });
-    assert.deepEqual(script.content, [{ type: "text", text: GITHUB_PUSH_SCRIPT }]);
   });
 
   it("reads a secret on each call, and answers null for one it lacks or that has no value", async () => {

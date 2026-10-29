@@ -490,7 +490,7 @@ const firstPrompt = (
   });
 
 const briefing = (checkout: string, branch: string) =>
-  `This session starts with no repository. The work is in ${checkout}: clone it with the GitHub token from the secrets MCP server's get_secret("GITHUB_TOKEN"), and push your changes to a new branch named ${branch}.\n\n`;
+  `This session starts with no repository. The work is in ${checkout}: clone it with the GitHub token from the secrets MCP server's get_secret("GITHUB_TOKEN"). This session's git proxy refuses git push, so push with the secrets MCP server's github_push_script, to a new branch named ${branch} unless you are asked to push to another.\n\n`;
 
 const openInput = (
   options: {
@@ -591,7 +591,7 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
         });
         assert.include(
           yield* firstPrompt(runner, sdk),
-          "branch named claude/t3-code-thread-reated.",
+          "branch named claude/t3-code-thread-reated unless",
         );
       }),
     );

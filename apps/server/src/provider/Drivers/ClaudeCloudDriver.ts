@@ -43,7 +43,6 @@ import {
   makeClaudeAdapterV2,
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { makeClaudeCloudQueryRunner } from "../../orchestration-v2/Adapters/ClaudeCloudQueryRunner.ts";
-import { makeClaudeCloudSecrets } from "../claudeCloud/ClaudeCloudSecrets.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import { resolveClaudeModelCatalog } from "../ClaudeModelCatalog.ts";
 import { ProviderDriverError } from "../Errors.ts";
@@ -206,7 +205,6 @@ export const ClaudeCloudDriver: ProviderDriver<ClaudeCloudSettings, ClaudeCloudD
         chooseRepository,
         fallbackRepository: fallbackRepository ?? undefined,
       },
-      secrets: yield* makeClaudeCloudSecrets(),
     }).pipe(Effect.provide(VcsProcess.layer));
 
     // The adapter reads Claude settings; only the custom models and the

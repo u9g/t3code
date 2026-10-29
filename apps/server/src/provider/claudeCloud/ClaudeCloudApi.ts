@@ -180,8 +180,7 @@ export interface ClaudeCloudCreateSessionInput {
   readonly title: string;
   /** `ccpool_…` ids are self-hosted runner pools and are sent as such. */
   readonly environmentId: string;
-  /** Without one, the session starts with no repository and clones its own. */
-  readonly source?: {
+  readonly source: {
     /** `https://github.com/<owner>/<repo>` */
     readonly repoUrl: string;
     /** Branch, tag or SHA to check out; null lets the server use the default branch. */
@@ -495,17 +494,14 @@ export const make = Effect.fn("ClaudeCloudApi.make")(function* (options: ClaudeC
         : { environment_id: input.environmentId }),
       events,
       config: {
-        sources:
-          input.source === undefined
-            ? []
-            : [
-                {
-                  type: "git_repository",
-                  url: input.source.repoUrl,
-                  ...(input.source.revision === null ? {} : { revision: input.source.revision }),
-                },
-              ],
-        ...(input.source === undefined || input.outcomeBranch === undefined
+        sources: [
+          {
+            type: "git_repository",
+            url: input.source.repoUrl,
+            ...(input.source.revision === null ? {} : { revision: input.source.revision }),
+          },
+        ],
+        ...(input.outcomeBranch === undefined
           ? {}
           : {
               outcomes: [

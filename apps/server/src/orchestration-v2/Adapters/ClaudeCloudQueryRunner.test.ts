@@ -348,12 +348,17 @@ const makeRunner = (input: {
   readonly nativeLog?: Array<unknown>;
   readonly filesDir?: string;
   readonly withoutProject?: ClaudeCloudQueryRunner.ClaudeCloudQueryRunnerOptions["withoutProject"];
+  /** The contents of the user's Claude `settings.json`. */
+  readonly claudeSettings?: string;
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const configDir = yield* fileSystem.makeTempDirectoryScoped({
       prefix: "t3-claude-cloud-config-",
     });
+    if (input.claudeSettings !== undefined) {
+      yield* fileSystem.writeFileString(`${configDir}/settings.json`, input.claudeSettings);
+    }
     const filesDir =
       input.filesDir ??
       (yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-cloud-files-" }));
@@ -893,6 +898,40 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
             },
           ]);
         }),
+    );
+
+    it.effect("applies the user's attribution, which a cloud session never reads itself", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeRepo();
+        const fake = makeFakeApi({ latestSequenceNum: 14 });
+        const sdk = makeFakeSdk();
+        const runner = yield* makeRunner({
+          api: fake.api,
+          sdk: sdk.sdk,
+          claudeSettings: JSON.stringify({
+            model: "opus",
+            attribution: { commit: "", pr: "", sessionUrl: false },
+          }),
+        });
+        yield* allocate(runner, allocateInput(cwd, "Fix the flaky test"));
+
+        // Even on the session it just created, before its first turn.
+        yield* runner.open(openInput({ resume: false }));
+        assert.deepEqual(
+          sdk.queries[0]?.controls.filter((control) => control.method === "applyFlagSettings"),
+          [
+            {
+              method: "applyFlagSettings",
+              argument: {
+                effortLevel: "xhigh",
+                fastMode: false,
+                ultracode: null,
+                attribution: { commit: "", pr: "", sessionUrl: false },
+              },
+            },
+          ],
+        );
+      }),
     );
 
     it.effect("keeps the worker out of bypassPermissions and skips unchanged modes", () =>

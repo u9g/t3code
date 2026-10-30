@@ -56,6 +56,7 @@ import {
   type ChooseClaudeCloudRepository,
   ClaudeCloudRepositoryChoice,
 } from "../../provider/claudeCloud/ClaudeCloudRepositoryChoice.ts";
+import { readClaudeUserSettings } from "../../provider/claudeCloud/ClaudeUserSettings.ts";
 import type * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   ClaudeAgentSdkQueryRunner,
@@ -969,16 +970,26 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
       },
     );
 
+    // A cloud session never reads the user's settings.json, so the attribution
+    // it sets there is applied as a flag, before the first turn writes it into
+    // the system prompt.
+    const { attribution } = yield* readClaudeUserSettings(options.configDir).pipe(
+      Effect.provideContext(context),
+    );
+    const flags: ClaudeFlagSettings = {
+      ...openFlagSettings(queryOptions),
+      ...(attribution == null ? {} : { attribution }),
+    };
     // A session this process just created already runs with the selection it
     // was created with; its container is still booting, so controls would
     // only wait on that.
-    const flags = openFlagSettings(queryOptions);
     const setModelOnOpen = created?.model !== queryOptions.model;
     const applyFlagsOnOpen =
       created === undefined ||
       created.effortLevel !== flags.effortLevel ||
       flags.fastMode === true ||
-      flags.ultracode === true;
+      flags.ultracode === true ||
+      flags.attribution != null;
     const setPermissionModeOnOpen =
       cloudPermissionMode(queryOptions.permissionMode) !== permissionMode;
     if (asleep) {

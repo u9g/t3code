@@ -1,9 +1,8 @@
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import type { ClaudeCloudEnvironment } from "./ClaudeCloudApi.ts";
+import { readClaudeUserSettings } from "./ClaudeUserSettings.ts";
 
 export class ClaudeCloudNoEnvironmentError extends Schema.TaggedError<ClaudeCloudNoEnvironmentError>()(
   "ClaudeCloudNoEnvironmentError",
@@ -13,32 +12,6 @@ export class ClaudeCloudNoEnvironmentError extends Schema.TaggedError<ClaudeClou
     return "Claude Cloud found no cloud environment to run in. Create one at https://claude.ai/code, or choose one in this provider's settings.";
   }
 }
-
-const ClaudeUserSettings = Schema.Struct({
-  remote: Schema.optional(
-    Schema.NullOr(
-      Schema.Struct({ defaultEnvironmentId: Schema.optional(Schema.NullOr(Schema.String)) }),
-    ),
-  ),
-});
-const decodeClaudeUserSettings = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(ClaudeUserSettings),
-);
-
-/** `remote.defaultEnvironmentId` from `<configDir>/settings.json`, as set by the CLI's `/remote-env`. */
-const readClaudeDefaultEnvironmentId = Effect.fn(
-  "ClaudeCloudEnvironment.readClaudeDefaultEnvironmentId",
-)(
-  function* (configDir: string) {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const settings = yield* fileSystem
-      .readFileString(path.join(configDir, "settings.json"))
-      .pipe(Effect.flatMap(decodeClaudeUserSettings));
-    return settings.remote?.defaultEnvironmentId?.trim() || undefined;
-  },
-  Effect.orElseSucceed(() => undefined),
-);
 
 const isSelfHostedPool = (id: string) => id.startsWith("ccpool_");
 
@@ -57,7 +30,10 @@ export const resolveClaudeCloudEnvironment = Effect.fn("resolveClaudeCloudEnviro
 }) {
   const configured = input.environmentId?.trim();
   if (configured) return configured;
-  const claudeDefault = yield* readClaudeDefaultEnvironmentId(input.configDir);
+  // `remote.defaultEnvironmentId`, as set by the CLI's `/remote-env`.
+  const claudeDefault =
+    (yield* readClaudeUserSettings(input.configDir)).remote?.defaultEnvironmentId?.trim() ||
+    undefined;
   if (claudeDefault !== undefined && isSelfHostedPool(claudeDefault)) return claudeDefault;
   const environments = yield* input.listEnvironments;
   const chosen =

@@ -1,4 +1,5 @@
 import {
+  isClaudeCodeDriver,
   type ModelCapabilities,
   ProviderDriverKind,
   type ProviderOptionDescriptor,
@@ -43,6 +44,23 @@ const EFFORT_CHOICES = [
   { id: "xhigh", label: "Extra High" },
 ] as const;
 
+const CLAUDE_DESCRIPTOR_PRESETS: ReadonlyArray<DescriptorPreset> = [
+  {
+    id: "effort",
+    label: "Reasoning",
+    type: "select",
+    choices: [
+      { id: "low", label: "Low" },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High", isDefault: true },
+      { id: "xhigh", label: "Extra High" },
+      { id: "max", label: "Max" },
+    ],
+  },
+  { id: "fastMode", label: "Fast Mode", type: "boolean" },
+  { id: "thinking", label: "Thinking", type: "boolean" },
+];
+
 export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
   Record<ProviderDriverKind, ReadonlyArray<DescriptorPreset>>
 > = {
@@ -58,22 +76,8 @@ export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
       ],
     },
   ],
-  [ProviderDriverKind.make("claudeAgent")]: [
-    {
-      id: "effort",
-      label: "Reasoning",
-      type: "select",
-      choices: [
-        { id: "low", label: "Low" },
-        { id: "medium", label: "Medium" },
-        { id: "high", label: "High", isDefault: true },
-        { id: "xhigh", label: "Extra High" },
-        { id: "max", label: "Max" },
-      ],
-    },
-    { id: "fastMode", label: "Fast Mode", type: "boolean" },
-    { id: "thinking", label: "Thinking", type: "boolean" },
-  ],
+  [ProviderDriverKind.make("claudeAgent")]: CLAUDE_DESCRIPTOR_PRESETS,
+  [ProviderDriverKind.make("claudeCloud")]: CLAUDE_DESCRIPTOR_PRESETS,
   [ProviderDriverKind.make("cursor")]: [
     { id: "reasoning", label: "Reasoning", type: "select", choices: EFFORT_CHOICES },
     { id: "fastMode", label: "Fast Mode", type: "boolean" },
@@ -144,11 +148,8 @@ export function emptyEditorChoice(): EditorChoice {
   return { key: newEditorKey(), id: "", label: "", isDefault: false };
 }
 
-/**
- * Prompt-injected choices (Claude's `ultrathink`) are delivered as prompt text
- * by built-in runtime profiles a custom entry does not have, so they are
- * dropped rather than stored as a plain option value.
- */
+/** Custom entries lack runtime profiles for prompt-injected choices, so do not store them as ordinary
+ * options. */
 function descriptorToEditor(descriptor: ProviderOptionDescriptor): EditorDescriptor {
   const promptInjected = new Set(
     descriptor.type === "select" ? (descriptor.promptInjectedValues ?? []) : [],
@@ -193,7 +194,7 @@ export function descriptorsFromCapabilities(
   driverKind: ProviderDriverKind | null,
 ): EditorDescriptor[] {
   return (capabilities?.optionDescriptors ?? [])
-    .filter((descriptor) => driverKind !== "claudeAgent" || descriptor.id !== "contextWindow")
+    .filter((descriptor) => !isClaudeCodeDriver(driverKind) || descriptor.id !== "contextWindow")
     .map(descriptorToEditor);
 }
 

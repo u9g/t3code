@@ -11,6 +11,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 import {
+  ClaudeSettings,
+  defaultInstanceIdForDriver,
+  ProviderDriverKind,
   ProviderReplayEntry,
   type ModelSelection,
   type ProviderApprovalDecision,
@@ -28,6 +31,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import * as ServerConfig from "../../config.ts";
+import { ClaudeCloudCapabilitiesV2 } from "../../provider/Drivers/ClaudeCloudDriver.ts";
 import {
   isWindowsClaudeLauncherShimPath,
   resolveClaudeSdkExecutablePath,
@@ -35,6 +39,7 @@ import {
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import { claudeTaskOutputRoot } from "./ClaudeTaskOutputTail.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { ProviderAdapterDriverCreateError } from "@t3tools/provider-core/server/adapterDriver";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import { randomUuidV4 } from "@t3tools/provider-core/server/randomUuid";
@@ -45,18 +50,31 @@ import {
 import type { ProviderReplayGate } from "@t3tools/provider-testing/replayGate";
 
 export const CLAUDE_AGENT_SDK_REPLAY_PROTOCOL = "claude-agent-sdk.query" as const;
+export const CLAUDE_CLOUD_PROVIDER = ProviderDriverKind.make("claudeCloud");
 export const claudeBackgroundWakeResultLabel = (wakeNumber: number) =>
   `result:background-wake:${wakeNumber}`;
 
-const ClaudeAgentSdkReplayTranscript = Schema.Struct({
-  provider: Schema.Literal(ClaudeAdapterV2.CLAUDE_PROVIDER),
+const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
+
+const replayTranscriptFields = {
   protocol: Schema.Literal(CLAUDE_AGENT_SDK_REPLAY_PROTOCOL),
   version: Schema.String,
   scenario: Schema.String,
   metadata: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   entries: Schema.Array(ProviderReplayEntry),
+};
+const ClaudeAgentSdkReplayTranscript = Schema.Struct({
+  provider: Schema.Literal(ClaudeAdapterV2.CLAUDE_PROVIDER),
+  ...replayTranscriptFields,
 });
-type ClaudeAgentSdkReplayTranscript = typeof ClaudeAgentSdkReplayTranscript.Type;
+// A cloud session speaks the same query protocol, recorded at the query runner.
+const ClaudeCloudReplayTranscript = Schema.Struct({
+  provider: Schema.Literal(CLAUDE_CLOUD_PROVIDER),
+  ...replayTranscriptFields,
+});
+type ClaudeAgentSdkReplayTranscript =
+  | typeof ClaudeAgentSdkReplayTranscript.Type
+  | typeof ClaudeCloudReplayTranscript.Type;
 
 export class ClaudeReplayTranscriptDecodeError extends Schema.TaggedError<ClaudeReplayTranscriptDecodeError>()(
   "ClaudeReplayTranscriptDecodeError",
@@ -191,6 +209,17 @@ interface ClaudeQuerySetPermissionModeFrame {
 
 interface ClaudeQueryInterruptFrame {
   readonly type: "query.interrupt";
+}
+
+// Replies only a remote session gives. Each is recorded right after the call
+// that got it, so replay hands it back as soon as the call is made.
+interface ClaudeQueryOpenedFrame {
+  readonly type: "query.opened";
+  readonly startupNotices: ReadonlyArray<string>;
+}
+
+interface ClaudeQueryInterruptedFrame extends ClaudeAdapterV2.ClaudeQueryInterruptReceipt {
+  readonly type: "query.interrupted";
 }
 
 interface ClaudePermissionRequestFrame {
@@ -331,9 +360,12 @@ function isClaudeSdkReplayMessage(frame: unknown): frame is SDKMessage {
     type === "system" ||
     type === "stream_event" ||
     type === "rate_limit_event" ||
-    // Undeclared in the SDK types: queued/started/completed for each prompt
-    // that carries a uuid.
-    type === "command_lifecycle"
+    type === "prompt_suggestion" ||
+    // The SDK types omit command_lifecycle for prompt uuids.
+    type === "command_lifecycle" ||
+    // Undeclared too, and sent only by a remote session.
+    type === "active_goal" ||
+    type === "autocompact_state"
   );
 }
 
@@ -343,6 +375,22 @@ function sdkMessageFromReplayFrame(frame: unknown): SDKMessage {
   }
   return frame;
 }
+
+const isStringArray = (value: unknown): value is ReadonlyArray<string> =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string");
+
+const isClaudeQueryOpenedFrame = (frame: unknown): frame is ClaudeQueryOpenedFrame =>
+  typeof frame === "object" &&
+  frame !== null &&
+  Reflect.get(frame, "type") === "query.opened" &&
+  isStringArray(Reflect.get(frame, "startupNotices"));
+
+const isClaudeQueryInterruptedFrame = (frame: unknown): frame is ClaudeQueryInterruptedFrame =>
+  typeof frame === "object" &&
+  frame !== null &&
+  Reflect.get(frame, "type") === "query.interrupted" &&
+  isStringArray(Reflect.get(frame, "stillQueued")) &&
+  isStringArray(Reflect.get(frame, "cancelled"));
 
 function isClaudePermissionRequestFrame(frame: unknown): frame is ClaudePermissionRequestFrame {
   const options =
@@ -492,6 +540,9 @@ function makeReplayQueryRunner(
   let failure: ClaudeAgentSdkReplayError | null = null;
   let cursorAdvanced = makeCursorSignal();
   const iteratorAbortControllers = new Set<AbortController>();
+  // A remote session's stream ends only when its query is closed, not when
+  // the recording runs out.
+  const remote = transcript.provider === CLAUDE_CLOUD_PROVIDER;
 
   const abortReplayIterators = () => {
     for (const abortController of iteratorAbortControllers) {
@@ -529,6 +580,11 @@ function makeReplayQueryRunner(
 
       const entry = transcript.entries[cursor];
       if (entry === undefined) {
+        if (remote) {
+          await waitForCursorAdvance(cursorAdvanced.promise, signal);
+          throwIfFailed();
+          if (!signal.aborted) continue;
+        }
         return;
       }
 
@@ -623,10 +679,13 @@ function makeReplayQueryRunner(
 
   const replayMessagesWithGateCleanup = (
     options: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions,
+    closed: AbortSignal,
   ): AsyncIterable<SDKMessage> => ({
     [Symbol.asyncIterator]: () => {
       const abortController = new AbortController();
       iteratorAbortControllers.add(abortController);
+      if (closed.aborted) abortController.abort();
+      closed.addEventListener("abort", () => abortController.abort(), { once: true });
       const iterator = replayMessages(options, abortController.signal);
       return {
         next: async () => {
@@ -654,10 +713,7 @@ function makeReplayQueryRunner(
     },
   });
 
-  // Prompt uuids are derived from ids that differ between the recording and
-  // a replay run, so a matched prompt offer maps the recorded uuid to the
-  // replayed one, and inbound frames echoing or acknowledging it are
-  // rewritten to match.
+  // Prompt uuids differ on replay; rewrite inbound echoes and acknowledgements to match.
   const promptUuidReplacements = new Map<string, string>();
   const replayedPromptUuid = (value: string): string => promptUuidReplacements.get(value) ?? value;
   const withReplayedPromptUuids = (frame: unknown): unknown => {
@@ -799,7 +855,35 @@ function makeReplayQueryRunner(
     return frame;
   };
 
-  const replayEffect = (tryEffect: () => void) =>
+  // A local transcript never has these, so one is taken only when recorded.
+  const takeRemoteReplyFrame = <Frame extends ClaudeQueryOpenedFrame | ClaudeQueryInterruptedFrame>(
+    type: Frame["type"],
+    isFrame: (frame: unknown) => frame is Frame,
+  ): Frame | undefined => {
+    const entry = transcript.entries[cursor];
+    if (
+      entry?.type !== "emit_inbound" ||
+      typeof entry.frame !== "object" ||
+      entry.frame === null ||
+      Reflect.get(entry.frame, "type") !== type
+    ) {
+      return undefined;
+    }
+    if (!isFrame(entry.frame)) {
+      return fail(
+        new ClaudeReplayFrameMismatchError({
+          scenario: transcript.scenario,
+          cursor,
+          expected: { type },
+          actual: entry.frame,
+        }),
+      );
+    }
+    advance();
+    return entry.frame;
+  };
+
+  const replayEffect = <A>(tryEffect: () => A) =>
     Effect.try({
       try: tryEffect,
       catch: (cause) => replayQueryRunnerError(transcript, cause),
@@ -808,9 +892,13 @@ function makeReplayQueryRunner(
   return {
     open: (input) => {
       assertNextOutboundFrame(makeClaudeQueryOpenFrame(input));
+      const opened = takeRemoteReplyFrame("query.opened", isClaudeQueryOpenedFrame);
+      const closed = new AbortController();
       return {
-        messages: Stream.fromAsyncIterable(replayMessagesWithGateCleanup(input.options), (cause) =>
-          replayQueryRunnerError(transcript, cause),
+        ...(opened === undefined ? {} : { startupNotices: opened.startupNotices }),
+        messages: Stream.fromAsyncIterable(
+          replayMessagesWithGateCleanup(input.options, closed.signal),
+          (cause) => replayQueryRunnerError(transcript, cause),
         ),
         offer: (message) =>
           replayEffect(() => {
@@ -845,10 +933,18 @@ function makeReplayQueryRunner(
           replayEffect(() => {
             assertNextOutboundFrame({ type: "query.background_tasks", toolUseId });
           }).pipe(Effect.as(true)),
-        interrupt: replayEffect(() => {
+        interrupt: replayEffect((): ClaudeAdapterV2.ClaudeQueryInterruptReceipt | undefined => {
           assertNextOutboundFrame({ type: "query.interrupt" });
+          const receipt = takeRemoteReplyFrame("query.interrupted", isClaudeQueryInterruptedFrame);
+          return receipt === undefined
+            ? undefined
+            : {
+                stillQueued: receipt.stillQueued.map(replayedPromptUuid),
+                cancelled: receipt.cancelled.map(replayedPromptUuid),
+              };
         }),
-        close: Effect.void,
+        // A local recording ends its stream itself, with `runtime_exit`.
+        close: remote ? Effect.sync(() => closed.abort()) : Effect.void,
       };
     },
     forkSession: (input) => {
@@ -923,22 +1019,6 @@ function replayQueryRunnerError(
   });
 }
 
-const makeClaudeAgentSdkReplayQueryRunner = Effect.fn("ClaudeAgentSdkReplayQueryRunner.layer")(
-  function* (
-    transcript: ClaudeAgentSdkReplayTranscript,
-    options: { readonly replayGate?: ProviderReplayGate } = {},
-  ) {
-    const queryRunner = makeReplayQueryRunner(transcript, options);
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        queryRunner.assertComplete();
-      }),
-    );
-
-    return replayQueryRunnerService(transcript, queryRunner);
-  },
-);
-
 function replayQueryRunnerService(
   transcript: ClaudeAgentSdkReplayTranscript,
   queryRunner: ClaudeQueryRunner,
@@ -955,16 +1035,6 @@ function replayQueryRunnerService(
     subagentLaunchToolUseId: (input) => replay(() => queryRunner.subagentLaunchToolUseId(input)),
     assertComplete: replay(() => queryRunner.assertComplete()),
   });
-}
-
-function layerClaudeAgentSdkReplayQueryRunner(
-  transcript: ClaudeAgentSdkReplayTranscript,
-  options: { readonly replayGate?: ProviderReplayGate } = {},
-): Layer.Layer<ClaudeAdapterV2.ClaudeAgentSdkQueryRunner> {
-  return Layer.effect(
-    ClaudeAdapterV2.ClaudeAgentSdkQueryRunner,
-    makeClaudeAgentSdkReplayQueryRunner(transcript, options),
-  );
 }
 
 function layerClaudeAgentSdkReplay(
@@ -994,12 +1064,7 @@ function layerClaudeAgentSdkReplay(
   );
 }
 
-/**
- * While a foreground Bash call runs, Claude Code writes its output to a task
- * file the adapter tails. A replay has no Claude Code process, so it writes the
- * file each recorded `task_started` names, holding that call's recorded output,
- * under a scenario-owned `CLAUDE_CODE_TMPDIR`.
- */
+/** Replays write recorded Bash output to task_started files under a scenario-owned CLAUDE_CODE_TMPDIR. */
 const writeReplayTaskOutputFiles = Effect.fn("ClaudeReplay.writeTaskOutputFiles")(function* (
   transcript: ClaudeAgentSdkReplayTranscript,
 ) {
@@ -1024,7 +1089,12 @@ const writeReplayTaskOutputFiles = Effect.fn("ClaudeReplay.writeTaskOutputFiles"
     const stderr = typeof result.stderr === "string" ? result.stderr : "";
     outputByToolUseId.set(toolResult.tool_use_id, `${result.stdout}${stderr}`);
   }
-  const root = claudeTaskOutputRoot({ CLAUDE_CODE_TMPDIR: tmpRoot }, path);
+  const root = claudeTaskOutputRoot(
+    { CLAUDE_CODE_TMPDIR: tmpRoot },
+    path,
+    null,
+    yield* HostProcess.Platform,
+  );
   for (const frame of frames) {
     if (frame.type !== "system" || frame.subtype !== "task_started") continue;
     if (frame.task_type !== "local_bash" || frame.is_backgrounded !== false) continue;
@@ -1055,15 +1125,18 @@ function layerClaudeProviderAdapterRegistryReplay(
     writeReplayTaskOutputFiles(transcript).pipe(
       Effect.orDie,
       Effect.map((tmpRoot) =>
-        ProviderAdapterRegistry.layerFromDrivers({
-          drivers: [ClaudeAdapterV2.ClaudeAdapterV2Driver],
-          configMap: {
-            [ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID]: {
-              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+        ProviderAdapterRegistry.layerFromAdaptersEffect(
+          ClaudeAdapterV2.createClaudeAdapterV2(
+            {
+              instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+              displayName: undefined,
               environment: [{ name: "CLAUDE_CODE_TMPDIR", value: tmpRoot, sensitive: false }],
+              enabled: true,
+              config: DEFAULT_CLAUDE_SETTINGS,
             },
-          },
-        }),
+            {},
+          ).pipe(Effect.map((adapter) => [adapter])),
+        ),
       ),
       Effect.provide(NodeServices.layer),
     ),
@@ -1075,6 +1148,49 @@ function layerClaudeProviderAdapterRegistryReplay(
         NodeServices.layer,
         layerServerConfig,
       ),
+    ),
+  );
+}
+
+const CLAUDE_CLOUD_INSTANCE_ID = defaultInstanceIdForDriver(CLAUDE_CLOUD_PROVIDER);
+
+/** The adapter as the claudeCloud driver builds it, over whatever runner the layer provides. */
+const makeClaudeCloudReplayAdapter = Effect.gen(function* () {
+  const serverConfig = yield* ServerConfig.ServerConfig;
+  return yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+    instanceId: CLAUDE_CLOUD_INSTANCE_ID,
+    settings: { ...DEFAULT_CLAUDE_SETTINGS, enabled: true },
+    environment: yield* HostProcess.Environment,
+    attachmentsDir: serverConfig.attachmentsDir,
+    fileSystem: yield* FileSystem.FileSystem,
+    path: yield* Path.Path,
+    crypto: yield* Crypto.Crypto,
+    idAllocator: yield* IdAllocator.IdAllocatorV2,
+    queryRunner: yield* ClaudeAdapterV2.ClaudeAgentSdkQueryRunner,
+    continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
+    driverKind: CLAUDE_CLOUD_PROVIDER,
+    capabilities: ClaudeCloudCapabilitiesV2,
+    transport: "remote",
+  });
+});
+
+/**
+ * A registry holding one claudeCloud instance whose sessions go through
+ * `queryRunner`: the replay runner, or the live cloud runner while recording.
+ */
+export function layerClaudeCloudProviderAdapterRegistry<E, R>(input: {
+  readonly scenario: string;
+  readonly queryRunner: Layer.Layer<ClaudeAdapterV2.ClaudeAgentSdkQueryRunner, E, R>;
+}) {
+  const layerServerConfig = Layer.effect(
+    ServerConfig.ServerConfig,
+    makeReplayServerConfig(input.scenario).pipe(Effect.orDie),
+  ).pipe(Layer.provide(NodeServices.layer));
+  return ProviderAdapterRegistry.layerFromAdaptersEffect(
+    makeClaudeCloudReplayAdapter.pipe(Effect.map((adapter) => [adapter])),
+  ).pipe(
+    Layer.provide(
+      Layer.mergeAll(input.queryRunner, IdAllocator.layer, NodeServices.layer, layerServerConfig),
     ),
   );
 }
@@ -1204,8 +1320,7 @@ function sanitizeSdkMessageForReplay(input: {
       session_id: message.session_id,
     };
   }
-  // Like init's slash_commands, the recording account's commands and skills
-  // are local configuration, not protocol.
+  // Recorded commands and skills are account configuration.
   if (message.type === "system" && message.subtype === "commands_changed") {
     return { ...message, commands: [] };
   }
@@ -1499,12 +1614,8 @@ async function recordMessagesUntilToolUse(input: {
   }
 }
 
-// The SDK package may not ship a Claude Code executable for this platform, so
-// recordings prefer the installed `claude` binary when it resolves on PATH to
-// something the SDK can spawn directly, and otherwise leave the SDK's own
-// executable discovery in place. A Windows launcher shim (`claude.cmd` and
-// friends) is not directly spawnable, so it only counts when
-// resolveClaudeSdkExecutablePath can follow it to a real package entry.
+// The SDK may lack a platform executable. Prefer installed Claude only when directly spawnable,
+// including Windows shims resolved to package entries.
 const resolveClaudeRecordingExecutablePath = Effect.fn("resolveClaudeRecordingExecutablePath")(
   function* (environment: NodeJS.ProcessEnv) {
     const resolveExecutable = yield* SpawnExecutableResolution;
@@ -1653,9 +1764,7 @@ async function recordClaudeStreamingQuery(input: {
         frame: makeClaudePromptOfferFrame(message),
       });
       promptQueue.offer(message);
-      // A task notification that lands during a turn queues a wake turn the
-      // CLI can run before this prompt's turn, so results are told apart by
-      // origin rather than by arrival order.
+      // Wake turns can precede the prompt turn; identify results by origin.
       let promptSettled = false;
       let wakes = 0;
       const expectedWakes = input.backgroundWakeCounts?.[index] ?? 0;
@@ -1667,8 +1776,7 @@ async function recordClaudeStreamingQuery(input: {
         }
       }
       if (input.backgroundWakeCounts !== undefined && input.offerNextPromptImmediately !== true) {
-        // Every turn opens with system:init; frames from still-running
-        // subagents are left for the next prompt's recording.
+        // system:init opens each turn; leave ongoing subagent frames for the next recording.
         while (isSystemInitFrame(await iterator.peekWithin(CLAUDE_RECORDING_WAKE_QUIET_MS))) {
           await recordTurn(index + 1);
         }
@@ -1713,7 +1821,6 @@ async function recordClaudeActiveSteeringQuery(input: {
   }
 
   const promptQueue = new RecordingPromptQueue();
-  const offeredPrompts = new Set<number>();
   const offerPrompt = (index: number, priority?: SDKUserMessage["priority"]) => {
     const message = ClaudeAdapterV2.makeClaudeUserMessage({
       text: input.prompts[index]!,
@@ -1725,13 +1832,10 @@ async function recordClaudeActiveSteeringQuery(input: {
       frame: makeClaudePromptOfferFrame(message),
     });
     promptQueue.offer(message);
-    offeredPrompts.add(index);
   };
   const offerSteeringPrompts = () => {
     for (let index = 1; index < input.prompts.length; index += 1) {
-      if (!offeredPrompts.has(index)) {
-        offerPrompt(index, "now");
-      }
+      offerPrompt(index, "now");
     }
   };
 
@@ -1805,9 +1909,6 @@ async function recordClaudeActiveSteeringQuery(input: {
     });
     if (!completed) {
       throw new Error("Claude active steering query ended before the turn completed.");
-    }
-    if (offeredPrompts.size < input.prompts.length) {
-      throw new Error("Claude active steering prompts were not all offered before completion.");
     }
     promptQueue.close();
     queryRuntime.close();
@@ -2628,9 +2729,6 @@ export async function recordClaudeAgentSdkReplayTranscript(input: {
     | "resume_at_cursor"
     | "fork_session"
     | "fork_session_prior_turn"
-    | "fork_session_continue"
-    | "fork_session_siblings"
-    | "fork_session_merge_back"
     | "fork_session_merge_back_siblings"
     | "active_steering"
     | "interrupt"
@@ -2748,9 +2846,6 @@ export async function recordClaudeAgentSdkReplayTranscript(input: {
   } else if (
     queryMode === "fork_session" ||
     queryMode === "fork_session_prior_turn" ||
-    queryMode === "fork_session_continue" ||
-    queryMode === "fork_session_siblings" ||
-    queryMode === "fork_session_merge_back" ||
     queryMode === "fork_session_merge_back_siblings"
   ) {
     await recordClaudeForkSessionQuery({
@@ -2762,20 +2857,6 @@ export async function recordClaudeAgentSdkReplayTranscript(input: {
       entries,
       metadata: recordingMetadata,
       ...(queryMode === "fork_session_prior_turn" ? { forkFromPromptIndex: 1 as const } : {}),
-      ...(queryMode === "fork_session_continue" ? { sourcePromptCount: 1 } : {}),
-      ...(queryMode === "fork_session_siblings"
-        ? {
-            sourcePromptCount: 1,
-            forkPromptGroups: [[input.prompts[1]!], [input.prompts[2]!]],
-          }
-        : {}),
-      ...(queryMode === "fork_session_merge_back"
-        ? {
-            sourcePromptCount: 1,
-            forkPromptGroups: [[input.prompts[1]!]],
-            sourceContinuationPromptCount: 2,
-          }
-        : {}),
       ...(queryMode === "fork_session_merge_back_siblings"
         ? {
             sourcePromptCount: 1,
@@ -2890,6 +2971,207 @@ export const ClaudeOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarnes
   makeProviderAdapterRegistryLayer: (transcript, options) =>
     layerClaudeProviderAdapterRegistryReplay(transcript, options),
 };
+
+const decodeClaudeCloudReplayTranscript = Schema.decodeUnknownEffect(ClaudeCloudReplayTranscript);
+
+export const ClaudeCloudOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness<
+  typeof ClaudeCloudReplayTranscript.Type,
+  ClaudeOrchestratorReplayHarnessError
+> = {
+  driver: CLAUDE_CLOUD_PROVIDER,
+  decodeTranscript: (transcript) =>
+    decodeClaudeCloudReplayTranscript(transcript).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ClaudeReplayTranscriptDecodeError({
+            ...metadataFromTranscript(transcript),
+            cause,
+          }),
+      ),
+    ),
+  makeProviderAdapterRegistryLayer: (transcript, options) =>
+    layerClaudeCloudProviderAdapterRegistry({
+      scenario: transcript.scenario,
+      queryRunner: layerClaudeAgentSdkReplay(transcript, options),
+    }),
+};
+
+// A remote session also stamps prompt uuids on `init`, and the adapter matches
+// turns to prompts by them. Its errors come from the cloud worker, so they hold
+// no local paths to rewrite.
+function sanitizeRemoteSdkMessageForReplay(message: SDKMessage, scenario: string): SDKMessage {
+  if (message.type === "result") return message;
+  const sanitized = sanitizeSdkMessageForReplay({ message, scenario });
+  const promptUuids: unknown = Reflect.get(message, "user_message_uuids");
+  return promptUuids === undefined || Reflect.has(sanitized, "user_message_uuids")
+    ? sanitized
+    : Object.assign({}, sanitized, { user_message_uuids: promptUuids });
+}
+
+/**
+ * Records the calls the adapter makes on a query runner and what comes back,
+ * in the format the replay runner reads. It records a runner only the adapter
+ * can drive, such as a cloud session's.
+ */
+export function recordClaudeAgentSdkQueryRunner(input: {
+  readonly scenario: string;
+  readonly queryRunner: ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape;
+  readonly entries: Array<ProviderReplayEntry>;
+}): ClaudeAdapterV2.ClaudeAgentSdkQueryRunnerShape {
+  const { scenario, entries } = input;
+  let promptOffers = 0;
+  let interrupts = 0;
+  const record = (entry: ProviderReplayEntry) => {
+    entries.push(entry);
+    return entry;
+  };
+  // Replay answers a call as it is made, so the answer goes right after the
+  // call, ahead of frames that arrived while it was in flight.
+  const recordAnswer = (call: ProviderReplayEntry, answer: ProviderReplayEntry) => {
+    entries.splice(entries.indexOf(call) + 1, 0, answer);
+  };
+  const recordCall = <A, E>(
+    label: () => string,
+    frame: ClaudeOutboundFrame,
+    call: Effect.Effect<A, E>,
+  ) =>
+    Effect.suspend(() => {
+      record({ type: "expect_outbound", label: label(), frame });
+      return call;
+    });
+
+  const recordSession = (
+    session: ClaudeAdapterV2.ClaudeAgentSdkQuerySession,
+  ): ClaudeAdapterV2.ClaudeAgentSdkQuerySession => ({
+    ...session,
+    messages: session.messages.pipe(
+      Stream.tap((message) =>
+        Effect.sync(() => {
+          record({
+            type: "emit_inbound",
+            label: message.type,
+            frame: sanitizeRemoteSdkMessageForReplay(message, scenario),
+          });
+        }),
+      ),
+    ),
+    offer: (message) =>
+      recordCall(
+        () => `prompt.offer:${++promptOffers}`,
+        makeClaudePromptOfferFrame(message),
+        session.offer(message),
+      ),
+    setModel: (model) =>
+      recordCall(
+        () => "query.set_model",
+        { type: "query.set_model", model },
+        session.setModel(model),
+      ),
+    applyFlagSettings: (settings) =>
+      recordCall(
+        () => "query.apply_flag_settings",
+        { type: "query.apply_flag_settings", settings },
+        session.applyFlagSettings(settings),
+      ),
+    setPermissionMode: (mode) =>
+      recordCall(
+        () => "query.set_permission_mode",
+        { type: "query.set_permission_mode", mode },
+        session.setPermissionMode(mode),
+      ),
+    stopTask: (taskId) =>
+      recordCall(
+        () => "query.stop_task",
+        { type: "query.stop_task", taskId },
+        session.stopTask(taskId),
+      ),
+    backgroundTasks: (toolUseId) =>
+      recordCall(
+        () => "query.background_tasks",
+        { type: "query.background_tasks", toolUseId },
+        session.backgroundTasks(toolUseId),
+      ),
+    interrupt: Effect.suspend(() => {
+      const call = record({
+        type: "expect_outbound",
+        label: `query.interrupt:${++interrupts}`,
+        frame: { type: "query.interrupt" },
+      });
+      return session.interrupt.pipe(
+        Effect.tap((receipt) =>
+          Effect.sync(() => {
+            if (!receipt) return;
+            recordAnswer(call, {
+              type: "emit_inbound",
+              label: "query.interrupted",
+              frame: {
+                type: "query.interrupted",
+                stillQueued: receipt.stillQueued,
+                cancelled: receipt.cancelled,
+              } satisfies ClaudeQueryInterruptedFrame,
+            });
+          }),
+        ),
+      );
+    }),
+  });
+
+  return {
+    ...input.queryRunner,
+    open: (openInput) =>
+      Effect.suspend(() => {
+        const canUseTool = openInput.options.canUseTool;
+        const recordedCanUseTool: CanUseTool | undefined =
+          canUseTool === undefined
+            ? undefined
+            : async (toolName, toolInput, callbackOptions) => {
+                const request = record({
+                  type: "emit_inbound",
+                  label: `permission.request:${toolName}`,
+                  frame: permissionRequestFrame({ toolName, toolInput, callbackOptions }),
+                });
+                const result = await canUseTool(toolName, toolInput, callbackOptions);
+                // Null sends nothing back, which replay cannot reproduce.
+                if (result !== null) {
+                  recordAnswer(request, {
+                    type: "expect_outbound",
+                    label: `permission.response:${toolName}`,
+                    frame: makeClaudePermissionResponseFrame(result),
+                  });
+                }
+                return result;
+              };
+        const call = record({
+          type: "expect_outbound",
+          label: "query.open",
+          frame: makeClaudeQueryOpenFrame(openInput),
+        });
+        return input.queryRunner
+          .open({
+            ...openInput,
+            options: {
+              ...openInput.options,
+              ...(recordedCanUseTool === undefined ? {} : { canUseTool: recordedCanUseTool }),
+            },
+          })
+          .pipe(
+            Effect.map((session) => {
+              if (session.startupNotices !== undefined) {
+                recordAnswer(call, {
+                  type: "emit_inbound",
+                  label: "query.opened",
+                  frame: {
+                    type: "query.opened",
+                    startupNotices: session.startupNotices,
+                  } satisfies ClaudeQueryOpenedFrame,
+                });
+              }
+              return recordSession(session);
+            }),
+          );
+      }),
+  };
+}
 
 export function makeClaudeRestartReplayHarness(transcript: ClaudeAgentSdkReplayTranscript) {
   const queryRunner = makeReplayQueryRunner(transcript);

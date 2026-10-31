@@ -1,5 +1,6 @@
 import {
   type CustomModelSetting,
+  DEFAULT_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   ModelCapabilities,
   type ModelSelection,
@@ -7,6 +8,7 @@ import {
   ProviderInstanceId,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
+  type ServerProviderModel,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -52,7 +54,7 @@ function getProviderOptionSelectionValue(
   return getRawSelectionValueById(selections, id);
 }
 
-export function getProviderOptionStringSelectionValue(
+function getProviderOptionStringSelectionValue(
   selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
   id: string,
 ): string | undefined {
@@ -60,7 +62,7 @@ export function getProviderOptionStringSelectionValue(
   return typeof value === "string" ? value : undefined;
 }
 
-export function getProviderOptionBooleanSelectionValue(
+function getProviderOptionBooleanSelectionValue(
   selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
   id: string,
 ): boolean | undefined {
@@ -114,6 +116,20 @@ export function modelSelectionsEqual(left: ModelSelection, right: ModelSelection
       ([id, value], index) => id === rightOptions[index]?.[0] && value === rightOptions[index]?.[1],
     )
   );
+}
+
+/**
+ * Whether a composer's draft model pick is what the thread already runs. Web sends
+ * `fastMode: false` for models with a fast toggle while mobile omits it, so off counts as unset.
+ */
+export function draftModelPickMatchesThread(pick: ModelSelection, thread: ModelSelection): boolean {
+  const withoutFastModeOff = (selection: ModelSelection) =>
+    createModelSelection(
+      selection.instanceId,
+      selection.model,
+      selection.options?.filter((option) => option.id !== "fastMode" || option.value !== false),
+    );
+  return modelSelectionsEqual(withoutFastModeOff(pick), withoutFastModeOff(thread));
 }
 
 function resolveDescriptorChoiceValue(
@@ -211,6 +227,17 @@ function getReportedOptionValue(
   )
     return undefined;
   return getRawSelectionValueById(reportedSelection.options, id);
+}
+
+export function getProviderOptionStatedValue(
+  id: string,
+  selection?: ModelSelection | null,
+  reportedSelection?: ModelSelection | null,
+) {
+  return (
+    getRawSelectionValueById(selection?.options, id) ??
+    getReportedOptionValue(id, selection, reportedSelection)
+  );
 }
 
 export function getProviderOptionCurrentValue(
@@ -452,6 +479,19 @@ function cloneSelections(
   return selections.map(cloneSelection);
 }
 
+/** The model a provider instance starts with when none is chosen, as in the composer. */
+export function defaultProviderInstanceModel(provider: {
+  readonly driverKind: ProviderDriverKind;
+  readonly models: ReadonlyArray<ServerProviderModel>;
+}): string | undefined {
+  return (
+    provider.models.find((model) => model.isDefault && !model.isCustom)?.slug ??
+    provider.models.find((model) => !model.isCustom)?.slug ??
+    provider.models[0]?.slug ??
+    DEFAULT_MODEL_BY_PROVIDER[provider.driverKind]
+  );
+}
+
 export function createModelSelection(
   instanceId: ProviderInstanceId,
   model: string,
@@ -488,10 +528,7 @@ export function applyClaudePromptEffortPrefix(
   if (!trimmed) {
     return trimmed;
   }
-  // Prefixing a slash command turns it into plain prose, so Claude never
-  // runs it. Command names come from arbitrary file names ("/deploy.prod",
-  // "/plugin:skill"), so accept any first token without a second slash;
-  // absolute paths like "/home/theo/app.ts" keep the prefix.
+  // Prefixing slash commands prevents Claude invocation; command names allow any token without a second slash.
   if (effort !== "ultrathink" || /^\/[^\s/]+(?:\s|$)/u.test(trimmed)) {
     return trimmed;
   }

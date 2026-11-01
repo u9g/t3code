@@ -549,12 +549,14 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
   return roots;
 });
 
+const SYNCED_SKILL_PREFIX = "anthropic-skills";
+
 // claude.ai org skills sync into one `<org>_<account>` bucket per login; the CLI loads only the
 // signed-in bucket and namespaces its skills as `anthropic-skills:<name>`.
 const syncedSkillRoot = (configDirPath: string, bucket: string, path: Path.Path) => ({
   directory: path.join(configDirPath, "skills", "synced", bucket),
   scope: "user" as const,
-  prefix: "anthropic-skills",
+  prefix: SYNCED_SKILL_PREFIX,
 });
 
 const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
@@ -690,8 +692,9 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         directory: path.join(path.resolve(cwd ?? ".", directory), ".claude", "skills"),
         scope: "project" as const,
       })),
-    ...(yield* discoverPluginSkillRoots(configDirPath, cwd, enabledPlugins, syncedBucket, env)),
+    // Ahead of plugins: Claude Code reserves `anthropic-skills:` names for synced skills.
     ...(syncedSkillBucket ? [syncedSkillRoot(configDirPath, syncedSkillBucket, path)] : []),
+    ...(yield* discoverPluginSkillRoots(configDirPath, cwd, enabledPlugins, syncedBucket, env)),
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();
@@ -742,7 +745,12 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         continue;
       }
 
-      const override = root.prefix ? undefined : skillOverrides.get(name);
+      // Plugin skills ignore skillOverrides; synced skills honor their prefixed or bare name.
+      const override = !root.prefix
+        ? skillOverrides.get(name)
+        : root.prefix === SYNCED_SKILL_PREFIX
+          ? (skillOverrides.get(name) ?? skillOverrides.get(directoryName))
+          : undefined;
       const userInvocationOnly =
         (frontmatter.kind === "parsed" && frontmatter.userInvocationOnly === true) ||
         override?.userInvocationOnly === true;

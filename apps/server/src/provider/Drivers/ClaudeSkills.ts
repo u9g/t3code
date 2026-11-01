@@ -721,6 +721,14 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
   return roots;
 });
 
+// claude.ai org skills sync into one `<org>_<account>` bucket per login; the CLI loads only the
+// signed-in bucket and namespaces its skills as `anthropic-skills:<name>`.
+const syncedSkillRoot = (configDirPath: string, bucket: string, path: Path.Path) => ({
+  directory: path.join(configDirPath, "skills", "synced", bucket),
+  scope: "user" as const,
+  prefix: "anthropic-skills",
+});
+
 const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
   config: Pick<ClaudeSettings, "homePath">,
   environment: NodeJS.ProcessEnv,
@@ -887,6 +895,12 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
     enabledPlugins,
     managedPluginNames,
   );
+  // Synced skills share the plugins' bucket but are not hidden with them.
+  const syncedSkillBucket = (yield* fileSystem
+    .exists(path.join(configDirPath, "skills", "synced"))
+    .pipe(Effect.orElseSucceed(() => false)))
+    ? (syncedBucket ?? (yield* resolveSyncedPluginBucket(config, configDirPath, env)))
+    : undefined;
 
   const roots: ReadonlyArray<ClaudeSkillRoot> = [
     ...(managedDirectory
@@ -909,6 +923,7 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
       syncedBucket,
       env,
     )),
+    ...(syncedSkillBucket ? [syncedSkillRoot(configDirPath, syncedSkillBucket, path)] : []),
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();

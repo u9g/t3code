@@ -427,11 +427,14 @@ const ClaudeAccount = Schema.fromJsonString(
   }),
 );
 
+const SYNCED_SKILL_PREFIX = "anthropic-skills";
+
 // claude.ai org skills sync into one `<org>_<account>` bucket per login; the CLI loads only the
-// signed-in bucket and namespaces its skills as `anthropic-skills:<name>`.
+// session's bucket, where CLAUDE_CODE_ORGANIZATION_UUID outranks the stored login's organization.
 const discoverSyncedSkillRoot = Effect.fn("discoverSyncedSkillRoot")(function* (
   configDirPath: string,
   accountConfigPath: string,
+  environment: NodeJS.ProcessEnv,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -440,14 +443,18 @@ const discoverSyncedSkillRoot = Effect.fn("discoverSyncedSkillRoot")(function* (
     Effect.map((config) => config.oauthAccount),
     Effect.orElseSucceed(() => undefined),
   );
-  const organization = account?.organizationUuid?.trim().toLowerCase();
+  const organization = (
+    environment.CLAUDE_CODE_ORGANIZATION_UUID?.trim() || account?.organizationUuid?.trim()
+  )?.toLowerCase();
   if (!organization) return [];
-  const bucket = `${organization}_${account?.accountUuid?.trim().toLowerCase() || "unbound"}`;
+  const accountUuid =
+    account?.accountUuid?.trim() || environment.CLAUDE_CODE_ACCOUNT_UUID?.trim() || "unbound";
+  const bucket = `${organization}_${accountUuid.toLowerCase()}`;
   return [
     {
       directory: path.join(configDirPath, "skills", "synced", bucket),
       scope: "user" as const,
-      prefix: "anthropic-skills",
+      prefix: SYNCED_SKILL_PREFIX,
     },
   ];
 });
@@ -554,12 +561,7 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         directory: path.join(path.resolve(cwd ?? ".", directory), ".claude", "skills"),
         scope: "project" as const,
       })),
-    ...(yield* discoverPluginSkillRoots(
-      configDirPath,
-      cwd,
-      enabledPlugins,
-      environment ?? process.env,
-    )),
+    // Ahead of plugins: Claude Code reserves `anthropic-skills:` names for synced skills.
     ...(yield* discoverSyncedSkillRoot(
       configDirPath,
       yield* claudeAccountConfigPath(
@@ -567,6 +569,13 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
           ? configDirPath
           : undefined,
       ),
+      environment ?? process.env,
+    )),
+    ...(yield* discoverPluginSkillRoots(
+      configDirPath,
+      cwd,
+      enabledPlugins,
+      environment ?? process.env,
     )),
   ];
 
@@ -618,7 +627,12 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
         continue;
       }
 
-      const override = root.prefix ? undefined : skillOverrides.get(name);
+      // Plugin skills ignore skillOverrides; synced skills honor their prefixed or bare name.
+      const override = !root.prefix
+        ? skillOverrides.get(name)
+        : root.prefix === SYNCED_SKILL_PREFIX
+          ? (skillOverrides.get(name) ?? skillOverrides.get(directoryName))
+          : undefined;
       const userInvocationOnly =
         (frontmatter.kind === "parsed" && frontmatter.userInvocationOnly === true) ||
         override?.userInvocationOnly === true;

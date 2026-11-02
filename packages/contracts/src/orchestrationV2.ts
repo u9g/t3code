@@ -2095,7 +2095,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   latestRunCompletedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   latestRunStopRequested: Schema.optional(Schema.Boolean),
   activeRunId: Schema.NullOr(RunId),
-  /** A scheduled task or an agent requested the latest run, and no person has sent a message since. */
+  /** A scheduled task or another agent requested the latest run, and no person has sent a message since. */
   latestRunAutomated: Schema.optional(Schema.Boolean),
   activityRunStartedAt: Schema.optional(Schema.NullOr(Schema.DateTimeUtc)),
   activityRunStatus: Schema.optional(

@@ -7853,36 +7853,52 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
       [
         [
           "a scheduled task",
-          { createdBy: "user", scheduledTaskId: "scheduled-task:projection-shell-automated" },
+          {
+            createdBy: "user",
+            creationSource: "server",
+            scheduledTaskId: "scheduled-task:projection-shell-automated",
+          },
           null,
           true,
         ],
-        ["an agent", { createdBy: "agent" }, null, true],
+        ["an agent", { createdBy: "agent", creationSource: "mcp" }, null, true],
         [
           "an agent, then its provider echoed a user message,",
-          { createdBy: "agent" },
+          { createdBy: "agent", creationSource: "mcp" },
           { source: "provider", afterRequestMs: 1_000 },
           true,
         ],
         [
           "an agent, after a person's earlier message,",
-          { createdBy: "agent" },
+          { createdBy: "agent", creationSource: "mcp" },
           { source: "web", afterRequestMs: -60_000 },
           true,
         ],
         [
           "an agent, then a person replied into another run,",
-          { createdBy: "agent" },
+          { createdBy: "agent", creationSource: "mcp" },
           { source: "web", afterRequestMs: 1_000 },
           false,
         ],
         [
           "an agent, then a person answered its question,",
-          { createdBy: "agent" },
+          { createdBy: "agent", creationSource: "mcp" },
           { source: "server", afterRequestMs: 1_000 },
           false,
         ],
-        ["the user", { createdBy: "user" }, null, false],
+        [
+          "the thread's own background task waking it",
+          { createdBy: "agent", creationSource: "provider" },
+          null,
+          false,
+        ],
+        [
+          "the server continuing the thread's own work",
+          { createdBy: "agent", creationSource: "server" },
+          null,
+          false,
+        ],
+        ["the user", { createdBy: "user", creationSource: "web" }, null, false],
       ] as const
     ).map(([requester, prompt, reply, automated], index) => ({
       index,
@@ -7942,7 +7958,7 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           occurredAt: now,
           payload: {
             createdBy: prompt.createdBy,
-            creationSource: "server",
+            creationSource: prompt.creationSource,
             id: userMessageId,
             threadId,
             runId,

@@ -1925,9 +1925,12 @@ function isAutomatedRunForShell(
   projection: Pick<OrchestrationV2ThreadProjection, "messages">,
 ): boolean {
   const prompt = projection.messages.find((message) => message.id === run.userMessageId);
+  // Another agent reaches a thread only through MCP; agent prompts from the provider or server
+  // continue the thread's own work, such as a background task finishing.
   if (
     prompt === undefined ||
-    (prompt.scheduledTaskId === undefined && prompt.createdBy !== "agent")
+    (prompt.scheduledTaskId === undefined &&
+      (prompt.createdBy !== "agent" || prompt.creationSource !== "mcp"))
   ) {
     return false;
   }
@@ -7698,7 +7701,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         WHERE prompt.message_id = json_extract(${run}.payload_json, '$.userMessageId')
           AND (
             json_extract(prompt.payload_json, '$.scheduledTaskId') IS NOT NULL
-            OR json_extract(prompt.payload_json, '$.createdBy') IS 'agent'
+            OR (
+              json_extract(prompt.payload_json, '$.createdBy') IS 'agent'
+              AND json_extract(prompt.payload_json, '$.creationSource') IS 'mcp'
+            )
           )
           AND NOT EXISTS (
             SELECT 1 FROM orchestration_v2_projection_messages reply

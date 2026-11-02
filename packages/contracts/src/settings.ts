@@ -24,7 +24,7 @@ import {
 } from "./baseSchemas.ts";
 import { UsageLimitSourceId } from "./usageLimitSourceId.ts";
 import { UsageModelFilter } from "./usage.ts";
-import { SecretProviderId, SecretProviderSlug } from "./secretReference.ts";
+import { SecretProviderId, SecretProviderSlug, SecretReference } from "./secretReference.ts";
 import { SettingsSecretValue } from "./settingsSecretValue.ts";
 import { EnvironmentMachineKind, ThreadEnvMode, WorktreeSubmodules } from "./environment.ts";
 import { KeybindingShortcut } from "./keybindings.ts";
@@ -1357,6 +1357,23 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+export const DEFAULT_AUTO_RETITLE_MODEL = "openai/gpt-4.1-mini";
+
+/**
+ * After each completed turn, asks a LiveKit Inference model whether the thread's subject has
+ * moved on from its title and, if so, renames it. Credentials are secret references (such as
+ * 1Password items), never literals, so nothing here is itself a secret.
+ */
+export const AutoRetitleSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  model: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_AUTO_RETITLE_MODEL))),
+  /** Empty uses LiveKit Cloud's production gateway. */
+  url: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  apiKey: Schema.NullOr(SecretReference).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  apiSecret: Schema.NullOr(SecretReference).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+});
+export type AutoRetitleSettings = typeof AutoRetitleSettings.Type;
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1538,6 +1555,7 @@ export const ServerSettings = Schema.Struct({
     ),
   ),
   threadTitleInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  autoRetitle: AutoRetitleSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   branchNamingMode: BranchNamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("static" as const)),
   ),
@@ -1931,6 +1949,15 @@ export const ServerSettingsPatch = Schema.Struct({
   ghqCloneLayout: Schema.optionalKey(Schema.Boolean),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   threadTitleInstructions: Schema.optionalKey(TrimmedString),
+  autoRetitle: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      model: Schema.optionalKey(TrimmedString),
+      url: Schema.optionalKey(TrimmedString),
+      apiKey: Schema.optionalKey(Schema.NullOr(SecretReference)),
+      apiSecret: Schema.optionalKey(Schema.NullOr(SecretReference)),
+    }),
+  ),
   branchNamingMode: Schema.optionalKey(BranchNamingMode),
   branchNamePrefix: Schema.optionalKey(TrimmedString),
   branchNameInstructions: Schema.optionalKey(TrimmedString),

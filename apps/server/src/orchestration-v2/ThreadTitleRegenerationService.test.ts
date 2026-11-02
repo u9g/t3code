@@ -12,8 +12,13 @@ import {
   ProviderThreadId,
   RunId,
   TextGenerationError,
+  SecretProviderId,
   ThreadId,
+  DEFAULT_AUTO_RETITLE_MODEL,
 } from "@t3tools/contracts";
+import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
+import { HttpClient, HttpClientResponse } from "effect/http";
+import { decodeJwt } from "jose";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -24,6 +29,8 @@ import { ATTACHMENT_ONLY_BOOTSTRAP_PROMPT } from "@t3tools/shared/composerContex
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import * as ProjectionStore from "./ProjectionStore.ts";
+import * as AutoRetitle from "./AutoRetitleService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
@@ -408,7 +415,17 @@ describe("ThreadTitleRegenerationService", () => {
         });
         const renamed = yield* threads.getThreadProjection(threadId);
         assert.equal(renamed.thread.title, "Manual title");
+        assert.equal(renamed.thread.titleSource, "user");
         assert.isNotOk(renamed.thread.titleRegeneration);
+
+        yield* threads.dispatch({
+          type: "thread.metadata.update",
+          commandId: CommandId.make("command:title:arm:agent-rename"),
+          threadId,
+          title: "Agent title",
+          titleSource: "agent",
+        });
+        assert.equal((yield* threads.getThreadProjection(threadId)).thread.titleSource, "agent");
       }).pipe(Effect.provide(harness.layer));
     }),
   );
@@ -481,6 +498,7 @@ describe("ThreadTitleRegenerationService", () => {
           assert.include(call?.message, "USER:\nInvestigate the flaky login test");
           const projection = yield* threads.getThreadProjection(threadId);
           assert.equal(projection.thread.title, "Fresh title");
+          assert.equal(projection.thread.titleSource, "auto");
           assert.isNotOk(projection.thread.titleRegeneration);
           assert.deepInclude(projection.thread.lastTitleRegeneration, {
             requestId,
@@ -812,5 +830,154 @@ describe("ThreadTitleRegenerationService", () => {
         });
       }).pipe(Effect.provide(harness.layer));
     }),
+  );
+});
+
+describe("AutoRetitleService", () => {
+  const apiKey = {
+    provider: SecretProviderId.make("1password"),
+    reference: "op://Employee/LiveKit/LIVEKIT_API_KEY",
+  };
+  const apiSecret = { ...apiKey, reference: "op://Employee/LiveKit/LIVEKIT_API_SECRET" };
+
+  /** Runs one decision for a thread against a stubbed LiveKit Inference gateway. */
+  function retitle(input: {
+    readonly threadId: ThreadId;
+    readonly runId: RunId;
+    readonly decision: { readonly rename: boolean; readonly title: string };
+  }) {
+    return Effect.gen(function* () {
+      const requests: Array<{
+        readonly url: string;
+        readonly authorization: string | undefined;
+        readonly body: { readonly model: string; readonly messages: ReadonlyArray<unknown> };
+      }> = [];
+      const http = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requests.push({
+            url: request.url,
+            authorization: request.headers.authorization,
+            body:
+              request.body._tag === "Uint8Array"
+                ? JSON.parse(new TextDecoder().decode(request.body.body))
+                : undefined,
+          });
+          return HttpClientResponse.fromWeb(
+            request,
+            Response.json({ choices: [{ message: { content: JSON.stringify(input.decision) } }] }),
+          );
+        }),
+      );
+      const service = yield* AutoRetitle.make.pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ServerSettings.layerTest({ autoRetitle: { enabled: true, apiKey, apiSecret } }),
+            Layer.mock(SecretResolver.SecretResolver)({
+              read: (references) =>
+                Effect.succeed(
+                  references.map((reference) =>
+                    reference.reference === apiKey.reference ? "lk-api-key" : "lk-api-secret",
+                  ),
+                ),
+            }),
+            Layer.succeed(HttpClient.HttpClient, http),
+          ),
+        ),
+      );
+      yield* service.retitle(input.threadId, input.runId);
+      return requests;
+    });
+  }
+
+  function makeAutoHarness() {
+    const harness = makeHarness();
+    return Layer.mergeAll(
+      harness.layer,
+      ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory)),
+    );
+  }
+
+  it.effect("renames the thread when the model decides its subject moved on", () =>
+    Effect.gen(function* () {
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const threadId = yield* createThread({
+        command: "command:auto:rename:create",
+        thread: "thread:auto:rename",
+      });
+      const runId = RunId.make("run:auto:rename");
+      yield* recordRun({
+        threadId,
+        runId,
+        ordinal: 1,
+        user: "Now redesign the whole onboarding flow as a three-step wizard",
+        assistant: "Here is the wizard plan",
+      });
+
+      const requests = yield* retitle({
+        threadId,
+        runId,
+        decision: { rename: true, title: "Onboarding wizard redesign" },
+      });
+
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0]?.url, "https://agent-gateway.livekit.cloud/v1/chat/completions");
+      assert.equal(requests[0]?.body.model, DEFAULT_AUTO_RETITLE_MODEL);
+      const token = requests[0]?.authorization?.replace(/^Bearer /, "") ?? "";
+      const claims = decodeJwt(token);
+      assert.equal(claims.iss, "lk-api-key");
+      assert.deepEqual(claims.inference, { perform: true });
+      assert.include(JSON.stringify(requests[0]?.body.messages), "three-step wizard");
+      const projection = yield* threads.getThreadProjection(threadId);
+      assert.equal(projection.thread.title, "Onboarding wizard redesign");
+      assert.equal(projection.thread.titleSource, "auto");
+    }).pipe(Effect.provide(makeAutoHarness())),
+  );
+
+  it.effect("keeps the title when the model decides it still fits", () =>
+    Effect.gen(function* () {
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const threadId = yield* createThread({
+        command: "command:auto:keep:create",
+        thread: "thread:auto:keep",
+      });
+      const runId = RunId.make("run:auto:keep");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "Tweak it", assistant: "Done" });
+
+      const requests = yield* retitle({
+        threadId,
+        runId,
+        decision: { rename: false, title: "Something else" },
+      });
+
+      assert.equal(requests.length, 1);
+      assert.equal((yield* threads.getThreadProjection(threadId)).thread.title, "Seed title");
+    }).pipe(Effect.provide(makeAutoHarness())),
+  );
+
+  it.effect("never asks about a thread the person named", () =>
+    Effect.gen(function* () {
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const threadId = yield* createThread({
+        command: "command:auto:user:create",
+        thread: "thread:auto:user",
+      });
+      yield* threads.dispatch({
+        type: "thread.metadata.update",
+        commandId: CommandId.make("command:auto:user:rename"),
+        threadId,
+        title: "My name for it",
+      });
+      const runId = RunId.make("run:auto:user");
+      yield* recordRun({ threadId, runId, ordinal: 1, user: "Something new", assistant: "Ok" });
+
+      const requests = yield* retitle({
+        threadId,
+        runId,
+        decision: { rename: true, title: "Model name" },
+      });
+
+      assert.equal(requests.length, 0);
+      assert.equal((yield* threads.getThreadProjection(threadId)).thread.title, "My name for it");
+    }).pipe(Effect.provide(makeAutoHarness())),
   );
 });

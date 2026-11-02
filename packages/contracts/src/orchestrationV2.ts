@@ -463,6 +463,13 @@ const OrchestrationV2LastTitleRegeneration = Schema.Struct({
   completedAt: Schema.DateTimeUtc,
 });
 
+/**
+ * Who named a thread: the person ("user"), an agent through its tools ("agent"), or title
+ * generation ("auto"). Automatic renames leave a "user" title alone.
+ */
+export const ThreadTitleSource = Schema.Literals(["user", "agent", "auto"]);
+export type ThreadTitleSource = typeof ThreadTitleSource.Type;
+
 export const OrchestrationV2AppThread = Schema.Struct({
   ...OrchestrationV2CreationFields,
   id: ThreadId,
@@ -518,6 +525,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   opens: Schema.optional(LenientThreadOpens),
+  /** Who set the current title; absent on seeded titles and threads from before it was kept. */
+  titleSource: Schema.optional(ThreadTitleSource),
   titleRegeneration: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
@@ -3245,6 +3254,8 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     title: Schema.optional(TrimmedNonEmptyString),
+    /** Who `title` comes from; absent means the person, as every client rename is. */
+    titleSource: Schema.optional(ThreadTitleSource),
     regenerateTitle: Schema.optional(Schema.Boolean),
     branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),

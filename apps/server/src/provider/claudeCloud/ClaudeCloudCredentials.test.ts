@@ -12,6 +12,8 @@ import * as TestClock from "effect/testing/TestClock";
 import { ChildProcessSpawner } from "effect/process";
 
 import * as ClaudeCloudCredentials from "./ClaudeCloudCredentials.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as Layer from "effect/Layer";
 
 const TOKEN = "sk-ant-oat-test-token";
 const MINUTE = 60_000;
@@ -88,7 +90,7 @@ const fakeSecurity = (result: { readonly stdout: string; readonly exitCode: numb
   return { calls, spawner };
 };
 
-it.layer(NodeServices.layer)("ClaudeCloudCredentials", (it) => {
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ClaudeCloudCredentials", (it) => {
   describe("resolveClaudeCloudLoginLocation", () => {
     it.effect(
       "uses ~/.claude and ~/.claude.json with the unsuffixed Keychain item by default",

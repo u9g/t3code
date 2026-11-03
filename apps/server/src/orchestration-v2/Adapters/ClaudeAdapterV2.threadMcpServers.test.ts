@@ -18,7 +18,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -32,6 +32,7 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
 const DEFAULT_CLAUDE_SETTINGS = Schema.decodeSync(ClaudeSettings)({});
 const MODEL_SELECTION = {
@@ -211,7 +212,7 @@ describe.each(["local", "remote"] as const)(
           attachmentsDir: yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-thread-mcp-" }),
           fileSystem,
           path: yield* Path.Path,
-          crypto: yield* Crypto.Crypto,
+          random: yield* SecureRandom.SecureRandom,
           idAllocator: yield* IdAllocator.IdAllocatorV2,
           ...(transport === "remote"
             ? { driverKind: ProviderDriverKind.make("claudeCloud"), transport: "remote" as const }
@@ -259,7 +260,12 @@ describe.each(["local", "remote"] as const)(
         return opened[0]!.options;
       }).pipe(
         Effect.provide(
-          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
         ),
       );
 

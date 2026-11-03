@@ -56,7 +56,7 @@ interface CliRun {
   readonly args: ReadonlyArray<string>;
   readonly cwd: string | undefined;
   readonly stdin: unknown;
-  readonly env: Record<string, string | undefined> | undefined;
+  readonly env: Record<string, string | Redacted.Redacted<string> | undefined> | undefined;
 }
 
 /** Stands in for `claude`; `refresh` plays the CLI rewriting its store. */
@@ -70,7 +70,7 @@ const fakeCli = (options: {
       if (!ChildProcess.isStandardCommand(command)) return yield* Effect.die("unexpected pipeline");
       runs.push({
         command: command.command,
-        args: command.args,
+        args: command.args.map((arg) => (typeof arg === "string" ? arg : Redacted.value(arg))),
         cwd: command.options.cwd,
         stdin: command.options.stdin,
         env: command.options.env,

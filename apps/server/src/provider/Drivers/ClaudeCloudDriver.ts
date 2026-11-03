@@ -28,7 +28,7 @@ import {
 } from "@t3tools/provider-core/server/snapshotSettings";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -59,6 +59,7 @@ import {
   makePendingClaudeCloudProvider,
 } from "../claudeCloud/ClaudeCloudStatus.ts";
 import { makeClaudeEnvironment } from "./ClaudeHome.ts";
+import * as Digest from "effect/crypto/Digest";
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeCloud");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -116,7 +117,8 @@ const unsupportedTextGeneration: ProviderTextGeneration = (() => {
 
 export type ClaudeCloudDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
-  | Crypto.Crypto
+  | SecureRandom.SecureRandom
+  | Digest.Digest
   | FileSystem.FileSystem
   | HttpClient.HttpClient
   | IdAllocator.IdAllocatorV2
@@ -148,7 +150,7 @@ export const ClaudeCloudDriver: ProviderDriver<ClaudeCloudSettings, ClaudeCloudD
     >();
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const crypto = yield* Crypto.Crypto;
+    const random = yield* SecureRandom.SecureRandom;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
     const { attachmentsDir, baseDir } = yield* ServerConfig.ServerConfig;
@@ -224,7 +226,7 @@ export const ClaudeCloudDriver: ProviderDriver<ClaudeCloudSettings, ClaudeCloudD
       attachmentsDir,
       fileSystem,
       path,
-      crypto,
+      random,
       idAllocator,
       queryRunner,
       continuationRequests,

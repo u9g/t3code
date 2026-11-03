@@ -1,5 +1,5 @@
 import * as Clock from "effect/Clock";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
@@ -391,7 +391,7 @@ export interface ClaudeCloudApiOptions {
 
 export const make = Effect.fn("ClaudeCloudApi.make")(function* (options: ClaudeCloudApiOptions) {
   const httpClient = yield* HttpClient.HttpClient;
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   const userAgent = `t3code/${options.version}`;
 
@@ -482,7 +482,7 @@ export const make = Effect.fn("ClaudeCloudApi.make")(function* (options: ClaudeC
             {
               payload: {
                 type: "control_request",
-                request_id: `set-mode-${yield* crypto.randomUUIDv4().pipe(Effect.orDie)}`,
+                request_id: `set-mode-${yield* random.uuidV4().pipe(Effect.orDie)}`,
                 request: { subtype: "set_permission_mode", mode: input.permissionMode },
               },
             },

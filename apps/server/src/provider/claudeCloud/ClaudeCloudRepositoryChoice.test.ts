@@ -12,12 +12,13 @@ import {
   type ClaudeCloudRepositoryChoiceRequest,
   makeClaudeCloudRepositoryChooser,
 } from "./ClaudeCloudRepositoryChoice.ts";
+import * as Redacted from "effect/Redacted";
 
 interface CliRun {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly cwd: string | undefined;
-  readonly env: Record<string, string | undefined> | undefined;
+  readonly env: Record<string, string | Redacted.Redacted<string> | undefined> | undefined;
   readonly prompt: string;
 }
 
@@ -47,7 +48,7 @@ const fakeCli = (answer: {
           : "";
       runs.push({
         command: command.command,
-        args: command.args,
+        args: command.args.map((arg) => (typeof arg === "string" ? arg : Redacted.value(arg))),
         cwd: command.options.cwd,
         env: command.options.env,
         prompt,

@@ -14,6 +14,8 @@ import {
 
 import * as ClaudeCloudApi from "./ClaudeCloudApi.ts";
 import { ClaudeCloudCredentialsError, type ClaudeCloudLogin } from "./ClaudeCloudCredentials.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as Layer from "effect/Layer";
 
 const TOKEN = "sk-ant-oat-test-token";
 const BASE = "https://cloud.test";
@@ -89,7 +91,7 @@ const makeApi = (
     ...options,
   }).pipe(Effect.provideService(HttpClient.HttpClient, client));
 
-it.layer(NodeServices.layer)("ClaudeCloudApi", (it) => {
+it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ClaudeCloudApi", (it) => {
   describe("session ids", () => {
     it("converts between the cse_ and session_ forms", () => {
       expect(ClaudeCloudApi.toCse("session_01Abc")).toBe("cse_01Abc");

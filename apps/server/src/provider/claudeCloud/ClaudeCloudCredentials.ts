@@ -4,7 +4,7 @@ import type { ClaudeSettings } from "@t3tools/contracts";
 import { spawnAndCollect } from "@t3tools/provider-core/server/snapshotProbe";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -136,11 +136,8 @@ const resolveKeychainAccount = (environment: NodeJS.ProcessEnv): string => {
 };
 
 const sha256Hex = Effect.fn("ClaudeCloudCredentials.sha256Hex")(function* (value: string) {
-  const crypto = yield* Crypto.Crypto;
-  const digest = yield* crypto
-    .digest("SHA-256", new TextEncoder().encode(value))
-    .pipe(Effect.orDie);
-  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const digester = yield* Digest.Digest;
+  return yield* digester.digestHex(Digest.sha256, new TextEncoder().encode(value));
 });
 
 type KeychainRead =

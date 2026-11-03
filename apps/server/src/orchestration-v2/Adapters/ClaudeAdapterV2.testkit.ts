@@ -1174,7 +1174,7 @@ const makeClaudeCloudReplayAdapter = Effect.gen(function* () {
     attachmentsDir: serverConfig.attachmentsDir,
     fileSystem: yield* FileSystem.FileSystem,
     path: yield* Path.Path,
-    crypto: yield* Crypto.Crypto,
+    random: yield* SecureRandom.SecureRandom,
     idAllocator: yield* IdAllocator.IdAllocatorV2,
     queryRunner: yield* ClaudeAdapterV2.ClaudeAgentSdkQueryRunner,
     continuationRequests: yield* ProviderContinuationRequests.ProviderContinuationRequests,
@@ -1200,7 +1200,13 @@ export function layerClaudeCloudProviderAdapterRegistry<E, R>(input: {
     makeClaudeCloudReplayAdapter.pipe(Effect.map((adapter) => [adapter])),
   ).pipe(
     Layer.provide(
-      Layer.mergeAll(input.queryRunner, IdAllocator.layer, NodeServices.layer, layerServerConfig),
+      Layer.mergeAll(
+        input.queryRunner,
+        IdAllocator.layer,
+        NodeServices.layer,
+        NodeCrypto.layer,
+        layerServerConfig,
+      ),
     ),
   );
 }

@@ -17,7 +17,7 @@ import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEve
 import { sanitizeBranchFragment } from "@t3tools/shared/git";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -373,7 +373,7 @@ const answerEachRequestOnce = (canUseTool: CanUseTool): CanUseTool => {
 export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner")(function* (
   options: ClaudeCloudQueryRunnerOptions,
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const random = yield* SecureRandom.SecureRandom;
   const { native: nativeEventLogger } = yield* ProviderEventLoggers.ProviderEventLoggers;
   const context = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | VcsProcess.VcsProcess
@@ -1293,7 +1293,7 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
         // echo could not be told apart from a prompt typed on claude.ai.
         const uuid =
           message.uuid ??
-          (yield* crypto.randomUUIDv4().pipe(
+          (yield* random.uuidV4().pipe(
             Effect.filterOrFail(isClaudePromptUuid),
             Effect.mapError(
               (cause) =>

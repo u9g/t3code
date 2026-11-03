@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProviderReplayEntry, ProviderReplayTranscript } from "@t3tools/contracts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -318,6 +319,6 @@ const record = Effect.gen(function* () {
 await Effect.runPromise(
   record.pipe(
     Effect.scoped,
-    Effect.provide(Layer.mergeAll(NodeServices.layer, FetchHttpClient.layer)),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, FetchHttpClient.layer)),
   ),
 );

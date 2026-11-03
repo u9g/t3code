@@ -50,8 +50,11 @@ import {
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import * as ClaudeCloudQueryRunner from "./ClaudeCloudQueryRunner.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
-const layer = VcsProcess.layer.pipe(Layer.provideMerge(NodeServices.layer));
+const layer = VcsProcess.layer.pipe(
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+);
 
 const SESSION_ID = "cse_01Created";
 const WEB_URL = "https://claude.ai/code/session_01Created";

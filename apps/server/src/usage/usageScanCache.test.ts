@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   decodeScanCache,
+  dedupeWithinFile,
   makeScanCacheWriter,
   type CachedFile,
   type ScanCache,
@@ -59,6 +60,18 @@ function cacheWith(entries: readonly [string, number, readonly UsageRecord[]][])
   return cache;
 }
 
+describe("dedupeWithinFile", () => {
+  it("keeps a message's first record with its latest block's generation time", () => {
+    const first = record({ prompts: 1, generationMs: 1000 });
+    const committed = dedupeWithinFile([
+      first,
+      record({ dedupeKey: "msg_2:" }),
+      record({ generationMs: 3000 }),
+    ]);
+    expect(committed).toEqual([{ ...first, generationMs: 3000 }, record({ dedupeKey: "msg_2:" })]);
+  });
+});
+
 describe("scan cache round trip", () => {
   it("restores cached history unchanged except for Claude local placeholders", () => {
     const original = cacheWith([
@@ -73,8 +86,10 @@ describe("scan cache round trip", () => {
             speed: "fast",
             cacheCreation1hTokens: 8,
             prompts: 2,
+            generationMs: 4200,
           }),
-          record({ dedupeKey: "msg_3:", prompts: 1 }),
+          record({ dedupeKey: "msg_3:", prompts: 1, generationMs: 900 }),
+          record({ dedupeKey: "msg_4:", generationMs: 300 }),
         ],
       ],
       [
@@ -172,7 +187,7 @@ describe("scan cache round trip", () => {
     expect(restored).toEqual(original);
   });
 
-  it.each([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])(
+  it.each([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])(
     "retains v%s history and compatible positions but invalidates obsolete state",
     (version) => {
       const original = cacheWith([["/gone.jsonl", 100, [record({ speed: "fast" })]]]);
@@ -229,7 +244,7 @@ describe("scan cache round trip", () => {
       };
 
       const restored = decodeScanCache(JSON.parse(JSON.stringify(legacy)), TEST_FORMAT_MAP);
-      // Claude transcripts are re-read once so pre-v16 history gains prompt counts.
+      // Claude transcripts are re-read once so pre-v17 history gains prompt counts and timing.
       expect(restored.get("/gone.jsonl")).toEqual({
         ...original.get("/gone.jsonl"),
         size: -1,
@@ -240,7 +255,7 @@ describe("scan cache round trip", () => {
         size: -1,
         position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
       });
-      // Clean Codex entries are re-read too, so they gain prompt counts.
+      // Clean Codex entries are re-read too, so they gain prompt counts and timing.
       expect(restored.get("/clean-codex.jsonl")).toEqual({
         ...cleanCodex,
         size: -1,

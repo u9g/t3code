@@ -84,6 +84,27 @@ export interface HourlyTotals {
   readonly byProvider: ReadonlyMap<UsageProviderKind, PeriodProviderTotals>;
 }
 
+export interface SpeedTotals {
+  readonly outputTokens: number;
+  readonly generationMs: number;
+}
+
+/** Output tokens per second, or null with no timed responses. */
+export function tokensPerSecond(totals: SpeedTotals | undefined): number | null {
+  return totals === undefined || totals.generationMs === 0
+    ? null
+    : (totals.outputTokens * 1000) / totals.generationMs;
+}
+
+export interface ModelSpeed extends SpeedTotals {
+  readonly provider: UsageProviderKind;
+  readonly model: string;
+  /** Keyed by day, or by hourStart for hourly summaries. */
+  readonly byPeriod: ReadonlyMap<string, SpeedTotals>;
+  /** Indexed by local hour of day, 0 to 23. */
+  readonly byHourOfDay: readonly SpeedTotals[];
+}
+
 export interface CostQuality {
   readonly providerReportedShare: number;
   readonly modelPricedShare: number;
@@ -129,6 +150,8 @@ export interface MergedUsage {
   readonly models: readonly ModelTotals[];
   readonly daily: readonly DailyTotals[];
   readonly hourly: readonly HourlyTotals[];
+  /** Models with timed responses, most output first. */
+  readonly speed: readonly ModelSpeed[];
   readonly costQuality: CostQuality;
   readonly categoryCost: CategoryCost;
   readonly speedCost: SpeedCost;
@@ -355,6 +378,7 @@ const EMPTY_MERGED: MergedUsage = {
   models: [],
   daily: [],
   hourly: [],
+  speed: [],
   costQuality: {
     providerReportedShare: 0,
     modelPricedShare: 0,
@@ -469,6 +493,17 @@ export function mergeUsage(
       scheduledPrompts: number;
       delegatedPrompts: number;
       byProvider: Map<UsageProviderKind, PeriodProviderTotals>;
+    }
+  >();
+  const speedAccumulator = new Map<
+    string,
+    {
+      provider: UsageProviderKind;
+      model: string;
+      outputTokens: number;
+      generationMs: number;
+      byPeriod: Map<string, { outputTokens: number; generationMs: number }>;
+      byHourOfDay: { outputTokens: number; generationMs: number }[];
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
@@ -589,6 +624,34 @@ export function mergeUsage(
       reasoningTokens += bucket.totals.reasoningTokens;
       records += bucket.records;
       prompts += bucket.prompts ?? 0;
+      if (bucket.speed !== undefined && bucket.speed.length > 0) {
+        const speedKey = `${bucket.provider} ${bucket.model}`;
+        let speed = speedAccumulator.get(speedKey);
+        if (speed === undefined) {
+          speed = {
+            provider: bucket.provider,
+            model: bucket.model,
+            outputTokens: 0,
+            generationMs: 0,
+            byPeriod: new Map(),
+            byHourOfDay: Array.from({ length: 24 }, () => ({ outputTokens: 0, generationMs: 0 })),
+          };
+          speedAccumulator.set(speedKey, speed);
+        }
+        const periodKey = bucket.hourStart ?? bucket.day;
+        const period = speed.byPeriod.get(periodKey) ?? { outputTokens: 0, generationMs: 0 };
+        for (const sample of bucket.speed) {
+          speed.outputTokens += sample.outputTokens;
+          speed.generationMs += sample.generationMs;
+          period.outputTokens += sample.outputTokens;
+          period.generationMs += sample.generationMs;
+          const hour = speed.byHourOfDay[sample.hour];
+          if (hour === undefined) continue;
+          hour.outputTokens += sample.outputTokens;
+          hour.generationMs += sample.generationMs;
+        }
+        speed.byPeriod.set(periodKey, period);
+      }
       unpricedRecords += bucket.unpricedRecords;
       if (bucket.costSource === "providerReported") providerReportedRecords += bucket.records;
       if (bucket.categoryCostUsd !== undefined) {
@@ -775,6 +838,7 @@ export function mergeUsage(
     models,
     daily,
     hourly,
+    speed: [...speedAccumulator.values()].sort((a, b) => b.outputTokens - a.outputTokens),
     costQuality: {
       providerReportedShare: records === 0 ? 0 : providerReportedRecords / records,
       unpricedShare: records === 0 ? 0 : unpricedRecords / records,

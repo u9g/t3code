@@ -9,7 +9,7 @@ import * as Schema from "effect/Schema";
 import { CLAUDE_SYNTHETIC_MODEL } from "../provider/Drivers/claudeUsage.ts";
 import { GUARD_LENGTH, type TranscriptParsePosition } from "./usageTranscriptReader.ts";
 
-const USAGE_SCAN_CACHE_VERSION = 12 as const;
+const USAGE_SCAN_CACHE_VERSION = 13 as const;
 const SPEED_COMPATIBLE_SINCE_VERSION = 4;
 
 /**
@@ -17,8 +17,9 @@ const SPEED_COMPATIBLE_SINCE_VERSION = 4;
  * replace it, dropping saved usage for deleted transcripts. Separate files keep
  * both.
  */
-export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v12.json";
+export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v13.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [
+  "usage-scan-cache-v12.json",
   "usage-scan-cache-v11.json",
   "usage-scan-cache-v10.json",
   "usage-scan-cache-v9.json",
@@ -59,7 +60,8 @@ type SerializedRecord = readonly [
   speed: number,
   rateModelIndex?: number | null,
   unresolvedServiceTierTurnId?: string | null,
-  prompts?: number,
+  prompts?: number | null,
+  generationMs?: number,
 ];
 
 interface SerializedFile {
@@ -118,11 +120,17 @@ function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile 
     record.rateModel === undefined
       ? null
       : intern(tables.models, tables.modelIndex, record.rateModel),
-    ...(record.prompts !== undefined
-      ? ([record.unresolvedServiceTierTurnId ?? null, record.prompts] as const)
-      : record.unresolvedServiceTierTurnId === undefined
-        ? ([] as const)
-        : ([record.unresolvedServiceTierTurnId] as const)),
+    ...(record.generationMs !== undefined
+      ? ([
+          record.unresolvedServiceTierTurnId ?? null,
+          record.prompts ?? null,
+          record.generationMs,
+        ] as const)
+      : record.prompts !== undefined
+        ? ([record.unresolvedServiceTierTurnId ?? null, record.prompts] as const)
+        : record.unresolvedServiceTierTurnId === undefined
+          ? ([] as const)
+          : ([record.unresolvedServiceTierTurnId] as const)),
   ];
   return {
     s: entry.size,
@@ -217,9 +225,11 @@ export function decodeScanCache(
         speedIndex,
         rateModelIndex,
         unresolvedServiceTierTurnIdSlot,
-        prompts,
+        promptsSlot,
+        generationMs,
       ] = row as SerializedRecord;
       const unresolvedServiceTierTurnId = unresolvedServiceTierTurnIdSlot ?? undefined;
+      const prompts = promptsSlot ?? undefined;
       const speed = typeof speedIndex === "number" ? SPEEDS[speedIndex] : undefined;
 
       const model = typeof modelIndex === "number" ? models[modelIndex] : undefined;
@@ -232,6 +242,7 @@ export function decodeScanCache(
           typeof unresolvedServiceTierTurnId !== "string") ||
         (rateModelIndex != null && rateModel === undefined) ||
         (prompts !== undefined && !(Number.isSafeInteger(prompts) && prompts > 0)) ||
+        (generationMs !== undefined && !(Number.isFinite(generationMs) && generationMs > 0)) ||
         !Number.isFinite(uncached) ||
         !Number.isFinite(cached) ||
         !Number.isFinite(cacheCreation) ||
@@ -266,6 +277,7 @@ export function decodeScanCache(
           : {}),
         dedupeKey: typeof dedupeKey === "string" ? dedupeKey : null,
         ...(prompts === undefined ? {} : { prompts }),
+        ...(generationMs === undefined ? {} : { generationMs }),
       });
     }
     return records;
@@ -302,13 +314,13 @@ export function decodeScanCache(
     // Keep history for deleted rollouts, but re-parse incompatible reducer state.
     // v9 and v11 repair skipped Codex requests; clean v8+ entries stay served while unchanged.
     // v10 adds Claude advisor calls, which no older Claude entry holds.
-    // v12 counts prompts for Claude and Codex, which no older entry holds.
+    // v12 counts prompts and v13 times responses for Claude and Codex, which no older entry holds.
     const legacy =
       (entry.p === "claude" && version < 10) ||
       (format.state !== undefined &&
         (version < 6 ||
           (entry.p === "codex" && (version < 8 || (version < 11 && malformedRecords > 0))) ||
-          ((entry.p === "claude" || entry.p === "codex") && version < 12)));
+          ((entry.p === "claude" || entry.p === "codex") && version < 13)));
     // A corrupt state disqualifies the entry: resuming with it would attach
     // appended usage to the wrong model or replay fork-copied history.
     if (!legacy && !isValidState.get(entry.p)?.(entry.cs)) continue;
@@ -367,16 +379,33 @@ export function pruneScanCache(cache: ScanCache, retentionCutoffMs: number): num
   return removed;
 }
 
-/** Mutates seen; share it across incremental line/tail batches to deduplicate the whole file. */
+/**
+ * Mutates seen; share it across incremental line/tail batches to deduplicate the whole file.
+ * A repeat's longer generation time wins: Claude writes each content block as it streams, so
+ * only the message's last block marks when its output ended.
+ */
 export function dedupeWithinFile(
   records: readonly UsageRecord[],
   seen: Set<string> = new Set(),
 ): readonly UsageRecord[] {
   const kept: UsageRecord[] = [];
+  const keptIndex = new Map<string, number>();
   for (const record of records) {
     if (record.dedupeKey !== null) {
-      if (seen.has(record.dedupeKey)) continue;
+      if (seen.has(record.dedupeKey)) {
+        const index = keptIndex.get(record.dedupeKey);
+        const first = index === undefined ? undefined : kept[index];
+        if (
+          first !== undefined &&
+          record.generationMs !== undefined &&
+          record.generationMs > (first.generationMs ?? 0)
+        ) {
+          kept[index!] = { ...first, generationMs: record.generationMs };
+        }
+        continue;
+      }
       seen.add(record.dedupeKey);
+      keptIndex.set(record.dedupeKey, kept.length);
     }
     kept.push(record);
   }

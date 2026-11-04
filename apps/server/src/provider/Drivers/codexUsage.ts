@@ -4,6 +4,7 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import {
+  generationMs,
   parseTimestampMs,
   type ProviderUsageReader,
   type TranscriptUsageFormat,
@@ -76,6 +77,7 @@ const CodexUnreportedRequest = Schema.Struct({
   turnId: Schema.String,
   speed: CodexSpeed,
   sawThreadSettings: Schema.Boolean,
+  generationMs: Schema.optionalKey(Schema.Finite),
   usage: CodexTokenUsage,
 });
 type CodexUnreportedRequest = typeof CodexUnreportedRequest.Type;
@@ -106,7 +108,8 @@ function unreportedRequests(
     Object.fromEntries(CODEX_USAGE_FIELDS.map((key) => [key, final.usage[key] - last[key]])),
   );
   if (remainder === null) return null;
-  return [...pending.slice(0, -1), { ...final, usage: remainder }].filter(
+  const { generationMs: _untimed, ...partial } = final;
+  return [...pending.slice(0, -1), { ...partial, usage: remainder }].filter(
     (request) => request.usage.input_tokens + request.usage.output_tokens > 0,
   );
 }
@@ -136,6 +139,8 @@ export const CodexScanState = Schema.Struct({
   forkCopyAnchorMs: Schema.mutableKey(Schema.Finite),
   /** Turns started since the last emitted record; each turn is one prompt. */
   pendingPrompts: Schema.mutableKey(Schema.Int),
+  /** When the next request's input was sent: its turn's start or the last tool output. */
+  requestStartMs: Schema.mutableKey(Schema.optionalKey(Schema.Finite)),
 });
 export type CodexScanState = typeof CodexScanState.Type;
 
@@ -230,7 +235,10 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
       state.suppressingForkCopies &&
       turnTimestampMs !== null &&
       turnTimestampMs - state.forkCopyAnchorMs < FORK_COPY_MAX_GAP_MS;
-    if (!copiedFromFork) state.pendingPrompts += 1;
+    if (!copiedFromFork) {
+      state.pendingPrompts += 1;
+      if (turnTimestampMs !== null) state.requestStartMs = turnTimestampMs;
+    }
     // Model carry is useful for usage, but history recovery needs this context's own identity.
     state.turnId =
       typeof payloadRecord["turn_id"] === "string" &&
@@ -248,7 +256,14 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
     if (timestampMs === null || usage === null || state.model.length === 0) return [];
     // Copied history is already billed in the parent.
     if (isForkCopy(state, timestampMs)) return [];
-    (state.unreportedRequests ??= []).push({ ...codexAttribution(state, timestampMs), usage });
+    const elapsedMs = generationMs(state.requestStartMs, timestampMs);
+    // Tool calls run between this request and the next; the next `token_count` restarts the clock.
+    delete state.requestStartMs;
+    (state.unreportedRequests ??= []).push({
+      ...codexAttribution(state, timestampMs),
+      ...(elapsedMs === undefined ? {} : { generationMs: elapsedMs }),
+      usage,
+    });
     return [];
   }
 
@@ -270,6 +285,8 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
   // Codex may re-emit these counters after the model or timestamp becomes available.
   const timestampMs = parseTimestampMs(record["timestamp"]);
   if (timestampMs === null || state.model.length === 0) return [];
+  // Tool output has been sent back with this snapshot, so the next request starts here.
+  state.requestStartMs = timestampMs;
 
   const last = readCodexTokenUsage(infoRecord["last_token_usage"]);
   const rawCumulative = infoRecord["total_token_usage"];
@@ -356,9 +373,18 @@ function parseCodexRecord(parsed: unknown, state: CodexScanState): readonly Usag
   }
   state.lastUsageSignature = signature;
 
+  // The request this snapshot reports is the last `token_usage_record` when their usage agrees.
+  const timed = pending?.at(-1);
+  const lastGenerationMs =
+    timed !== undefined && CODEX_USAGE_FIELDS.every((key) => timed.usage[key] === last[key])
+      ? timed.generationMs
+      : undefined;
   return [
     ...unreported.map((request) => codexRequestRecord(state, request.usage, request)),
-    codexRequestRecord(state, last, codexAttribution(state, timestampMs)),
+    codexRequestRecord(state, last, {
+      ...codexAttribution(state, timestampMs),
+      ...(lastGenerationMs === undefined ? {} : { generationMs: lastGenerationMs }),
+    }),
   ];
 }
 
@@ -375,7 +401,7 @@ function codexAttribution(state: CodexScanState, timestampMs: number): CodexRequ
 function codexRequestRecord(
   state: CodexScanState,
   usage: CodexTokenUsage,
-  { timestampMs, model, turnId, speed, sawThreadSettings }: CodexRequestAttribution,
+  { timestampMs, model, turnId, speed, sawThreadSettings, generationMs }: CodexRequestAttribution,
 ): UsageRecord {
   const inputTokens = usage.input_tokens;
   const cachedInputTokens = usage.cached_input_tokens;
@@ -412,6 +438,7 @@ function codexRequestRecord(
       : {}),
     dedupeKey: null,
     ...(prompts > 0 ? { prompts } : {}),
+    ...(generationMs === undefined ? {} : { generationMs }),
   };
 }
 

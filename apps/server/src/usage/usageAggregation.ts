@@ -48,6 +48,27 @@ function makeDayFormatter(timeZone: string): (timestampMs: number) => string {
   };
 }
 
+// Zone offsets are whole quarter hours, so one local hour covers each quarter-hour slot.
+function makeHourOfDayFormatter(timeZone: string): (timestampMs: number) => number {
+  const options = { hour: "numeric", hourCycle: "h23" } as const;
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat("en-US", { ...options, timeZone });
+  } catch {
+    format = new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" });
+  }
+  const hours = new Map<number, number>();
+  return (timestampMs) => {
+    const slot = Math.floor(timestampMs / QUARTER_HOUR_MS);
+    let hour = hours.get(slot);
+    if (hour === undefined) {
+      hour = Number(format.format(new Date(slot * QUARTER_HOUR_MS))) % 24;
+      hours.set(slot, hour);
+    }
+    return hour;
+  };
+}
+
 const QUARTER_HOUR_MS = 15 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -61,6 +82,8 @@ interface MutableBucket {
   speedPremiumUsd: number;
   records: number;
   prompts: number;
+  /** Indexed by local hour of day; created on the first timed response. */
+  speed: { outputTokens: number; generationMs: number }[] | null;
   unpricedRecords: number;
   unpricedTokens: number;
   providerReportedRecords: number;
@@ -154,7 +177,8 @@ export function mergeUsageCopies(held: UsageRecord, copy: UsageRecord): UsageRec
     b.outputTokens <= a.outputTokens &&
     b.reasoningTokens <= a.reasoningTokens &&
     (copy.cacheCreation1hTokens ?? 0) <= (held.cacheCreation1hTokens ?? 0) &&
-    reportedCostUsd === held.reportedCostUsd
+    reportedCostUsd === held.reportedCostUsd &&
+    (copy.generationMs ?? 0) <= (held.generationMs ?? 0)
   ) {
     return held;
   }
@@ -162,9 +186,14 @@ export function mergeUsageCopies(held: UsageRecord, copy: UsageRecord): UsageRec
     held.cacheCreation1hTokens ?? 0,
     copy.cacheCreation1hTokens ?? 0,
   );
+  const generationMs =
+    held.generationMs === undefined || copy.generationMs === undefined
+      ? (held.generationMs ?? copy.generationMs)
+      : Math.max(held.generationMs, copy.generationMs);
   return {
     ...held,
     ...(cacheCreation1hTokens > 0 ? { cacheCreation1hTokens } : {}),
+    ...(generationMs === undefined ? {} : { generationMs }),
     totals: {
       uncachedInputTokens: Math.max(a.uncachedInputTokens, b.uncachedInputTokens),
       cachedInputTokens: Math.max(a.cachedInputTokens, b.cachedInputTokens),
@@ -188,6 +217,7 @@ export class UsageAggregator {
   readonly #serverPrompts = new Map<UsageServerPromptKind, Map<string, number>>();
   readonly #seen = new Map<string, Contribution>();
   readonly #toDay: (timestampMs: number) => string;
+  readonly #toHourOfDay: (timestampMs: number) => number;
   readonly #hourlyWindow: { readonly sinceTimeMs: number; readonly untilTimeMs: number } | null;
   readonly #options: AggregateOptions;
   #lastBucket: {
@@ -204,6 +234,7 @@ export class UsageAggregator {
   constructor(options: AggregateOptions) {
     this.#options = options;
     this.#toDay = makeDayFormatter(options.timeZone);
+    this.#toHourOfDay = makeHourOfDayFormatter(options.timeZone);
     if (options.resolution === "hour") {
       if (options.sinceTimeMs === undefined || options.untilTimeMs === undefined) {
         throw new Error("Hourly usage aggregation requires exact time bounds");
@@ -280,6 +311,12 @@ export class UsageAggregator {
     );
     bucket.records += 1;
     bucket.prompts += record.prompts ?? 0;
+    if (record.generationMs !== undefined && record.totals.outputTokens > 0) {
+      bucket.speed ??= Array.from({ length: 24 }, () => ({ outputTokens: 0, generationMs: 0 }));
+      const sample = bucket.speed[this.#toHourOfDay(record.timestampMs)]!;
+      sample.outputTokens += record.totals.outputTokens;
+      sample.generationMs += record.generationMs;
+    }
     if (priced.costSource === "unpriced") {
       bucket.unpricedRecords += 1;
       bucket.unpricedTokens +=
@@ -376,6 +413,7 @@ export class UsageAggregator {
         speedPremiumUsd: 0,
         records: 0,
         prompts: 0,
+        speed: null,
         unpricedRecords: 0,
         unpricedTokens: 0,
         providerReportedRecords: 0,
@@ -425,6 +463,21 @@ export class UsageAggregator {
         costSource: resolveCostSource(bucket),
         records: bucket.records,
         ...(bucket.prompts === 0 ? {} : { prompts: bucket.prompts }),
+        ...(bucket.speed === null
+          ? {}
+          : {
+              speed: bucket.speed.flatMap((sample, hour) =>
+                sample.generationMs === 0
+                  ? []
+                  : [
+                      {
+                        hour,
+                        outputTokens: sample.outputTokens,
+                        generationMs: Math.round(sample.generationMs),
+                      },
+                    ],
+              ),
+            }),
         unpricedRecords: bucket.unpricedRecords,
         unpricedTokens: bucket.unpricedTokens,
         sessions: bucket.sessions.size,

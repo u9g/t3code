@@ -87,6 +87,7 @@ import {
 } from "./UsageProviderChart";
 import { SpeedPremium, UsageModelDialog } from "./UsageModelDialog";
 import { UsageShareBar } from "./UsageShareBar";
+import { UsageSpeedSection } from "./UsageSpeedChart";
 import {
   costTypeSegments,
   modelShare,
@@ -538,6 +539,14 @@ export function UsagePage() {
                   </p>
                 ))}
               </div>
+            ) : metric === "speed" ? (
+              <UsageSpeedSection
+                speed={merged.speed}
+                periods={shownHourly ? hours : days}
+                resolution={shownHourly ? "hour" : "day"}
+                timeZone={shownWindow.timeZone}
+                hour12={hour12}
+              />
             ) : (
               <UsageOverview
                 merged={merged}
@@ -557,7 +566,7 @@ export function UsagePage() {
           </WorkspacePageContainer>
         </ScrollArea>
       </div>
-      {showingLimits ? null : (
+      {metric === "limits" || metric === "speed" ? null : (
         <UsageModelDialogHost
           models={merged.models}
           environments={selectedEnvironments}

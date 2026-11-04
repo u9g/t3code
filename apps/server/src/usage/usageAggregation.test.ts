@@ -160,6 +160,29 @@ describe("UsageAggregator", () => {
     expect(losAngeles.buckets[0]?.day).toBe("2026-08-06");
   });
 
+  it("sums timed output by local hour of day and leaves untimed responses out", () => {
+    const at = (iso: string, generationMs?: number) =>
+      record({
+        timestampMs: Date.parse(iso),
+        ...(generationMs === undefined ? {} : { generationMs }),
+      });
+    const [bucket] = aggregate(
+      [
+        at("2026-08-07T13:05:00Z", 1000),
+        at("2026-08-07T13:55:00Z", 4000),
+        at("2026-08-07T15:30:00Z", 500),
+        at("2026-08-07T16:00:00Z"),
+      ],
+      "America/New_York",
+    ).buckets;
+
+    expect(bucket?.speed).toEqual([
+      { hour: 9, outputTokens: 100, generationMs: 5000 },
+      { hour: 11, outputTokens: 50, generationMs: 500 },
+    ]);
+    expect(aggregate([record()]).buckets[0]).not.toHaveProperty("speed");
+  });
+
   it("finds the day at a quarter-hour zone's midnight across interleaved buckets", () => {
     const result = aggregate(
       [

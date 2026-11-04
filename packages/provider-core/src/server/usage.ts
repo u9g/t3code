@@ -26,6 +26,17 @@ export interface UsageRecord {
   readonly dedupeKey: string | null;
   /** User prompts this response answered, counted on the session's first response after them. */
   readonly prompts?: number;
+  /** Wall time from the request's input to its last output, including time to first token. */
+  readonly generationMs?: number;
+}
+
+/** Longer gaps are a stalled or resumed session, not generation. */
+const MAX_GENERATION_MS = 10 * 60 * 1000;
+
+export function generationMs(startMs: number | undefined, endMs: number): number | undefined {
+  if (startMs === undefined) return undefined;
+  const elapsed = endMs - startMs;
+  return elapsed > 0 && elapsed <= MAX_GENERATION_MS ? elapsed : undefined;
 }
 
 export const EMPTY_TOTALS: UsageTokenTotals = {

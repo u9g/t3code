@@ -369,7 +369,7 @@ describe("parseCodexLine", () => {
     expect(state.malformedRecords).toBe(1);
   });
 
-  it("bills each interrupted turn's request with the model, tier and time it was read under", () => {
+  it("bills each interrupted turn's request with the model, tier, time and duration it was read under", () => {
     const state = initialCodexScanState();
     const line = (type: string, time: string, payload: Record<string, unknown>) =>
       JSON.stringify({ type, timestamp: `2026-11-0${time}Z`, payload });
@@ -412,6 +412,8 @@ describe("parseCodexLine", () => {
         speed: record.speed,
         timestampMs: record.timestampMs,
         unresolvedServiceTierTurnId: record.unresolvedServiceTierTurnId,
+        // From the turn start or last snapshot to the request; none after an untimed gap.
+        generationMs: record.generationMs,
       })),
     ).toEqual([
       {
@@ -420,6 +422,7 @@ describe("parseCodexLine", () => {
         speed: "standard",
         timestampMs: at("1T23:59:52"),
         unresolvedServiceTierTurnId: "turn-1",
+        generationMs: 1000,
       },
       {
         tokens: 160,
@@ -427,6 +430,7 @@ describe("parseCodexLine", () => {
         speed: "standard",
         timestampMs: at("1T23:59:59"),
         unresolvedServiceTierTurnId: "turn-1",
+        generationMs: 7000,
       },
       {
         tokens: 55,
@@ -434,6 +438,7 @@ describe("parseCodexLine", () => {
         speed: "standard",
         timestampMs: at("2T00:00:01"),
         unresolvedServiceTierTurnId: "turn-1",
+        generationMs: undefined,
       },
       {
         tokens: 55,
@@ -441,6 +446,7 @@ describe("parseCodexLine", () => {
         speed: "fast",
         timestampMs: at("2T00:00:03"),
         unresolvedServiceTierTurnId: undefined,
+        generationMs: 1000,
       },
       {
         tokens: 35,
@@ -448,6 +454,7 @@ describe("parseCodexLine", () => {
         speed: "fast",
         timestampMs: at("2T00:00:04"),
         unresolvedServiceTierTurnId: undefined,
+        generationMs: undefined,
       },
       {
         tokens: 230,
@@ -455,6 +462,7 @@ describe("parseCodexLine", () => {
         speed: "standard",
         timestampMs: at("2T00:00:07"),
         unresolvedServiceTierTurnId: undefined,
+        generationMs: 1000,
       },
     ]);
     expect(state.malformedRecords).toBe(0);

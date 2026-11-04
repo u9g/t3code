@@ -50,6 +50,14 @@ export const UsageCategoryCost = Schema.Struct({
 });
 export type UsageCategoryCost = typeof UsageCategoryCost.Type;
 
+/** Responses with a known generation time, by local hour of day in the summary's zone. */
+export const UsageSpeedSample = Schema.Struct({
+  hour: NonNegativeInt.check(Schema.isLessThan(24)),
+  outputTokens: NonNegativeInt,
+  generationMs: NonNegativeInt,
+});
+export type UsageSpeedSample = typeof UsageSpeedSample.Type;
+
 export const UsageBucket = Schema.Struct({
   day: UsageDay,
   hourStart: Schema.optional(TrimmedNonEmptyString),
@@ -67,6 +75,8 @@ export const UsageBucket = Schema.Struct({
   records: NonNegativeInt,
   /** Prompts the user sent, counted on the first response to each. */
   prompts: Schema.optionalKey(NonNegativeInt),
+  /** Output speed: tokens over generation time, so tokens per second is their ratio. */
+  speed: Schema.optionalKey(Schema.Array(UsageSpeedSample)),
   unpricedRecords: NonNegativeInt,
   /** Absent from older servers; merges then estimate it from the unpriced record share. */
   unpricedTokens: Schema.optional(NonNegativeInt),

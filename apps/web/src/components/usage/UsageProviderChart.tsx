@@ -15,8 +15,8 @@ import { cn } from "~/lib/utils";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION } from "./usageProviders";
 import { observeResize } from "~/lib/observeResize";
 
-const VIEW_WIDTH = 960;
-const VIEW_HEIGHT = 260;
+export const VIEW_WIDTH = 960;
+export const VIEW_HEIGHT = 260;
 const TICK_COUNT = 4;
 const PLOT_TOP = 8;
 const NONE_LOADING: ReadonlySet<UsageProviderKind> = new Set();
@@ -65,7 +65,7 @@ export interface DayColumn {
   readonly total: number;
 }
 
-interface Point {
+export interface Point {
   readonly x: number;
   readonly y: number;
 }
@@ -158,7 +158,7 @@ interface CurveSegment {
   readonly to: Point;
 }
 
-function smoothCurve(points: readonly Point[]): readonly CurveSegment[] {
+export function smoothCurve(points: readonly Point[]): readonly CurveSegment[] {
   if (points.length < 2) return [];
   const tangents = monotoneTangents(points);
   const segments: CurveSegment[] = [];
@@ -178,7 +178,7 @@ function smoothCurve(points: readonly Point[]): readonly CurveSegment[] {
   return segments;
 }
 
-function curvePath(segments: readonly CurveSegment[]): string {
+export function curvePath(segments: readonly CurveSegment[]): string {
   const first = segments[0];
   if (first === undefined) return "";
   let path = `M${first.from.x.toFixed(2)},${first.from.y.toFixed(2)}`;
@@ -192,7 +192,7 @@ function areaPath(line: string) {
   return line === "" ? "" : `${line} L${VIEW_WIDTH},${VIEW_HEIGHT} L0,${VIEW_HEIGHT} Z`;
 }
 
-function niceScale(peak: number, count: number): { max: number; ticks: readonly number[] } {
+export function niceScale(peak: number, count: number): { max: number; ticks: readonly number[] } {
   if (peak <= 0) return { max: 0, ticks: [0] };
 
   const rawStep = peak / count;
@@ -226,7 +226,7 @@ function chartScale(
     : { ...niceScale(peak, TICK_COUNT), labeled: true };
 }
 
-function valueToY(value: number, max: number) {
+export function valueToY(value: number, max: number) {
   return max === 0 ? VIEW_HEIGHT : VIEW_HEIGHT - (value / max) * (VIEW_HEIGHT - PLOT_TOP);
 }
 

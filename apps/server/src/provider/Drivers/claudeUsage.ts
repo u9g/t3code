@@ -5,6 +5,7 @@ import * as Path from "effect/Path";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
+  generationMs,
   parseTimestampMs,
   tokenCount,
   type ProviderUsageReader,
@@ -34,6 +35,9 @@ export function parseClaudeLine(line: string, state: ClaudeScanState): readonly 
 /** Prompts seen since the session's last response; the next response carries them. */
 export const ClaudeScanState = Schema.Struct({
   pendingPrompts: Schema.mutableKey(Schema.Int),
+  /** When the last user line (prompt or tool result) landed, per chain; responses start there. */
+  inputAtMs: Schema.mutableKey(Schema.optionalKey(Schema.Finite)),
+  sidechainInputAtMs: Schema.mutableKey(Schema.optionalKey(Schema.Finite)),
 });
 export type ClaudeScanState = typeof ClaudeScanState.Type;
 
@@ -64,8 +68,14 @@ function parseClaudeRecord(parsed: unknown, state: ClaudeScanState): readonly Us
   if (typeof parsed !== "object" || parsed === null) return [];
 
   const record = parsed as Record<string, unknown>;
+  const sidechain = record["isSidechain"] === true;
   if (record["type"] === "user") {
     if (isUserPrompt(record)) state.pendingPrompts += 1;
+    const inputAtMs = parseTimestampMs(record["timestamp"]);
+    if (inputAtMs !== null) {
+      if (sidechain) state.sidechainInputAtMs = inputAtMs;
+      else state.inputAtMs = inputAtMs;
+    }
     return [];
   }
   if (record["type"] !== "assistant") return [];
@@ -92,6 +102,12 @@ function parseClaudeRecord(parsed: unknown, state: ClaudeScanState): readonly Us
   const cost = record["costUSD"];
   const prompts = state.pendingPrompts;
   state.pendingPrompts = 0;
+  // Every content block of a message repeats its usage; keeping the latest block's duration
+  // (see dedupeWithinFile) measures to the end of the message.
+  const elapsedMs = generationMs(
+    sidechain ? state.sidechainInputAtMs : state.inputAtMs,
+    timestampMs,
+  );
 
   const executor: UsageRecord = {
     provider: "claude",
@@ -110,6 +126,7 @@ function parseClaudeRecord(parsed: unknown, state: ClaudeScanState): readonly Us
     speed: usageRecord["speed"] === "fast" ? "fast" : "standard",
     dedupeKey,
     ...(prompts > 0 ? { prompts } : {}),
+    ...(elapsedMs === undefined ? {} : { generationMs: elapsedMs }),
   };
 
   // Top-level `usage` is the executor's alone. Advisor calls run on another model at its own rates

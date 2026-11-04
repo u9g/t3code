@@ -1,5 +1,8 @@
 import { useState } from "react";
 
+import { cn } from "~/lib/utils";
+import { InlineButton } from "../ui/button";
+
 import { tokensPerSecond, type ModelSpeed, type SpeedTotals } from "@t3tools/shared/usageMerge";
 import { formatDayShort, formatHourShort, formatTokens } from "@t3tools/shared/usageFormat";
 import {
@@ -240,6 +243,8 @@ export function UsageSpeedSection({
   readonly timeZone: string;
   readonly hour12: boolean;
 }) {
+  // Empty shows every model; otherwise only the picked ones, keeping their colors.
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
   if (speed.length === 0) {
     return (
       <p className="py-12 text-center text-sm text-muted-foreground">
@@ -260,30 +265,59 @@ export function UsageSpeedSection({
     resolution === "hour" ? formatHourShort(period, timeZone, hour12) : formatDayShort(period);
   const periodLabels = periods.map(formatPeriod);
   const hourLabels = HOURS_OF_DAY.map(formatHourOfDay);
+  const shown = (series: readonly SpeedSeries[]) =>
+    picked.size === 0 ? series : series.filter((entry) => picked.has(entry.key));
+  const toggle = (key: string) =>
+    setPicked((current) => {
+      const next = new Set(current);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
 
   return (
     <div className="flex flex-col gap-6">
-      <ul className="flex flex-wrap gap-x-5 gap-y-2 text-xs" aria-label="Models">
-        {byHourOfDay.map((entry, index) => (
-          <li key={entry.key} className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
-            <span className="text-foreground">{entry.label}</span>
-            <span className="text-muted-foreground tabular-nums">
-              {entry.overall === null ? "n/a" : `${formatRate(entry.overall)} tok/s`} ·{" "}
-              {formatTokens(speed[index]?.outputTokens ?? 0)} out
-            </span>
+      <ul className="flex flex-wrap items-center gap-x-1 gap-y-1 text-xs" aria-label="Models">
+        {byHourOfDay.map((entry, index) => {
+          const active = picked.size === 0 || picked.has(entry.key);
+          return (
+            <li key={entry.key}>
+              <button
+                type="button"
+                aria-pressed={picked.has(entry.key)}
+                onClick={() => toggle(entry.key)}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2 py-1 transition-opacity hover:bg-accent",
+                  picked.has(entry.key) && "bg-accent",
+                  !active && "opacity-45",
+                )}
+              >
+                <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="text-foreground">{entry.label}</span>
+                <span className="text-muted-foreground tabular-nums">
+                  {entry.overall === null ? "n/a" : `${formatRate(entry.overall)} tok/s`} ·{" "}
+                  {formatTokens(speed[index]?.outputTokens ?? 0)} out
+                </span>
+              </button>
+            </li>
+          );
+        })}
+        {picked.size === 0 ? null : (
+          <li className="px-2">
+            <InlineButton tone="muted" onClick={() => setPicked(new Set())}>
+              Show all
+            </InlineButton>
           </li>
-        ))}
+        )}
       </ul>
       <SpeedChart
         title="Output speed by time of day"
-        series={byHourOfDay}
+        series={shown(byHourOfDay)}
         xLabels={hourLabels}
         formatX={(index) => hourLabels[index] ?? ""}
       />
       <SpeedChart
         title={resolution === "hour" ? "Output speed by hour" : "Output speed by day"}
-        series={byPeriod}
+        series={shown(byPeriod)}
         xLabels={periodLabels}
         formatX={(index) => periodLabels[index] ?? ""}
       />

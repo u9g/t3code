@@ -10,7 +10,12 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
-import { isModelCostUnknown, mergeUsage, type EnvironmentUsage } from "./usageMerge.ts";
+import {
+  isModelCostUnknown,
+  mergeUsage,
+  tokensPerSecond,
+  type EnvironmentUsage,
+} from "./usageMerge.ts";
 
 const decodeSummary = Schema.decodeUnknownSync(UsageSummary);
 
@@ -709,6 +714,43 @@ describe("mergeUsage", () => {
 });
 
 describe("mergeUsage server prompts", () => {
+  it("sums each model's timed output by day and hour of day, decoding through the contract", () => {
+    const source = { provider: "claude" as const, hostId: "mac", homePath: "/Users/me/.claude" };
+    const merged = mergeUsage(
+      [
+        environment(
+          "mac",
+          decodeSummary(
+            summary(
+              [
+                bucket({
+                  speed: [
+                    { hour: 9, outputTokens: 1000, generationMs: 10_000 },
+                    { hour: 14, outputTokens: 3000, generationMs: 10_000 },
+                  ],
+                }),
+                bucket({
+                  day: "2026-08-08" as UsageDay,
+                  speed: [{ hour: 9, outputTokens: 2000, generationMs: 10_000 }],
+                }),
+                bucket({ model: "claude-opus-5" }),
+              ],
+              [source],
+            ),
+          ),
+        ),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+    expect(merged.speed).toHaveLength(1);
+    const [model] = merged.speed;
+    expect(tokensPerSecond(model)).toBe(200);
+    expect(model?.byHourOfDay[9]).toEqual({ outputTokens: 3000, generationMs: 20_000 });
+    expect(tokensPerSecond(model?.byPeriod.get("2026-08-07"))).toBe(200);
+    expect(tokensPerSecond(model?.byPeriod.get("2026-08-08"))).toBe(200);
+    expect(tokensPerSecond(model?.byHourOfDay[0])).toBeNull();
+  });
+
   it("adds each server's scheduled prompts to the totals, providers, models and days", () => {
     const source = { provider: "claude" as const, hostId: "mac", homePath: "/Users/me/.claude" };
     const withScheduled = (count: number): UsageSummary => ({

@@ -10,7 +10,7 @@ import { CLAUDE_SYNTHETIC_MODEL } from "../provider/Drivers/claudeUsage.ts";
 import { mergeUsageCopies } from "./usageAggregation.ts";
 import { GUARD_LENGTH, type TranscriptParsePosition } from "./usageTranscriptReader.ts";
 
-const USAGE_SCAN_CACHE_VERSION = 19 as const;
+const USAGE_SCAN_CACHE_VERSION = 20 as const;
 const SPEED_COMPATIBLE_SINCE_VERSION = 4;
 
 /**
@@ -18,8 +18,9 @@ const SPEED_COMPATIBLE_SINCE_VERSION = 4;
  * replace it, dropping saved usage for deleted transcripts. Separate files keep
  * the newer one; older files are removed once it is saved.
  */
-export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v19.json";
+export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v20.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [
+  "usage-scan-cache-v19.json",
   "usage-scan-cache-v18.json",
   "usage-scan-cache-v17.json",
   "usage-scan-cache-v16.json",
@@ -67,8 +68,9 @@ type SerializedRecord = readonly [
   speed: number,
   rateModelIndex?: number | null,
   unresolvedServiceTierTurnId?: string | null,
-  cacheCreation1hTokens?: number,
+  cacheCreation1hTokens?: number | null,
   prompts?: number | null,
+  generationMs?: number | null,
   modelCalls?: number,
 ];
 
@@ -113,6 +115,15 @@ function intern(table: string[], index: Map<string, number>, value: string): num
   return next;
 }
 
+/** Optional trailing slots: drop unset ones at the end, null the gaps before a set one. */
+function trimTrailingUndefined<T extends readonly unknown[]>(
+  slots: T,
+): Partial<{ -readonly [K in keyof T]: Exclude<T[K], undefined> | null }> {
+  let end = slots.length;
+  while (end > 0 && slots[end - 1] === undefined) end--;
+  return slots.slice(0, end).map((slot) => slot ?? null) as never;
+}
+
 function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile {
   const serializeRecord = (record: UsageRecord): SerializedRecord => [
     record.timestampMs,
@@ -129,24 +140,13 @@ function serializeFile(entry: CachedFile, tables: InternTables): SerializedFile 
     record.rateModel === undefined
       ? null
       : intern(tables.models, tables.modelIndex, record.rateModel),
-    ...(record.modelCalls !== undefined && record.modelCalls > 1
-      ? ([
-          record.unresolvedServiceTierTurnId ?? null,
-          record.cacheCreation1hTokens ?? 0,
-          record.prompts ?? null,
-          record.modelCalls,
-        ] as const)
-      : record.prompts !== undefined
-        ? ([
-            record.unresolvedServiceTierTurnId ?? null,
-            record.cacheCreation1hTokens ?? 0,
-            record.prompts,
-          ] as const)
-        : record.cacheCreation1hTokens !== undefined
-          ? ([record.unresolvedServiceTierTurnId ?? null, record.cacheCreation1hTokens] as const)
-          : record.unresolvedServiceTierTurnId !== undefined
-            ? ([record.unresolvedServiceTierTurnId] as const)
-            : ([] as const)),
+    ...trimTrailingUndefined([
+      record.unresolvedServiceTierTurnId,
+      record.cacheCreation1hTokens,
+      record.prompts,
+      record.generationMs,
+      record.modelCalls !== undefined && record.modelCalls > 1 ? record.modelCalls : undefined,
+    ] as const),
   ];
   return {
     s: entry.size,
@@ -238,8 +238,9 @@ export function decodeScanCache(
         speedIndex,
         rateModelIndex,
         unresolvedServiceTierTurnIdSlot,
-        cacheCreation1h = 0,
+        cacheCreation1hSlot,
         promptsSlot,
+        generationMsSlot,
         modelCallsSlot,
       ] = row as SerializedRecord;
       const unresolvedServiceTierTurnId = unresolvedServiceTierTurnIdSlot ?? undefined;
@@ -247,6 +248,8 @@ export function decodeScanCache(
       const grokV18 = version === 18 && provider === "grok";
       const prompts = grokV18 ? undefined : (promptsSlot ?? undefined);
       const modelCalls = (grokV18 ? promptsSlot : modelCallsSlot) ?? 1;
+      const generationMs = generationMsSlot ?? undefined;
+      const cacheCreation1h = cacheCreation1hSlot ?? 0;
       const speed = typeof speedIndex === "number" ? SPEEDS[speedIndex] : undefined;
 
       const model = typeof modelIndex === "number" ? models[modelIndex] : undefined;
@@ -262,6 +265,7 @@ export function decodeScanCache(
         modelCalls < 0 ||
         (rateModelIndex != null && rateModel === undefined) ||
         (prompts !== undefined && !(Number.isSafeInteger(prompts) && prompts > 0)) ||
+        (generationMs !== undefined && !(Number.isFinite(generationMs) && generationMs > 0)) ||
         !Number.isFinite(uncached) ||
         !Number.isFinite(cached) ||
         !Number.isFinite(cacheCreation) ||
@@ -300,14 +304,15 @@ export function decodeScanCache(
         dedupeKey:
           typeof dedupeKey !== "string"
             ? null
-            : // Saved copies of moved transcripts must still match the re-parsed v17 key.
+            : // Saved copies of moved transcripts must still match the re-parsed v18 key.
               provider === "grok" &&
-                version < 17 &&
+                version < 18 &&
                 dedupeKey.endsWith(`:${model}`) &&
                 !dedupeKey.endsWith(`:${timestampMs}:${model}`)
               ? `${dedupeKey.slice(0, -model.length)}${timestampMs}:${model}`
               : dedupeKey,
         ...(prompts === undefined ? {} : { prompts }),
+        ...(generationMs === undefined ? {} : { generationMs }),
       });
     }
     return records;
@@ -351,12 +356,11 @@ export function decodeScanCache(
     ) {
       continue;
     }
-    // Retain deleted transcripts and re-read live files with obsolete usage data.
+    // Upstream caches through v18 could lack the fork's prompt counts and response times.
     const legacy =
-      (entry.p === "claude" && (version < 16 || version === 18)) ||
+      ((entry.p === "claude" || entry.p === "codex") && version < 19) ||
       (entry.p === "grok" && version < 18) ||
-      (format.state !== undefined &&
-        (version < 6 || (entry.p === "codex" && (version < 16 || version === 18))));
+      (format.state !== undefined && version < 6);
     // A corrupt state disqualifies the entry: resuming with it would attach
     // appended usage to the wrong model or replay fork-copied history.
     if (!legacy && !isValidState.get(entry.p)?.(entry.cs)) continue;
@@ -413,7 +417,11 @@ export function pruneScanCache(cache: ScanCache, retentionCutoffMs: number): num
   return removed;
 }
 
-/** Pass only newline-terminated records: an unterminated tail can still change, so the aggregator merges it per scan. */
+/**
+ * Pass only newline-terminated records: an unterminated tail can still change, so the aggregator merges it per scan.
+ * Merged copies keep the longer generation time: Claude writes each content block as it streams, so
+ * only the message's last block marks when its output ended.
+ */
 export function dedupeWithinFile(records: readonly UsageRecord[]): readonly UsageRecord[] {
   const kept: UsageRecord[] = [];
   const firstIndex = new Map<string, number>();

@@ -9,10 +9,13 @@ function claudeLine(overrides: {
   model?: string;
   outputTokens?: number;
   speed?: string;
+  timestamp?: string;
+  isSidechain?: boolean;
 }): string {
   return JSON.stringify({
     type: "assistant",
-    timestamp: "2026-08-07T04:05:13.944Z",
+    timestamp: overrides.timestamp ?? "2026-08-07T04:05:13.944Z",
+    ...(overrides.isSidechain ? { isSidechain: true } : {}),
     sessionId: "5a128faa-8253-489e-b935-6c08e8e670c0",
     cwd: "/home/theo/project",
     message: {
@@ -56,10 +59,9 @@ describe("parseClaudeLine", () => {
     const [text] = parseClaudeLine(claudeLine({ messageId: "msg_2", contentType: "text" }), {
       pendingPrompts: 0,
     });
-    const [toolUse] = parseClaudeLine(
-      claudeLine({ messageId: "msg_2", contentType: "tool_use" }),
-      { pendingPrompts: 0 },
-    );
+    const [toolUse] = parseClaudeLine(claudeLine({ messageId: "msg_2", contentType: "tool_use" }), {
+      pendingPrompts: 0,
+    });
 
     expect(text?.dedupeKey).toBe(toolUse?.dedupeKey);
     expect(text?.totals).toEqual(toolUse?.totals);
@@ -126,6 +128,40 @@ describe("Claude prompt counting", () => {
     expect(first?.prompts).toBe(2);
     expect(second?.prompts).toBeUndefined();
   });
+
+  it("times each response from the last user line on its own chain", () => {
+    const state = { pendingPrompts: 0 };
+    const at = (seconds: number) => `2026-08-07T04:05:${String(seconds).padStart(2, "0")}.000Z`;
+    const timed = (line: string) => parseClaudeLine(line, state)[0]?.generationMs;
+    const input = (seconds: number, extra: Record<string, unknown> = {}) =>
+      parseClaudeLine(
+        JSON.stringify({
+          type: "user",
+          timestamp: at(seconds),
+          message: { role: "user", content: [{ type: "tool_result", content: "ok" }] },
+          ...extra,
+        }),
+        state,
+      );
+
+    expect(timed(claudeLine({ messageId: "m0", contentType: "text", timestamp: at(1) }))).toBe(
+      undefined,
+    );
+    input(10);
+    input(12, { isSidechain: true });
+    // Each block of a streamed message measures to its own write; dedupe keeps the latest.
+    expect(timed(claudeLine({ messageId: "m1", contentType: "thinking", timestamp: at(13) }))).toBe(
+      3000,
+    );
+    expect(timed(claudeLine({ messageId: "m1", contentType: "text", timestamp: at(15) }))).toBe(
+      5000,
+    );
+    expect(
+      timed(
+        claudeLine({ messageId: "s1", contentType: "text", timestamp: at(14), isSidechain: true }),
+      ),
+    ).toBe(2000);
+  });
 });
 
 describe("Claude advisor iterations", () => {
@@ -175,7 +211,8 @@ describe("Claude advisor iterations", () => {
     ...advisorTurn,
     message: { ...advisorTurn.message, usage: { ...advisorTurn.message.usage, iterations } },
   });
-  const parse = (turn: unknown) => claudeUsageFormat.parseLine(JSON.stringify(turn), { pendingPrompts: 0 });
+  const parse = (turn: unknown) =>
+    claudeUsageFormat.parseLine(JSON.stringify(turn), { pendingPrompts: 0 });
 
   it("reports the advisor model's tokens as their own record beside the unchanged executor record", () => {
     const executor = {
@@ -238,12 +275,13 @@ describe("Claude advisor iterations", () => {
     );
 
     expect(parse(withIterations(executorIterations))).toHaveLength(1);
-    expect(claudeUsageFormat.parseProjected(withIterations([]), { pendingPrompts: 0 })).toHaveLength(1);
     expect(
-      claudeUsageFormat.parseLine(
-        claudeLine({ messageId: "msg_3", contentType: "text" }),
-        { pendingPrompts: 0 },
-      ),
+      claudeUsageFormat.parseProjected(withIterations([]), { pendingPrompts: 0 }),
+    ).toHaveLength(1);
+    expect(
+      claudeUsageFormat.parseLine(claudeLine({ messageId: "msg_3", contentType: "text" }), {
+        pendingPrompts: 0,
+      }),
     ).toHaveLength(1);
   });
 

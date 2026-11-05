@@ -1,12 +1,14 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Config from "effect/Config";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
+import * as NetService from "@t3tools/shared/Net";
 
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
@@ -19,9 +21,12 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
+import * as DesktopServerExposure from "./DesktopServerExposure.ts";
 import type { DesktopBackendStartConfig } from "./DesktopBackendManager.ts";
 
-function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
+function layerPool(
+  labelRef: Ref.Ref<string>,
+): Layer.Layer<DesktopBackendPool.DesktopBackendPool, Config.ConfigError> {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
@@ -65,6 +70,15 @@ function layerPool(labelRef: Ref.Ref<string>): Layer.Layer<DesktopBackendPool.De
         DesktopAppSettings.layerTest(),
         DesktopState.layer,
         DesktopWslEnvironment.layerTest(),
+        NetService.layer,
+        Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
+          getState: Effect.die("unexpected getState"),
+          backendConfig: Effect.die("unexpected backendConfig"),
+          configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
+          setMode: () => Effect.die("unexpected setMode"),
+          setTailscaleServeEnabled: () => Effect.die("unexpected setTailscaleServeEnabled"),
+          getAdvertisedEndpoints: Effect.die("unexpected getAdvertisedEndpoints"),
+        } satisfies DesktopServerExposure.DesktopServerExposure["Service"]),
         ElectronDialog.layer,
         ElectronApp.layer,
         Layer.succeed(DesktopWindow.DesktopWindow, {
@@ -111,6 +125,7 @@ describe("DesktopBackendPool", () => {
               t3Home: "/tmp/t3",
               host: "127.0.0.1",
               desktopBootstrapToken: "token",
+              desktopLaunchId: "launch-1",
               tailscaleServeEnabled: false,
               tailscaleServePort: 443,
             },

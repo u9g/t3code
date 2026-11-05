@@ -17,6 +17,8 @@ export const DesktopBackendBootstrap = Schema.Struct({
   desktopBootstrapToken: Schema.String,
   // Derives rotating tokens instead of trusting desktopBootstrapToken indefinitely; see @t3tools/shared/desktopBootstrapToken.
   desktopBootstrapSecret: Schema.optionalKey(Schema.String),
+  // Public correlation id echoed by the descriptor; fresh for each backend launch.
+  desktopLaunchId: Schema.optionalKey(TrimmedNonEmptyString),
   // Absent means the backend must hydrate PATH, as WSL and older desktops require.
   shellEnvironmentPrepared: Schema.optionalKey(Schema.Boolean),
   tailscaleServeEnabled: Schema.Boolean,

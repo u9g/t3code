@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { cn } from "~/lib/utils";
 import { InlineButton } from "../ui/button";
+import { Checkbox } from "../ui/checkbox";
 
 import { tokensPerSecond, type ModelSpeed, type SpeedTotals } from "@t3tools/shared/usageMerge";
 import { formatDayShort, formatHourShort, formatTokens } from "@t3tools/shared/usageFormat";
@@ -75,6 +76,28 @@ function runs(
   return result;
 }
 
+/** Log axis bounds and ticks on the 1-2-5 sequence, covering every plotted value. */
+function logScale(values: readonly number[]) {
+  const steps = (exponent: number) => [1, 2, 5].map((step) => step * 10 ** exponent);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const candidates = Array.from(
+    { length: Math.ceil(Math.log10(max)) - Math.floor(Math.log10(min)) + 2 },
+    (_, index) => steps(Math.floor(Math.log10(min)) + index - 1),
+  ).flat();
+  const lo = candidates.findLast((tick) => tick <= min * (1 + 1e-9)) ?? min;
+  const found = candidates.find((tick) => tick >= max * (1 - 1e-9)) ?? max;
+  const hi = found > lo ? found : lo * 2;
+  const inRange = candidates.filter((tick) => tick >= lo && tick <= hi);
+  // Past three decades the 2s and 5s crowd the axis; keep the powers of ten.
+  const ticks =
+    Math.log10(hi / lo) > 3
+      ? inRange.filter((tick) => Number.isInteger(Math.log10(tick)) || tick === lo || tick === hi)
+      : inRange;
+  const span = Math.log(hi / lo);
+  return { ticks, toY: (value: number) => valueToY(Math.log(Math.max(value, lo) / lo), span) };
+}
+
 const formatRate = (value: number) => `${value >= 100 ? Math.round(value) : value.toFixed(1)}`;
 
 function SpeedChart({
@@ -82,8 +105,10 @@ function SpeedChart({
   series,
   xLabels,
   formatX,
+  log,
 }: {
   readonly title: string;
+  readonly log: boolean;
   readonly series: readonly SpeedSeries[];
   readonly xLabels: readonly string[];
   readonly formatX: (index: number) => string;
@@ -94,9 +119,15 @@ function SpeedChart({
     (max, entry) => entry.values.reduce<number>((inner, value) => Math.max(inner, value ?? 0), max),
     0,
   );
-  const scale = niceScale(peak, 4);
+  const plotted = series.flatMap((entry) =>
+    entry.values.filter((value): value is number => value !== null && value > 0),
+  );
+  const linear = niceScale(peak, 4);
+  const { ticks, toY } =
+    log && plotted.length > 0
+      ? logScale(plotted)
+      : { ticks: linear.ticks, toY: (value: number) => valueToY(value, linear.max) };
   const stepX = count < 2 ? 0 : VIEW_WIDTH / (count - 1);
-  const toY = (value: number) => valueToY(value, scale.max);
   const hovered =
     hoverIndex === null
       ? []
@@ -111,7 +142,7 @@ function SpeedChart({
       <h3 className="text-xs font-medium text-muted-foreground">{title}</h3>
       <div className="flex gap-2">
         <div className="relative h-56 w-14 shrink-0">
-          {scale.ticks.map((tick) => (
+          {ticks.map((tick) => (
             <span
               key={tick}
               className="absolute right-0 -translate-y-1/2 text-3xs text-muted-foreground tabular-nums"
@@ -138,7 +169,7 @@ function SpeedChart({
             role="img"
             aria-label={`${title}, output tokens per second by model`}
           >
-            {scale.ticks.map((tick) => (
+            {ticks.map((tick) => (
               <line
                 key={tick}
                 x1={0}
@@ -245,6 +276,7 @@ export function UsageSpeedSection({
 }) {
   // Empty shows every model; otherwise only the picked ones, keeping their colors.
   const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  const [log, setLog] = useState(false);
   if (speed.length === 0) {
     return (
       <p className="py-12 text-center text-sm text-muted-foreground">
@@ -276,48 +308,56 @@ export function UsageSpeedSection({
 
   return (
     <div className="flex flex-col gap-6">
-      <ul className="flex flex-wrap items-center gap-x-1 gap-y-1 text-xs" aria-label="Models">
-        {byHourOfDay.map((entry, index) => {
-          const active = picked.size === 0 || picked.has(entry.key);
-          return (
-            <li key={entry.key}>
-              <button
-                type="button"
-                aria-pressed={picked.has(entry.key)}
-                onClick={() => toggle(entry.key)}
-                className={cn(
-                  "flex items-center gap-1.5 rounded-md px-2 py-1 transition-opacity hover:bg-accent",
-                  picked.has(entry.key) && "bg-accent",
-                  !active && "opacity-45",
-                )}
-              >
-                <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
-                <span className="text-foreground">{entry.label}</span>
-                <span className="text-muted-foreground tabular-nums">
-                  {entry.overall === null ? "n/a" : `${formatRate(entry.overall)} tok/s`} ·{" "}
-                  {formatTokens(speed[index]?.outputTokens ?? 0)} out
-                </span>
-              </button>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <ul className="flex flex-wrap items-center gap-x-1 gap-y-1 text-xs" aria-label="Models">
+          {byHourOfDay.map((entry, index) => {
+            const active = picked.size === 0 || picked.has(entry.key);
+            return (
+              <li key={entry.key}>
+                <button
+                  type="button"
+                  aria-pressed={picked.has(entry.key)}
+                  onClick={() => toggle(entry.key)}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2 py-1 transition-opacity hover:bg-accent",
+                    picked.has(entry.key) && "bg-accent",
+                    !active && "opacity-45",
+                  )}
+                >
+                  <span className="size-2 rounded-full" style={{ backgroundColor: entry.color }} />
+                  <span className="text-foreground">{entry.label}</span>
+                  <span className="text-muted-foreground tabular-nums">
+                    {entry.overall === null ? "n/a" : `${formatRate(entry.overall)} tok/s`} ·{" "}
+                    {formatTokens(speed[index]?.outputTokens ?? 0)} out
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+          {picked.size === 0 ? null : (
+            <li className="px-2">
+              <InlineButton tone="muted" onClick={() => setPicked(new Set())}>
+                Show all
+              </InlineButton>
             </li>
-          );
-        })}
-        {picked.size === 0 ? null : (
-          <li className="px-2">
-            <InlineButton tone="muted" onClick={() => setPicked(new Set())}>
-              Show all
-            </InlineButton>
-          </li>
-        )}
-      </ul>
+          )}
+        </ul>
+        <label className="flex shrink-0 cursor-pointer items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground">
+          <Checkbox checked={log} onCheckedChange={(checked) => setLog(checked === true)} />
+          Log scale
+        </label>
+      </div>
       <SpeedChart
         title="Output speed by time of day"
         series={shown(byHourOfDay)}
+        log={log}
         xLabels={hourLabels}
         formatX={(index) => hourLabels[index] ?? ""}
       />
       <SpeedChart
         title={resolution === "hour" ? "Output speed by hour" : "Output speed by day"}
         series={shown(byPeriod)}
+        log={log}
         xLabels={periodLabels}
         formatX={(index) => periodLabels[index] ?? ""}
       />

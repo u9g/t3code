@@ -7,6 +7,7 @@ import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import * as TestClock from "effect/testing/TestClock";
 import * as FileSystem from "effect/FileSystem";
+import * as Config from "effect/Config";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -15,6 +16,7 @@ import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
+import * as NetService from "@t3tools/shared/Net";
 
 import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
@@ -29,6 +31,7 @@ import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslEnvironment from "../wsl/DesktopWslEnvironment.ts";
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
+import * as DesktopServerExposure from "./DesktopServerExposure.ts";
 import type { DesktopBackendStartConfig } from "./DesktopBackendManager.ts";
 
 // Models the spawner's release for a backend that ignores SIGTERM, without OS signals.
@@ -98,6 +101,7 @@ const runningConfig = {
     t3Home: "/tmp/t3",
     host: "127.0.0.1",
     desktopBootstrapToken: "token",
+    desktopLaunchId: "launch-1",
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
   },
@@ -118,7 +122,7 @@ function layerPool(
     readonly onReady?: Effect.Effect<void>;
     readonly backend?: Effect.Success<ReturnType<typeof makeFakeBackendProcess>>;
   } = {},
-): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
+): Layer.Layer<DesktopBackendPool.DesktopBackendPool, Config.ConfigError> {
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
@@ -153,7 +157,10 @@ function layerPool(
               options.backend === undefined
                 ? Effect.die("unexpected HTTP request")
                 : Effect.succeed(
-                    HttpClientResponse.fromWeb(request, new Response(null, { status: 200 })),
+                    HttpClientResponse.fromWeb(
+                      request,
+                      Response.json({ desktopLaunchId: runningConfig.bootstrap.desktopLaunchId }),
+                    ),
                   ),
             ),
         ),
@@ -190,6 +197,15 @@ function layerPool(
         DesktopAppSettings.layerTest(),
         DesktopState.layer,
         DesktopWslEnvironment.layerTest(),
+        NetService.layer,
+        Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
+          getState: Effect.die("unexpected getState"),
+          backendConfig: Effect.die("unexpected backendConfig"),
+          configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
+          setMode: () => Effect.die("unexpected setMode"),
+          setTailscaleServeEnabled: () => Effect.die("unexpected setTailscaleServeEnabled"),
+          getAdvertisedEndpoints: Effect.die("unexpected getAdvertisedEndpoints"),
+        } satisfies DesktopServerExposure.DesktopServerExposure["Service"]),
         ElectronDialog.layer,
         ElectronApp.layer,
         Layer.succeed(DesktopWindow.DesktopWindow, {
@@ -241,6 +257,7 @@ const makeUpdateMarkerFixture = () =>
         desktopBootstrapToken: "token",
         tailscaleServeEnabled: false,
         tailscaleServePort: 443,
+        desktopLaunchId: "update-marker-launch",
       },
       bootstrapDelivery: "fd3",
       extendEnv: true,
@@ -292,7 +309,12 @@ const makeUpdateMarkerFixture = () =>
       ),
       httpClient: HttpClient.make((request) =>
         Deferred.await(allowReady).pipe(
-          Effect.as(HttpClientResponse.fromWeb(request, new Response(null, { status: 200 }))),
+          Effect.as(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({ desktopLaunchId: config.bootstrap.desktopLaunchId }),
+            ),
+          ),
         ),
       ),
       onReady: Queue.offer(readyRuns, undefined).pipe(Effect.asVoid),

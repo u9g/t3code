@@ -19,6 +19,8 @@ export const DesktopBackendBootstrap = Schema.Struct({
   desktopBootstrapSecret: Schema.optionalKey(Schema.String),
   // Fresh per launch. A backend without a control channel proves it holds this before it counts as ready; see @t3tools/shared/desktopReadinessProof.
   desktopReadinessSecret: Schema.optionalKey(Schema.String),
+  // Public correlation id echoed by the descriptor; fresh for each backend launch.
+  desktopLaunchId: Schema.optionalKey(TrimmedNonEmptyString),
   // Absent means the backend must hydrate PATH, as WSL and older desktops require.
   shellEnvironmentPrepared: Schema.optionalKey(Schema.Boolean),
   tailscaleServeEnabled: Schema.Boolean,

@@ -200,7 +200,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
         runningDistro,
         httpBaseUrl: httpBaseUrl.href,
         wsBaseUrl: toWebSocketBaseUrl(httpBaseUrl),
-        // The renderer uses this token with httpBaseUrl once the backend has reported ready.
+        desktopLaunchId: bootstrap.desktopLaunchId,
         // Use the current window's derived token; the launch config's token may be stale.
         ...(!snapshot.ready
           ? {}

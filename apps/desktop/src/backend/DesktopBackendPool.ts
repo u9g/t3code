@@ -20,11 +20,14 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as FileSystem from "effect/FileSystem";
 import { HttpClient } from "effect/http";
 import { ChildProcessSpawner } from "effect/process";
+import * as NetService from "@t3tools/shared/Net";
 
 import * as DesktopBackendConfiguration from "./DesktopBackendConfiguration.ts";
 import * as DesktopBackendManager from "./DesktopBackendManager.ts";
 import * as DesktopHomeOwner from "./DesktopHomeOwner.ts";
 import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
+import * as DesktopServerExposure from "./DesktopServerExposure.ts";
+import * as DesktopConfig from "../app/DesktopConfig.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
@@ -125,6 +128,9 @@ export const layer = Layer.effect(
     const electronApp = yield* ElectronApp.ElectronApp;
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
     const { primaryBackendStartup } = yield* DesktopState.DesktopState;
+    const { configuredBackendPort } = yield* DesktopConfig.DesktopConfig;
+    const serverExposure = yield* DesktopServerExposure.DesktopServerExposure;
+    const net = yield* NetService.NetService;
     // Parent instance scopes to the pool so shutdown runs stop finalizers before the OS kills backends.
     const layerScope = yield* Scope.Scope;
     const factoryContext = yield* Effect.context<BackendInstanceFactoryRequirements>();
@@ -207,6 +213,32 @@ export const layer = Layer.effect(
       },
     );
 
+    // WSL localhost relays can appear after the startup scan. Only move unpinned ports.
+    const handlePrimaryPortTaken = Effect.fn("desktop.backendPool.primaryPortTaken")(function* (
+      port: number,
+    ) {
+      const nextPort = Option.isSome(configuredBackendPort)
+        ? Option.none<number>()
+        : yield* DesktopServerExposure.findAvailableBackendPort(port + 1).pipe(
+            Effect.provideService(NetService.NetService, net),
+            Effect.option,
+          );
+      if (Option.isNone(nextPort)) {
+        yield* electronDialog.showErrorBox(
+          `Port ${port} is in use`,
+          `Another server is answering on port ${port}, so T3 Code stopped its own backend there. Stop that server, or set T3CODE_PORT to a free port, and reopen T3 Code.`,
+        );
+        yield* electronApp.quit;
+        return false;
+      }
+      yield* logBackendPoolWarning("another server is answering on the backend port; moving", {
+        port,
+        nextPort: nextPort.value,
+      });
+      yield* serverExposure.configureFromSettings({ port: nextPort.value });
+      return true;
+    });
+
     const primary = yield* DesktopBackendManager.makeBackendInstance({
       id: DesktopBackendManager.PRIMARY_INSTANCE_ID,
       // Resolve lazily: startup loads persisted settings after pool initialization.
@@ -231,6 +263,7 @@ export const layer = Layer.effect(
           Effect.andThen(desktopWindow.handleBackendNotReady),
         ),
       onPreflightFailed: handlePrimaryPreflightFailure,
+      onPortTaken: handlePrimaryPortTaken,
       onStateDirOwned: () =>
         DesktopHomeOwner.readLiveHomeOwner().pipe(
           Effect.flatMap((owner) =>

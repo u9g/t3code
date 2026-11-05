@@ -1,4 +1,6 @@
 import { attachSidebarTree } from "../lib/sidebarTree";
+import { environmentIdsKey } from "../state/environmentAtomList";
+import { scheduledTaskThreadKeys, scheduledTasksListAtom } from "../state/scheduledTasks";
 import { type EnvironmentId, type ScopedProjectRef } from "@t3tools/contracts";
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import {
@@ -359,6 +361,8 @@ interface SidebarThreadPartitionInput {
   readonly workingShelfEnabled: boolean;
   /** Boring mode: folders list active threads by the user's latest message. */
   readonly sortActiveBySend: boolean;
+  /** Threads an enabled scheduled task runs in; they wait on the Automations shelf. */
+  readonly scheduledThreadKeys: ReadonlySet<string>;
   // Snooze wakes, the queued-turn grace and the Working shelf's exit grace depend
   // on the clock, so the minute tick, the precise snooze-wake tick and the inbox
   // tracker's expiry version are inputs: a new key repartitions.
@@ -444,6 +448,10 @@ function useSidebarThreads(input: {
   // Folders already separate the work, so boring mode has no Working shelf.
   const workingShelfEnabled =
     useClientSettings((s) => s.sidebarWorkingShelfEnabled) && folderGroups === null;
+  const scheduledThreadKeys = scheduledTaskThreadKeys(
+    connectedEnvironmentIds,
+    useAtomValue(scheduledTasksListAtom(environmentIdsKey(connectedEnvironmentIds))),
+  );
   const inboxReturnsVersion = useSyncExternalStore(
     inboxReturns.subscribe,
     inboxReturns.getSnapshot,
@@ -493,6 +501,7 @@ function useSidebarThreads(input: {
     optimisticDrop,
     workingShelfEnabled,
     sortActiveBySend: folderGroups !== null,
+    scheduledThreadKeys,
     clockKey: `${nowMinute}:${snoozeWakeClock}:${inboxReturnsVersion}`,
   });
 
@@ -643,6 +652,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     optimisticDrop,
     workingShelfEnabled,
     sortActiveBySend,
+    scheduledThreadKeys,
   } = input;
   const preciseNow = new Date().toISOString();
   const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
@@ -652,7 +662,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const working: EnvironmentThreadShell[] = [];
   const automations: EnvironmentThreadShell[] = [];
   const inbox = (thread: EnvironmentThreadShell, manuallyMoved = false) =>
-    thread.source.latestRunAutomated === true
+    thread.source.latestRunAutomated === true || scheduledThreadKeys.has(threadShellKey(thread))
       ? automations
       : workingShelfEnabled &&
           (manuallyMoved ? isThreadWorking(thread) : inboxObservation.isWorking(thread))

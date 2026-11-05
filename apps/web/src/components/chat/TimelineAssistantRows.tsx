@@ -51,8 +51,25 @@ import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts"
 import { useAtomValue } from "@effect/atom-react";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { vcsEnvironment } from "../../state/vcs";
+import { create } from "zustand";
 
 const NO_VCS_STATUS = Atom.make(AsyncResult.initial());
+
+/** Replies opened with "Show full reply"; outlives the row so switching threads keeps them open. */
+const useFocusExpandedStore = create<{
+  readonly ids: ReadonlySet<string>;
+  readonly setExpanded: (id: string, expanded: boolean) => void;
+}>((set) => ({
+  ids: new Set(),
+  setExpanded: (id, expanded) =>
+    set(({ ids }) => {
+      if (ids.has(id) === expanded) return {};
+      const next = new Set(ids);
+      if (expanded) next.add(id);
+      else next.delete(id);
+      return { ids: next };
+    }),
+}));
 
 function FocusPreviewCard({
   trigger,
@@ -85,9 +102,10 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   );
   const text = liveText ?? row.message.text;
   const focusModeEnabled = useClientSettings((settings) => settings.focusModeEnabled);
-  const [focusExpanded, setFocusExpanded] = useState(false);
-  const focusLinks =
-    focusModeEnabled && !row.assistantCopyStreaming ? extractFocusLinks(text) : [];
+  const focusExpanded = useFocusExpandedStore((store) => store.ids.has(row.message.id));
+  const setFocusExpandedFor = useFocusExpandedStore((store) => store.setExpanded);
+  const setFocusExpanded = (expanded: boolean) => setFocusExpandedFor(row.message.id, expanded);
+  const focusLinks = focusModeEnabled && !row.assistantCopyStreaming ? extractFocusLinks(text) : [];
   const previousReply = focusModeEnabled && ctx.focusPreviousReplyIds.has(row.message.id);
   const focusIntro =
     focusModeEnabled && !row.assistantCopyStreaming && !previousReply
@@ -183,7 +201,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                     </div>
                   );
                   return (
-                    <div key={`${index}:${section.heading}`}>
+                    <div key={`${section.heading}\n${section.body}`}>
                       {open || !section.body ? (
                         heading
                       ) : (

@@ -988,6 +988,52 @@ it.effect("a caller cannot rewrite a scheduled task that runs above its own mode
   ),
 );
 
+it.effect("schedule_task passes freshSession through when updating a task", () => {
+  const upserts: Array<{ readonly threadMode?: string | undefined }> = [];
+  return Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const result = yield* server
+      .callTool({
+        name: "schedule_task",
+        arguments: { scheduledTaskId: "task-auto", freshSession: true },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope("auto")),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(result.isError).toBe(false);
+    expect(upserts.map((input) => input.threadMode)).toEqual(["fresh_session"]);
+  }).pipe(
+    Effect.provide(
+      layerOrchestratorToolkit.pipe(
+        Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(Layer.mock(ThreadManagement.ThreadManagementService)({})),
+        Layer.provide(ServerSettings.layerTest()),
+        Layer.provide(Layer.mock(ProviderRegistry.ProviderRegistry)({})),
+        Layer.provide(Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({})),
+        Layer.provide(
+          Layer.mock(ScheduledTaskService.ScheduledTaskService)({
+            list: () => Effect.succeed({ tasks: [scheduledTask("task-auto", "auto")] }),
+            upsert: (input) => {
+              upserts.push(input);
+              return Effect.succeed({
+                task: { ...(scheduledTask("task-auto", "auto") as object), ...input },
+              } as never);
+            },
+          }),
+        ),
+        Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+        Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+        Layer.provide(Layer.mock(PeerForwarding.PeerForwarding)({})),
+        Layer.provide(Layer.mock(PeerLinkRequests.PeerLinkRequests)({})),
+        Layer.provide(Layer.mock(PeerLinks.PeerLinks)({})),
+        Layer.provide(Layer.mock(RemoteDelegation.RemoteDelegation)({})),
+      ),
+    ),
+  );
+});
+
 it.effect.each([
   {
     scenario: "explains why a webhook task cannot run manually",

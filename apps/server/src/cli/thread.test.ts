@@ -1,11 +1,139 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { RunId, ThreadId } from "@t3tools/contracts";
+import { AuthSessionId, ProjectId, RunId, ThreadId } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NetService from "@t3tools/shared/Net";
+import * as ConfigProvider from "effect/ConfigProvider";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import * as TestConsole from "effect/testing/TestConsole";
+import { Command } from "effect/cli";
+import { vi } from "vite-plus/test";
 
-import { readLatestMessages, type ThreadTools, waitForRun } from "./thread.ts";
+import * as McpBridge from "../mcp/AcpMcpStdioBridge.ts";
+import {
+  makePersistedServerRuntimeState,
+  persistServerRuntimeState,
+} from "../serverRuntimeState.ts";
+import {
+  readLatestMessages,
+  threadCommand,
+  type ThreadTools,
+  threadMcpServersFromConfig,
+  titleFromMessage,
+  waitForRun,
+} from "./thread.ts";
+
+vi.mock("../auth/EnvironmentAuth.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../auth/EnvironmentAuth.ts")>();
+  return {
+    ...actual,
+    layerRuntime: Layer.mock(actual.EnvironmentAuth)({
+      issueMcpClientSession: () =>
+        Effect.map(DateTime.now, (expiresAt) => ({
+          sessionId: AuthSessionId.make("test-session"),
+          token: "synthetic-token",
+          expiresAt,
+        })),
+      revokeSession: () => Effect.succeed(true),
+    }),
+  };
+});
 
 const threadId = ThreadId.make("thread-1");
 const runId = RunId.make("run-1");
+
+it.effect(
+  "start resolves home-relative project paths while preserving ids and relative paths",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs
+        .makeTempDirectoryScoped({ prefix: "t3-thread-project-path-" })
+        .pipe(Effect.flatMap((directory) => fs.realPath(directory)));
+      const home = path.join(root, "home");
+      const cwd = path.join(root, "current");
+      const workspaceRoot = path.join(home, "My Project");
+      const nestedRoot = path.join(workspaceRoot, "nested");
+      const baseDir = path.join(root, "state");
+      yield* fs.makeDirectory(nestedRoot, { recursive: true });
+      yield* fs.makeDirectory(cwd);
+      const projects = [
+        { id: ProjectId.make("current-project"), title: "Current", workspaceRoot: cwd },
+        { id: ProjectId.make("home-project"), title: "Home", workspaceRoot: home },
+        { id: ProjectId.make("intended-project"), title: "Intended", workspaceRoot },
+        { id: ProjectId.make("nested-project"), title: "Nested", workspaceRoot: nestedRoot },
+        { id: ProjectId.make("~/literal-id"), title: "Exact id", workspaceRoot: cwd },
+      ];
+      yield* persistServerRuntimeState({
+        path: path.join(baseDir, "userdata", "server-runtime.json"),
+        state: yield* makePersistedServerRuntimeState({
+          config: { host: "127.0.0.1", devUrl: undefined },
+          port: 3_773,
+        }),
+      });
+      using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
+        Effect.succeed({
+          call: (tool, args) => {
+            switch (tool) {
+              case "t3_project_list":
+                return Effect.succeed({ structuredContent: { projects, nextCursor: null } });
+              case "t3_thread_launch":
+                return Effect.succeed({
+                  structuredContent: { threadId, projectId: args.projectId, runId: null },
+                });
+              default:
+                return Effect.die(`unexpected ${tool} call`);
+            }
+          },
+        }),
+      );
+
+      for (const [identifier, expectedProjectId] of [
+        ["intended-project", "intended-project"],
+        ["~/literal-id", "~/literal-id"],
+        [workspaceRoot, "intended-project"],
+        [path.relative(cwd, workspaceRoot), "intended-project"],
+        [".", "current-project"],
+        ["~/My Project", "intended-project"],
+        ["~", "home-project"],
+        ["~/My Project/nested", "nested-project"],
+        ["~/My Project/missing", "intended-project"],
+      ] as const) {
+        yield* Command.runWith(threadCommand, { version: "0.0.0" })([
+          "start",
+          identifier,
+          "Inspect this project",
+          "--json",
+          "--base-dir",
+          baseDir,
+        ]).pipe(
+          Effect.provideService(HostProcess.HomeDirectory, home),
+          Effect.provideService(HostProcess.WorkingDirectory, cwd),
+        );
+        assert.strictEqual(
+          (yield* TestConsole.logLines).at(-1),
+          JSON.stringify({ threadId, projectId: expectedProjectId, runId: null }),
+          identifier,
+        );
+      }
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          NodeServices.layer,
+          NodeCrypto.layer,
+          NetService.layer,
+          ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_PORT: "3773" } })),
+        ),
+      ),
+    ),
+);
 
 /** Answers each tool call with the next scripted response for that tool. */
 const scriptedTools = (script: Record<string, Array<unknown>>) => {
@@ -15,7 +143,8 @@ const scriptedTools = (script: Record<string, Array<unknown>>) => {
     const next = script[tool]?.shift();
     return next === undefined ? Effect.die(`unscripted ${tool} call`) : Effect.succeed(next);
   }) as ThreadTools["call"];
-  return { tools: { call } satisfies ThreadTools, calls };
+  const toolTakesParameter = () => Effect.die("unscripted tools/list call");
+  return { tools: { call, toolTakesParameter } satisfies ThreadTools, calls };
 };
 
 it.effect("--wait follows the sent run to its continuation's terminal status", () =>
@@ -158,5 +287,78 @@ it.effect("show returns a --messages count larger than one call can spread", () 
       messages.map((item) => item.itemId),
       latest(200_000),
     );
+  }),
+);
+
+it("titles from a long first line without splitting an emoji", () => {
+  const title = titleFromMessage(`${"a".repeat(78)}😀 and the rest of a long first line`);
+  assert.strictEqual(title, `${"a".repeat(78)}…`);
+});
+
+const mcpConfigError = (config: unknown) =>
+  threadMcpServersFromConfig(typeof config === "string" ? config : JSON.stringify(config)).pipe(
+    Effect.flip,
+    Effect.map((error) => error.message),
+  );
+
+it.effect("--mcp-config takes Claude Code's mcpServers shape for HTTP servers", () =>
+  Effect.gen(function* () {
+    const servers = yield* threadMcpServersFromConfig(
+      JSON.stringify({
+        mcpServers: {
+          gem: {
+            type: "http",
+            url: "http://127.0.0.1:7341/mcp/thread/1",
+            headers: { Authorization: "Bearer gem-token" },
+            // Fields Claude Code knows and a thread does not, such as a timeout, are left out.
+            timeout: 5_000,
+          },
+          docs: { type: "http", url: "https://docs.example/mcp" },
+        },
+      }),
+    );
+
+    assert.deepStrictEqual(servers, {
+      gem: {
+        type: "http",
+        url: "http://127.0.0.1:7341/mcp/thread/1",
+        headers: { Authorization: "Bearer gem-token" },
+      },
+      docs: { type: "http", url: "https://docs.example/mcp" },
+    });
+  }),
+);
+
+it.effect("--mcp-config rejects what a thread cannot use, without quoting headers", () =>
+  Effect.gen(function* () {
+    const headers = { Authorization: "Bearer must-not-leak" };
+    const messages = [
+      yield* mcpConfigError("{not json"),
+      yield* mcpConfigError({ servers: {} }),
+      yield* mcpConfigError({ mcpServers: {} }),
+      yield* mcpConfigError({
+        mcpServers: { "t3-code": { type: "http", url: "http://x/mcp", headers } },
+      }),
+      yield* mcpConfigError({ mcpServers: { "gem server": { type: "http", url: "http://x" } } }),
+      yield* mcpConfigError({ mcpServers: { gem: { command: "gem", args: ["mcp"] } } }),
+      yield* mcpConfigError({ mcpServers: { gem: { type: "sse", url: "http://x", headers } } }),
+      yield* mcpConfigError({ mcpServers: { gem: { type: "http", url: "file:///mcp", headers } } }),
+      yield* mcpConfigError({
+        mcpServers: { gem: { type: "http", url: "http://x", headers: { Authorization: 1 } } },
+      }),
+    ];
+
+    assert.deepStrictEqual(messages, [
+      "--mcp-config: not valid JSON, or a file that holds it.",
+      '--mcp-config: needs an "mcpServers" object.',
+      '--mcp-config: "mcpServers" is empty.',
+      "--mcp-config: t3-code is T3 Code's own MCP server; give yours another name.",
+      "--mcp-config: server name 'gem server' must be 1 to 64 letters, digits, '_' or '-', since Claude puts it in tool names.",
+      '--mcp-config: server \'gem\' has type "stdio"; only "http" servers are supported, since the agent may run on another machine.',
+      '--mcp-config: server \'gem\' has type "sse"; only "http" servers are supported, since the agent may run on another machine.',
+      "--mcp-config: server 'gem' needs a \"url\" starting with http:// or https://.",
+      "--mcp-config: server 'gem' has \"headers\" that are not all strings.",
+    ]);
+    assert.notInclude(messages.join("\n"), "must-not-leak");
   }),
 );

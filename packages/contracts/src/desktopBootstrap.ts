@@ -4,6 +4,8 @@ import { PortSchema, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts
 
 // A supervisor must not restart a server refused by the state-directory owner.
 export const SERVER_EXIT_CODE_STATE_DIR_OWNED = 78;
+// A server the managed policy refused, so the desktop app blames the policy rather than the release.
+export const SERVER_EXIT_CODE_MANAGED_POLICY = 77;
 
 export const DesktopBackendBootstrap = Schema.Struct({
   mode: Schema.Literal("desktop"),
@@ -15,6 +17,8 @@ export const DesktopBackendBootstrap = Schema.Struct({
   desktopBootstrapToken: Schema.String,
   // Derives rotating tokens instead of trusting desktopBootstrapToken indefinitely; see @t3tools/shared/desktopBootstrapToken.
   desktopBootstrapSecret: Schema.optionalKey(Schema.String),
+  // Public correlation id echoed by the descriptor; fresh for each backend launch.
+  desktopLaunchId: Schema.optionalKey(TrimmedNonEmptyString),
   // Absent means the backend must hydrate PATH, as WSL and older desktops require.
   shellEnvironmentPrepared: Schema.optionalKey(Schema.Boolean),
   tailscaleServeEnabled: Schema.Boolean,

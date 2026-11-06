@@ -6,7 +6,11 @@ import {
   OrchestratorMcpThreadWaitResult,
   ProjectId,
   RunId,
+  T3_CODE_MCP_SERVER_NAME,
   ThreadId,
+  ThreadMcpHttpServer,
+  ThreadMcpServerName,
+  ThreadMcpServers,
   TrimmedNonEmptyString,
   type OrchestratorMcpThreadListItem,
   type OrchestratorMcpThreadStatus,
@@ -29,6 +33,7 @@ import { Argument, Command, Flag, GlobalFlag } from "effect/cli";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
 import { mcpToolSession, type McpToolSession } from "../mcp/AcpMcpStdioBridge.ts";
+import { expandHomePath } from "../os-jank.ts";
 import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
@@ -163,6 +168,21 @@ const ThreadLaunchResult = Schema.Struct({
   runId: Schema.NullOr(RunId),
 });
 
+const ToolListPage = Schema.Struct({
+  tools: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      inputSchema: Schema.optional(
+        Schema.Struct({
+          properties: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+        }),
+      ),
+    }),
+  ),
+  nextCursor: Schema.optional(Schema.String),
+});
+const decodeToolListPage = Schema.decodeUnknownEffect(ToolListPage);
+
 const toolFailureDetail = (result: typeof ToolResult.Type) => {
   const text = result.content?.find((part) => part.text !== undefined)?.text ?? "";
   return Option.match(decodeFailureText(text), {
@@ -193,6 +213,25 @@ const makeThreadTools = (session: McpToolSession, origin: string) => {
       return yield* Schema.decodeUnknownEffect(schema)(result.structuredContent).pipe(
         Effect.mapError(() => unexpected(tool)),
       );
+    }),
+    /** An older server ignores parameters it does not know, so ask before relying on one. */
+    toolTakesParameter: Effect.fn("cli.thread.toolTakesParameter")(function* (
+      tool: string,
+      parameter: string,
+    ): Effect.fn.Return<boolean, ThreadServerUnreachableError | ThreadToolFailedError> {
+      let cursor: string | undefined;
+      do {
+        const raw = yield* session
+          .listTools(cursor)
+          .pipe(Effect.mapError((cause) => new ThreadServerUnreachableError({ origin, cause })));
+        const page = yield* decodeToolListPage(raw).pipe(
+          Effect.mapError(() => unexpected("tools/list")),
+        );
+        const found = page.tools.find((candidate) => candidate.name === tool);
+        if (found !== undefined) return found.inputSchema?.properties?.[parameter] !== undefined;
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+      return false;
     }),
   };
 };
@@ -287,7 +326,9 @@ const resolveProject = Effect.fn("cli.thread.resolveProject")(function* (
   // through a symlink (macOS /tmp), so both sides compare as real paths.
   const realPath = (value: string) =>
     fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => value));
-  const target = yield* realPath(path.resolve(yield* HostProcess.WorkingDirectory, identifier));
+  const target = yield* realPath(
+    path.resolve(yield* HostProcess.WorkingDirectory, yield* expandHomePath(identifier)),
+  );
   const roots = yield* Effect.forEach(projects, (project) =>
     Effect.map(realPath(project.workspaceRoot), (root) => ({ project, root })),
   );
@@ -508,11 +549,16 @@ const finishRun = Effect.fn("cli.thread.finishRun")(function* (
   }
 });
 
-const titleFromMessage = (message: string) => {
+export const titleFromMessage = (message: string) => {
   const firstLine = message.trim().split("\n")[0]?.trim() ?? "";
-  return firstLine.length > TITLE_MAX_CHARS
-    ? `${firstLine.slice(0, TITLE_MAX_CHARS - 1).trimEnd()}…`
-    : firstLine;
+  if (firstLine.length <= TITLE_MAX_CHARS) return firstLine;
+  let end = TITLE_MAX_CHARS - 1;
+  const previous = firstLine.charCodeAt(end - 1);
+  const next = firstLine.charCodeAt(end);
+  if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+    end -= 1;
+  }
+  return `${firstLine.slice(0, end).trimEnd()}…`;
 };
 
 const launchWorkspaceStrategy = (input: {
@@ -531,6 +577,81 @@ const launchWorkspaceStrategy = (input: {
         ...Option.match(input.branch, { onNone: () => ({}), onSome: (branch) => ({ branch }) }),
       }),
   });
+
+const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const isThreadMcpServerName = Schema.is(ThreadMcpServerName);
+const isThreadMcpServerUrl = Schema.is(ThreadMcpHttpServer.fields.url);
+const isHeaderRecord = Schema.is(Schema.Record(Schema.String, Schema.String));
+const decodeThreadMcpServers = Schema.decodeUnknownEffect(ThreadMcpServers);
+const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Reads Claude Code's `--mcp-config` shape, `{"mcpServers": {...}}`, keeping
+ * only what a thread can take. Errors never quote header values.
+ */
+export const threadMcpServersFromConfig = Effect.fn("cli.thread.mcpServersFromConfig")(function* (
+  text: string,
+) {
+  const usage = (detail: string) => new ThreadUsageError({ detail: `--mcp-config: ${detail}` });
+  const config = yield* decodeJsonText(text).pipe(
+    Effect.mapError(() => usage("not valid JSON, or a file that holds it.")),
+  );
+  if (!isObject(config) || !isObject(config.mcpServers)) {
+    return yield* usage('needs an "mcpServers" object.');
+  }
+  const entries = Object.entries(config.mcpServers);
+  if (entries.length === 0) return yield* usage('"mcpServers" is empty.');
+  const servers: Record<string, ThreadMcpHttpServer> = {};
+  for (const [name, server] of entries) {
+    if (name === T3_CODE_MCP_SERVER_NAME) {
+      return yield* usage(`${name} is T3 Code's own MCP server; give yours another name.`);
+    }
+    if (!isThreadMcpServerName(name)) {
+      return yield* usage(
+        `server name '${name}' must be 1 to 64 letters, digits, '_' or '-', since Claude puts it in tool names.`,
+      );
+    }
+    if (!isObject(server)) return yield* usage(`server '${name}' is not an object.`);
+    // Claude Code reads a server without a type as stdio.
+    const type = server.type ?? "stdio";
+    if (type !== "http") {
+      return yield* usage(
+        `server '${name}' has type "${String(type)}"; only "http" servers are supported, since the agent may run on another machine.`,
+      );
+    }
+    if (typeof server.url !== "string" || !isThreadMcpServerUrl(server.url)) {
+      return yield* usage(`server '${name}' needs a "url" starting with http:// or https://.`);
+    }
+    if (server.headers !== undefined && !isHeaderRecord(server.headers)) {
+      return yield* usage(`server '${name}' has "headers" that are not all strings.`);
+    }
+    servers[name] = {
+      type: "http",
+      url: server.url,
+      ...(server.headers === undefined ? {} : { headers: server.headers }),
+    };
+  }
+  return yield* decodeThreadMcpServers(servers).pipe(
+    Effect.mapError(() => usage("a thread takes at most 16 MCP servers.")),
+  );
+});
+
+/** The flag takes the JSON itself, as Claude Code's does, or a path to a file of it. */
+const readMcpConfigFlag = Effect.fn("cli.thread.readMcpConfigFlag")(function* (value: string) {
+  if (value.trimStart().startsWith("{")) return yield* threadMcpServersFromConfig(value);
+  const path = yield* Path.Path;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const file = path.resolve(yield* HostProcess.WorkingDirectory, value);
+  const text = yield* fileSystem
+    .readFileString(file)
+    .pipe(
+      Effect.mapError(
+        () => new ThreadUsageError({ detail: `--mcp-config: could not read ${file}.` }),
+      ),
+    );
+  return yield* threadMcpServersFromConfig(text);
+});
 
 const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Print JSON instead of text."),
@@ -601,11 +722,13 @@ const threadStartCommand = Command.make("start", {
     Flag.optional,
   ),
   provider: Flag.String("provider").pipe(
-    Flag.withDescription("Provider instance id. Pass with --model."),
+    Flag.withDescription(
+      "Provider instance id. Defaults to the project's default provider; without --model, runs the model the composer picks for it.",
+    ),
     Flag.optional,
   ),
   model: Flag.String("model").pipe(
-    Flag.withDescription("Model slug. Defaults to the project's default model."),
+    Flag.withDescription("Model slug. Defaults to the project's default model. Needs --provider."),
     Flag.optional,
   ),
   worktree: Flag.String("worktree").pipe(
@@ -618,6 +741,12 @@ const threadStartCommand = Command.make("start", {
     Flag.withDescription("Branch name for the new worktree."),
     Flag.optional,
   ),
+  mcpConfig: Flag.String("mcp-config").pipe(
+    Flag.withDescription(
+      'MCP servers for the thread\'s agent, as JSON or a path to a JSON file, in Claude Code\'s --mcp-config shape: {"mcpServers":{"<name>":{"type":"http","url":"...","headers":{...}}}}. Every session of the thread gets them, and their tools need no approval. HTTP servers on Claude providers only.',
+    ),
+    Flag.optional,
+  ),
   wait: waitFlag,
   json: jsonFlag,
 }).pipe(
@@ -626,15 +755,27 @@ const threadStartCommand = Command.make("start", {
     Effect.gen(function* () {
       const message = yield* readMessageArgument(flags.message);
       const workspaceStrategy = yield* launchWorkspaceStrategy(flags);
-      if (Option.isSome(flags.provider) !== Option.isSome(flags.model)) {
-        return yield* new ThreadUsageError({ detail: "--provider and --model go together." });
+      if (Option.isSome(flags.model) && Option.isNone(flags.provider)) {
+        return yield* new ThreadUsageError({ detail: "--model needs --provider." });
       }
       const title = yield* decodeTitle(
         Option.getOrElse(flags.title, () => titleFromMessage(message)),
       ).pipe(Effect.mapError(() => new ThreadUsageError({ detail: "The title is empty." })));
+      const mcpServers = Option.isNone(flags.mcpConfig)
+        ? undefined
+        : yield* readMcpConfigFlag(flags.mcpConfig.value);
       yield* withThreadTools(
         flags,
         Effect.fn("cli.thread.start")(function* (tools) {
+          if (
+            mcpServers !== undefined &&
+            !(yield* tools.toolTakesParameter("t3_thread_launch", "mcpServers"))
+          ) {
+            return yield* new ThreadUsageError({
+              detail:
+                "The running T3 Code server cannot give a thread MCP servers. Update T3 Code, then retry.",
+            });
+          }
           const project = yield* resolveProject(tools, flags.project);
           const launched = yield* tools.call(
             "t3_thread_launch",
@@ -643,14 +784,17 @@ const threadStartCommand = Command.make("start", {
               title,
               message,
               ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-              ...(Option.isSome(flags.provider) && Option.isSome(flags.model)
-                ? {
-                    modelSelection: {
-                      instanceId: flags.provider.value,
-                      model: flags.model.value,
-                    },
-                  }
-                : {}),
+              ...(mcpServers === undefined ? {} : { mcpServers }),
+              ...(Option.isNone(flags.provider)
+                ? {}
+                : Option.isNone(flags.model)
+                  ? { providerInstanceId: flags.provider.value }
+                  : {
+                      modelSelection: {
+                        instanceId: flags.provider.value,
+                        model: flags.model.value,
+                      },
+                    }),
             },
             ThreadLaunchResult,
           );

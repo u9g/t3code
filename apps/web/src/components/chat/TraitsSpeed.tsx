@@ -1,4 +1,8 @@
-import type { ProviderDriverKind, ProviderOptionDescriptor } from "@t3tools/contracts";
+import {
+  isClaudeCodeDriver,
+  type ProviderDriverKind,
+  type ProviderOptionDescriptor,
+} from "@t3tools/contracts";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 import { ZapIcon } from "lucide-react";
 import { UltrafastIcon } from "../Icons";
@@ -57,7 +61,7 @@ export function TraitsSpeedIcon({
           "fill-current opacity-80",
           size === "xs"
             ? "text-current"
-            : provider === "claudeAgent"
+            : isClaudeCodeDriver(provider)
               ? "text-[#d97757]"
               : "text-foreground",
         )}

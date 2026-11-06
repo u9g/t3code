@@ -1,7 +1,7 @@
 import {
+  SERVER_EXIT_CODE_MANAGED_POLICY,
   SERVER_EXIT_CODE_STATE_DIR_OWNED,
   DesktopBackendBootstrap,
-  type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
   DesktopTelemetryControlMessage,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
@@ -49,6 +49,7 @@ const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
     t3Home: "/tmp/t3",
     host: "127.0.0.1",
     desktopBootstrapToken: "token",
+    desktopLaunchId: "launch-1",
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
     desktopTelemetryFd: 4,
@@ -61,7 +62,7 @@ const baseConfig: DesktopBackendManager.DesktopBackendStartConfig = {
   preflightFailure: Option.none(),
 };
 
-const configWithObservability: DesktopBackendBootstrapValue = {
+const configWithObservability: DesktopBackendManager.DesktopBackendStartConfig["bootstrap"] = {
   ...baseConfig.bootstrap,
   tailscaleServeEnabled: true,
   desktopTelemetryFd: 4,
@@ -94,7 +95,10 @@ function responseForRequest(
   request: HttpClientRequest.HttpClientRequest,
   status: number,
 ): HttpClientResponse.HttpClientResponse {
-  return HttpClientResponse.fromWeb(request, new Response(null, { status }));
+  return HttpClientResponse.fromWeb(
+    request,
+    new Response(status < 300 ? '{"desktopLaunchId":"launch-1"}' : null, { status }),
+  );
 }
 
 function layerHttpClient(
@@ -129,6 +133,7 @@ interface MakeInstanceInput {
   readonly onPreflightFailed?: (
     failure: DesktopBackendManager.PreflightFailure,
   ) => Effect.Effect<boolean>;
+  readonly onPortTaken?: (port: number) => Effect.Effect<boolean>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
   readonly configResolve?: Effect.Effect<
     DesktopBackendManager.DesktopBackendStartConfig,
@@ -186,6 +191,7 @@ function makeTestInstance(input: MakeInstanceInput) {
     ...(input.onStateDirOwned ? { onStateDirOwned: () => input.onStateDirOwned! } : {}),
     ...(input.onPreflightFailed ? { onPreflightFailed: input.onPreflightFailed } : {}),
     ...(input.onStartupFailure ? { onStartupFailure: input.onStartupFailure } : {}),
+    ...(input.onPortTaken ? { onPortTaken: input.onPortTaken } : {}),
   });
 
   return instance.pipe(Effect.provide(layerServices));
@@ -219,7 +225,12 @@ describe("DesktopBackendManager", () => {
             HttpClient.make((request) =>
               Deferred.succeed(probe, undefined).pipe(
                 Effect.andThen(Deferred.await(ready)),
-                Effect.as(HttpClientResponse.fromWeb(request, new Response("{}"))),
+                Effect.as(
+                  HttpClientResponse.fromWeb(
+                    request,
+                    Response.json({ desktopLaunchId: "launch-1" }),
+                  ),
+                ),
               ),
             ),
           ),
@@ -338,7 +349,11 @@ describe("DesktopBackendManager", () => {
         desktopTelemetryStream: Stream.empty,
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(layerSpawner, layerHealthyHttpClient)));
 
-      assert.deepEqual(exit, { code: Option.none(), reason: "killed by SIGKILL" });
+      assert.deepEqual(exit, {
+        code: Option.none(),
+        reason: "killed by SIGKILL",
+        portTaken: false,
+      });
     }),
   );
 
@@ -417,6 +432,169 @@ describe("DesktopBackendManager", () => {
         yield* instance.start;
         assert.isTrue(yield* Deferred.await(handled));
       }),
+    ),
+  );
+
+  it.effect.each([401, 404])(
+    "stops its backend when a persistent HTTP %s responder occupies its port",
+    (status) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const killed = yield* Deferred.make<void>();
+          const firstRequest = yield* Deferred.make<void>();
+          let readyCount = 0;
+          const layerSpawner = Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.succeed(
+                makeProcess({
+                  exitCode: Deferred.await(killed).pipe(Effect.as(ChildProcessSpawner.ExitCode(1))),
+                  kill: () => Deferred.succeed(killed, void 0).pipe(Effect.asVoid),
+                }),
+              ),
+            ),
+          );
+          const layerHttp = layerHttpClient((request) =>
+            Deferred.succeed(firstRequest, void 0).pipe(
+              Effect.as(
+                HttpClientResponse.fromWeb(request, new Response("Not a T3 endpoint", { status })),
+              ),
+            ),
+          );
+          const run = yield* DesktopBackendManager.runBackendProcess({
+            ...baseConfig,
+            desktopTelemetryStream: Stream.empty,
+            readinessTimeout: Duration.seconds(1),
+            onReady: () =>
+              Effect.sync(() => {
+                readyCount += 1;
+              }),
+          }).pipe(Effect.provide(Layer.merge(layerSpawner, layerHttp)), Effect.forkChild);
+
+          yield* Deferred.await(firstRequest);
+          yield* TestClock.adjust(Duration.seconds(2));
+
+          assert.isTrue(yield* Deferred.isDone(killed));
+          assert.equal(readyCount, 0);
+          assert.isTrue((yield* Fiber.join(run)).portTaken);
+        }).pipe(Effect.provide(TestClock.layer())),
+      ),
+  );
+
+  it.effect("reports a port collision when the child exits before the descriptor responds", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const requestStarted = yield* Deferred.make<void>();
+        const exitObserved = yield* Deferred.make<void>();
+        const respond = yield* Deferred.make<void>();
+        const layerSpawner = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.succeed(
+              makeProcess({
+                exitCode: Deferred.await(requestStarted).pipe(
+                  Effect.as(ChildProcessSpawner.ExitCode(1)),
+                ),
+              }),
+            ),
+          ),
+        );
+        const layerHttp = layerHttpClient((request) =>
+          Deferred.succeed(requestStarted, void 0).pipe(
+            Effect.andThen(Deferred.await(respond)),
+            Effect.as(
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json({ desktopLaunchId: "another-launch" }),
+              ),
+            ),
+          ),
+        );
+        const run = yield* DesktopBackendManager.runBackendProcess({
+          ...baseConfig,
+          desktopTelemetryStream: Stream.empty,
+          onExitObserved: () => Deferred.succeed(exitObserved, void 0).pipe(Effect.asVoid),
+        }).pipe(
+          Effect.provide(Layer.merge(layerSpawner, layerHttp)),
+          Effect.scoped,
+          Effect.forkChild,
+        );
+
+        yield* Deferred.await(exitObserved);
+        // Let exit handling settle while the descriptor request is still pending.
+        yield* TestClock.adjust(Duration.zero);
+        yield* Deferred.succeed(respond, void 0);
+
+        assert.isTrue((yield* Fiber.join(run)).portTaken);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("restarts on the port the spec moves to after another server took its port", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const port = yield* Ref.make(3773);
+        const spawnedPorts: Array<number> = [];
+        const takenPorts: Array<number> = [];
+        const ready = yield* Deferred.make<void>();
+        const layerSpawner = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.gen(function* () {
+              spawnedPorts.push(yield* Ref.get(port));
+              const killed = yield* Deferred.make<void>();
+              return makeProcess({
+                exitCode: Deferred.await(killed).pipe(Effect.as(ChildProcessSpawner.ExitCode(1))),
+                kill: () => Deferred.succeed(killed, void 0).pipe(Effect.asVoid),
+              });
+            }),
+          ),
+        );
+        const layerHttp = layerHttpClient((request) =>
+          Effect.succeed(
+            HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                desktopLaunchId:
+                  new URL(request.url).port === "3773" ? "wsl-service" : "launch-3774",
+              }),
+            ),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer: layerSpawner,
+          httpClientLayer: layerHttp,
+          configResolve: Ref.get(port).pipe(
+            Effect.map((current) => ({
+              ...baseConfig,
+              bootstrap: {
+                ...baseConfig.bootstrap,
+                port: current,
+                desktopLaunchId: `launch-${current}`,
+              },
+              httpBaseUrl: new URL(`http://127.0.0.1:${current}`),
+            })),
+          ),
+          onPortTaken: (taken) =>
+            Effect.sync(() => takenPorts.push(taken)).pipe(
+              Effect.andThen(Ref.set(port, taken + 1)),
+              Effect.as(true),
+            ),
+          onReady: Deferred.succeed(ready, void 0).pipe(Effect.asVoid),
+        });
+
+        yield* instance.start;
+        yield* Effect.yieldNow;
+        yield* TestClock.adjust(Duration.seconds(1));
+        yield* Deferred.await(ready);
+
+        assert.deepEqual(takenPorts, [3773]);
+        assert.deepEqual(spawnedPorts, [3773, 3774]);
+        const current = yield* instance.currentConfig;
+        assert.equal(Option.getOrThrow(current).httpBaseUrl.href, "http://127.0.0.1:3774/");
+        assert.isTrue((yield* instance.snapshot).ready);
+      }).pipe(Effect.provide(TestClock.layer())),
     ),
   );
 
@@ -623,56 +801,66 @@ describe("DesktopBackendManager", () => {
     ),
   );
 
-  it.effect("reports a crash loop with the server output on the third restart", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const message = "Error: Cannot find module 'zod/v4' in /Users/René";
-        let exitCount = 0;
-        const firstExit = yield* Deferred.make<void>();
-        const reports = yield* Queue.unbounded<{
-          readonly exitCount: number;
-          readonly failure: DesktopBackendManager.BackendStartupFailure;
-        }>();
-        const instance = yield* makeTestInstance({
-          spawnerLayer: Layer.succeed(
-            ChildProcessSpawner.ChildProcessSpawner,
-            ChildProcessSpawner.make(() =>
-              Effect.succeed(
-                makeProcess({
-                  // "é" split across chunks must not decode as U+FFFD, and the 4,000-char cut
-                  // lands inside the emoji's surrogate pair.
-                  stderr: Stream.make(
-                    new TextEncoder().encode(
-                      `😀${"x".repeat(3_999 - message.length)}${message.slice(0, -1)}`,
+  // A policy refusal is reported on the first exit, since retrying cannot fix it.
+  it.effect.each([
+    { code: 1, exits: 3, managedPolicy: false },
+    { code: SERVER_EXIT_CODE_MANAGED_POLICY, exits: 1, managedPolicy: true },
+  ])(
+    "reports exit $code with the server output after $exits exits",
+    ({ code, exits, managedPolicy }) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const message = "Error: Cannot find module 'zod/v4' in /Users/René";
+          let exitCount = 0;
+          const firstExit = yield* Deferred.make<void>();
+          const reports = yield* Queue.unbounded<{
+            readonly exitCount: number;
+            readonly failure: DesktopBackendManager.BackendStartupFailure;
+          }>();
+          const instance = yield* makeTestInstance({
+            spawnerLayer: Layer.succeed(
+              ChildProcessSpawner.ChildProcessSpawner,
+              ChildProcessSpawner.make(() =>
+                Effect.succeed(
+                  makeProcess({
+                    // "é" split across chunks must not decode as U+FFFD, and the 4,000-char cut
+                    // lands inside the emoji's surrogate pair.
+                    stderr: Stream.make(
+                      new TextEncoder().encode(
+                        `😀${"x".repeat(3_999 - message.length)}${message.slice(0, -1)}`,
+                      ),
+                      new Uint8Array([0xc3]),
+                      new Uint8Array([0xa9]),
                     ),
-                    new Uint8Array([0xc3]),
-                    new Uint8Array([0xa9]),
-                  ),
-                  exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
-                }),
+                    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(code)),
+                  }),
+                ),
               ),
             ),
-          ),
-          httpClientLayer: layerHttpClient(() => Effect.never),
-          backendOutputLog: {
-            persistFailure: () => {
-              exitCount += 1;
-              return Deferred.succeed(firstExit, undefined).pipe(Effect.asVoid);
+            httpClientLayer: layerHttpClient(() => Effect.never),
+            backendOutputLog: {
+              persistFailure: () => {
+                exitCount += 1;
+                return Deferred.succeed(firstExit, undefined).pipe(Effect.asVoid);
+              },
             },
-          },
-          onStartupFailure: (failure) =>
-            Queue.offer(reports, { exitCount, failure }).pipe(Effect.asVoid),
-        });
-        yield* instance.start;
-        yield* Deferred.await(firstExit);
-        yield* TestClock.adjust(Duration.minutes(1));
-        const { exitCount: exitsWhenReported, failure } = yield* Queue.take(reports);
-        assert.equal(exitsWhenReported, 3);
-        assert.equal(failure.reason, "The server could not start (code=1).");
-        assert.isTrue(failure.output.endsWith(message));
-        assert.isTrue(failure.output.isWellFormed());
-      }).pipe(Effect.provide(TestClock.layer())),
-    ),
+            onStartupFailure: (failure) =>
+              Queue.offer(reports, { exitCount, failure }).pipe(Effect.asVoid),
+          });
+          yield* instance.start;
+          // An early exit waits up to 1 s for the readiness probe to identify the listener.
+          while (!(yield* Deferred.isDone(firstExit))) {
+            yield* TestClock.adjust(Duration.millis(100));
+          }
+          yield* TestClock.adjust(Duration.minutes(1));
+          const { exitCount: exitsWhenReported, failure } = yield* Queue.take(reports);
+          assert.equal(exitsWhenReported, exits);
+          assert.equal(failure.reason, `The server could not start (code=${code}).`);
+          assert.equal(failure.managedPolicy, managedPolicy);
+          assert.isTrue(failure.output.endsWith(message));
+          assert.isTrue(failure.output.isWellFormed());
+        }).pipe(Effect.provide(TestClock.layer())),
+      ),
   );
 
   it.effect("waits out a slow startup and reports one that never becomes ready", () =>
@@ -709,6 +897,60 @@ describe("DesktopBackendManager", () => {
         yield* TestClock.adjust(Duration.seconds(1));
         const failure = yield* Queue.take(reports);
         assert.equal(failure.reason, "The server started but did not become ready in time.");
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("the quit stop deadline waits for a backend that only exits at the force kill", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const spawned = yield* Deferred.make<void>();
+        const teardownStarted = yield* Deferred.make<void>();
+        const teardownFinished = yield* Deferred.make<void>();
+        // The real spawner sends SIGTERM, waits the grace, then SIGKILLs. A backend that
+        // ignores SIGTERM therefore finishes tearing down just after the grace.
+        const instance = yield* makeTestInstance({
+          spawnerLayer: Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.gen(function* () {
+                const scope = yield* Scope.Scope;
+                yield* Deferred.succeed(spawned, undefined);
+                yield* Scope.addFinalizer(
+                  scope,
+                  Deferred.succeed(teardownStarted, undefined).pipe(
+                    Effect.andThen(Effect.sleep(Duration.seconds(6))),
+                    Effect.andThen(Deferred.succeed(teardownFinished, undefined)),
+                    Effect.asVoid,
+                  ),
+                );
+                return makeProcess({
+                  exitCode: Deferred.await(teardownFinished).pipe(
+                    Effect.as(ChildProcessSpawner.ExitCode(0)),
+                  ),
+                });
+              }),
+            ),
+          ),
+          httpClientLayer: layerHttpClient(() => Effect.never),
+        });
+        yield* instance.start;
+        yield* Deferred.await(spawned);
+
+        // App quit and the updater stop every backend with this deadline.
+        const quitDone = yield* Deferred.make<void>();
+        const quitFiber = yield* instance
+          .stop({ timeout: DesktopBackendManager.BACKEND_QUIT_STOP_TIMEOUT })
+          .pipe(Effect.andThen(Deferred.succeed(quitDone, undefined)), Effect.forkChild);
+
+        yield* Deferred.await(teardownStarted);
+        // Past the SIGTERM grace but before the force kill lands: quit must still be waiting.
+        yield* TestClock.adjust(Duration.millis(5_500));
+        assert.isFalse(yield* Deferred.isDone(quitDone));
+
+        yield* TestClock.adjust(Duration.millis(500));
+        yield* Fiber.join(quitFiber);
+        assert.isTrue(yield* Deferred.isDone(teardownFinished));
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );

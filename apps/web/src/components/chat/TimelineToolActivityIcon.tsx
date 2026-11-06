@@ -11,6 +11,7 @@ import {
   CircleAlertIcon,
   EyeIcon,
   GlobeIcon,
+  InfoIcon,
   ListTodoIcon,
   MessageCircleIcon,
   SearchIcon,
@@ -46,6 +47,7 @@ export type WorkEntryIconName =
   | "eye"
   | "globe"
   | "hammer"
+  | "info"
   | "message-circle"
   | "search"
   | "square-pen"
@@ -258,6 +260,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
       return <GlobeIcon className={className} aria-hidden />;
     case "hammer":
       return <HammerIcon className={className} aria-hidden />;
+    case "info":
+      return <InfoIcon className={className} aria-hidden />;
     case "search":
       return <SearchIcon className={className} aria-hidden />;
     case "message-circle":

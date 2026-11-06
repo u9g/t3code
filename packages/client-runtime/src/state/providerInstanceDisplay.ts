@@ -77,7 +77,9 @@ export function shouldShowInstanceBadge(
   if (normalizeProviderAccentColor(entry.accentColor)) return true;
   let sharedProviderCount = 0;
   for (const candidate of entries) {
-    if (candidate.driverKind !== entry.driverKind) continue;
+    // Claude Cloud draws Claude's logo, so it needs marking apart from local Claude instances.
+    const sharesLogo = entry.driverKind === "claudeCloud" && candidate.driverKind === "claudeAgent";
+    if (candidate.driverKind !== entry.driverKind && !sharesLogo) continue;
     // Historical threads still need to distinguish accounts that are all disabled.
     if (entry.enabled && !candidate.enabled) continue;
     if (

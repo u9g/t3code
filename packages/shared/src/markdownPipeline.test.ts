@@ -3,6 +3,7 @@ import { unified } from "unified";
 import rehypeRaw from "rehype-raw";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
+import { markdownFilePathDestination } from "./markdownLinks.ts";
 import type { Root, RootContent } from "mdast";
 import {
   CHAT_MARKDOWN_REHYPE_PLUGINS,
@@ -289,4 +290,21 @@ it("moves a <picture>'s color-scheme sources onto its <img>, which the renderer 
     { src: "docs/dark.webp" },
     { dataLocalSrc: String.raw`C:\shots\light.png`, dataDarkSrc: "file:///C:/shots/dark.png" },
   ]);
+});
+
+it.each([
+  ["C:\\Users\\Jo Smith\\.t3\\userdata\\files\\clip (1) #2.mp4", "dataLocalSrc"],
+  ["/home/jo smith/.t3/userdata/files/clip (1) #2.mp4", "src"],
+])("hands an image destination built from %s back unchanged", (path, property) => {
+  const destination = markdownFilePathDestination(path);
+  const processor = unified()
+    .use(remarkParse)
+    .use(CHAT_MARKDOWN_REMARK_PLUGINS)
+    .use(remarkRehype, { allowDangerousHtml: true })
+    .use(CHAT_MARKDOWN_REHYPE_PLUGINS);
+  const tree = processor.runSync(processor.parse(`Sent:\n\n![clip](${destination})`));
+  expect(tree.children[2]).toMatchObject({
+    tagName: "p",
+    children: [{ tagName: "img", properties: { [property]: destination } }],
+  });
 });

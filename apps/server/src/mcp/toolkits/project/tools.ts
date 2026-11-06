@@ -16,9 +16,11 @@ import {
   ProjectId,
   OrchestratorMcpClientRequestId,
   OrchestratorMcpEnvironmentTarget,
+  ProviderInstanceId,
   OrchestratorMcpFailure,
   SourceControlCloneRepositoryInput,
   SourceControlCloneRepositoryResult,
+  ThreadMcpServers,
 } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
 import * as DocumentText from "../../../provider/DocumentText.ts";
@@ -26,7 +28,8 @@ import * as ServerConfig from "../../../config.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 import * as ProjectService from "../../../project/ProjectService.ts";
@@ -45,7 +48,7 @@ const shared = {
     McpInvocationContext.McpInvocationContext,
     ThreadManagementService.ThreadManagementService,
     ProjectService.ProjectService,
-    Crypto.Crypto,
+    SecureRandom.SecureRandom,
   ],
 };
 const ProjectListTool = Tool.make("t3_project_list", {
@@ -135,12 +138,18 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ),
     title: TrimmedNonEmptyString,
     modelSelection: Schema.optional(ModelSelection),
+    providerInstanceId: Schema.optional(
+      ProviderInstanceId.annotate({
+        description:
+          "Run on this provider instance with the model the composer would pick for it. Not with `modelSelection`.",
+      }),
+    ),
     runtimeMode: Schema.optional(RuntimeMode),
     interactionMode: Schema.optional(ProviderInteractionMode),
     workspaceStrategy: Schema.optional(
       OrchestrationV2ThreadLaunchWorkspaceStrategy.annotate({
         description:
-          "'worktree': new checkout from `baseRef`. 'existing_worktree': bind `worktreePath`, a project worktree. 'root': project checkout, the default, not your worktree. Stack: parent branch as `baseRef`, `startFromOrigin: false`. Uncommitted edits are not copied.",
+          "'worktree': new checkout from `baseRef`. Honor a requested base. Otherwise, independent work uses the default branch as `remote/branch` (e.g. `origin/main`) with `startFromOrigin: true`; with no remote, use the local default branch. Required unpublished commits and dependent or stacked work use their local base with `startFromOrigin: false`. 'existing_worktree': bind `worktreePath`, a project worktree. 'root': project checkout, the default, not your worktree. Uncommitted edits are not copied.",
       }),
     ),
     message: Schema.optional(
@@ -152,6 +161,12 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
     /** Set by a linked environment launching its agent's delegated task here; ignored otherwise. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    mcpServers: Schema.optional(
+      ThreadMcpServers.annotate({
+        description:
+          'HTTP MCP servers the new agent gets beside T3 Code\'s own, in Claude Code\'s mcpServers shape: {"<name>":{"type":"http","url":"...","headers":{...}}}. Every session of the thread gets them, and their tools need no approval, so this needs full access. Claude providers only. Header values stay on this server.',
+      }),
+    ),
   }),
   success: Schema.Struct({
     threadId: ThreadId,
@@ -171,6 +186,7 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     ServerSettings.ServerSettingsService,
     ProviderRegistry.ProviderRegistry,
     DocumentText.DocumentText,
+    Digest.Digest,
   ],
 })
   .annotate(Tool.Destructive, true)

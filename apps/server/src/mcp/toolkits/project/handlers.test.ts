@@ -1,4 +1,3 @@
-import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -22,6 +21,7 @@ import * as Path from "effect/Path";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import { Tool } from "effect/ai";
 
 import * as DocumentText from "../../../provider/DocumentText.ts";
 import { OrchestratorRuntimeModeAboveCeilingError } from "../../../orchestration-v2/Orchestrator.ts";
@@ -33,6 +33,7 @@ import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -50,7 +51,7 @@ const clientLaunchHarness = (input: {
   readonly launched: Array<ThreadLaunch.ThreadLaunchInput>;
   readonly workspaceRoot?: string;
   readonly checkWorktreeBase?: ThreadLaunch.ThreadLaunchService["Service"]["checkWorktreeBase"];
-  readonly webOrigin?: string;
+  readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
 }) => {
@@ -81,7 +82,6 @@ const clientLaunchHarness = (input: {
             },
           }),
     }),
-    NodeCrypto.layer,
     Layer.succeed(McpInvocationContext.McpInvocationContext, {
       environmentId: EnvironmentId.make("environment"),
       requestNamespace: "client:session-1",
@@ -90,7 +90,7 @@ const clientLaunchHarness = (input: {
         sessionId: "session-1",
         label: "Claude Code",
         access: input.runtimeModeCeiling,
-        webOrigin: input.webOrigin,
+        hostedAppUrl: input.hostedAppUrl,
       },
       issuedAt: 0,
       capabilities: new Set(["orchestration" as const]),
@@ -170,7 +170,7 @@ const clientLaunchHarness = (input: {
         Layer.provide(NodeServices.layer),
       ),
     ),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   return { projectId, modelSelection, projectDefaults, dependencies: layerDependencies };
 };
@@ -188,18 +188,18 @@ it.effect(
           readonly runtimeMode?: RuntimeMode;
           readonly targeted?: false;
           readonly overrideModel?: ModelSelection;
-          readonly webOrigin?: string;
+          readonly hostedAppUrl?: string;
           readonly refusedByCeiling?: true;
         },
       ) {
-        const { targeted, overrideModel, webOrigin, refusedByCeiling, ...input } = params;
+        const { targeted, overrideModel, hostedAppUrl, refusedByCeiling, ...input } = params;
         const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
         const { projectId, modelSelection, dependencies } = clientLaunchHarness({
           runtimeModeCeiling,
           defaultRuntimeMode,
           launched,
           ...(overrideModel === undefined ? {} : { overrideModel }),
-          ...(webOrigin === undefined ? {} : { webOrigin }),
+          ...(hostedAppUrl === undefined ? {} : { hostedAppUrl }),
           ...(refusedByCeiling === undefined ? {} : { refusedByCeiling }),
         });
         const toolkit = yield* ProjectToolkit.pipe(
@@ -229,11 +229,11 @@ it.effect(
 
       const aboveCeiling = yield* launchWith("auto-accept-edits", "full-access", {
         title: "Fix",
-        webOrigin: "https://box.example.ts.net",
+        hostedAppUrl: "https://t3.example.com",
       });
       expect(aboveCeiling.launched[0]?.runtimeMode).toBe("auto-accept-edits");
       expect(aboveCeiling.result).toMatchObject({
-        link: `https://box.example.ts.net/environment/${encodeURIComponent(aboveCeiling.launched[0]?.threadId ?? "")}`,
+        link: `https://t3.example.com/threads/environment/${encodeURIComponent(aboveCeiling.launched[0]?.threadId ?? "")}`,
       });
 
       const requested = yield* launchWith("full-access", "approval-required", {
@@ -424,6 +424,61 @@ it.effect("a retried launch replays after the project loses its default model", 
       launched[0]?.threadId,
       launched[0]?.threadId,
     ]);
+  }),
+);
+
+it.effect("a launch on a provider alone starts with the model the composer picks for it", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const { projectId, modelSelection, dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "full-access",
+      providers: [
+        {
+          instanceId: ProviderInstanceId.make("claudeCloud"),
+          driver: "claudeCloud",
+          models: [
+            { slug: "my-custom-model", isCustom: true },
+            { slug: "claude-opus-5-5", isCustom: false },
+            { slug: "claude-fable-5-1", isCustom: false },
+          ],
+        },
+        { instanceId: ProviderInstanceId.make("empty"), driver: "unknownDriver", models: [] },
+      ] as unknown as readonly ServerProvider[],
+      launched,
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    const launch = (input: {
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly modelSelection?: ModelSelection;
+    }) =>
+      toolkit.handle("t3_thread_launch", { title: "Fix", projectId, ...input }).pipe(
+        Stream.unwrap,
+        Stream.runCollect,
+        Effect.provide(dependencies),
+        Effect.map((results) => results.at(-1)?.result),
+      );
+
+    // The first built-in model, as no model is marked default.
+    yield* launch({ providerInstanceId: ProviderInstanceId.make("claudeCloud") });
+    // The project's default is on this instance, so it is kept as it is.
+    yield* launch({ providerInstanceId: modelSelection.instanceId });
+    expect(launched.map((entry) => entry.modelSelection)).toEqual([
+      { instanceId: "claudeCloud", model: "claude-opus-5-5" },
+      modelSelection,
+    ]);
+
+    for (const refused of [
+      { providerInstanceId: ProviderInstanceId.make("claudeCloud"), modelSelection },
+      { providerInstanceId: ProviderInstanceId.make("missing") },
+      { providerInstanceId: ProviderInstanceId.make("empty") },
+    ]) {
+      expect(yield* launch(refused)).toMatchObject({ code: "invalid_request" });
+    }
+    expect(launched).toHaveLength(2);
   }),
 );
 
@@ -665,3 +720,113 @@ it.effect("deleting a project through MCP also discards its clone record", () =>
     expect(discarded).toEqual([harness.projectId]);
   }),
 );
+
+it.effect("an update the project refuses tells the agent why", () =>
+  Effect.gen(function* () {
+    const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched: [] });
+    const detail = "Project monograms must contain at most two characters.";
+    const dependencies = Layer.merge(
+      harness.dependencies,
+      Layer.mock(Project.ProjectService)({
+        update: (input) =>
+          Effect.fail(new Project.ProjectInvalidError({ projectId: input.projectId, detail })),
+      }),
+    );
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+
+    const refused = yield* toolkit
+      .handle("t3_project_update", {
+        projectId: harness.projectId,
+        projectIcon: { kind: "monogram", text: "ABC", color: "blue" },
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+    expect(refused.at(-1)?.result).toMatchObject({ code: "invalid_request", message: detail });
+  }),
+);
+
+it.effect("a launch with MCP servers starts only on a provider that gives them to its agent", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const providers = [
+      { instanceId: ProviderInstanceId.make("claudeAgent"), driver: "claudeAgent", models: [] },
+      { instanceId: ProviderInstanceId.make("claudeCloud"), driver: "claudeCloud", models: [] },
+      { instanceId: ProviderInstanceId.make("empty"), driver: "unknownDriver", models: [] },
+    ] as unknown as ReadonlyArray<ServerProvider>;
+    const { projectId, dependencies } = clientLaunchHarness({
+      runtimeModeCeiling: "full-access",
+      launched,
+      providers,
+    });
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+    const mcpServers = {
+      gem: {
+        type: "http" as const,
+        url: "http://127.0.0.1:7341/mcp",
+        headers: { Authorization: "Bearer gem-token" },
+      },
+    };
+    const launch = (modelSelection: ModelSelection) =>
+      toolkit
+        .handle("t3_thread_launch", { title: "Fix", projectId, modelSelection, mcpServers })
+        .pipe(
+          Stream.unwrap,
+          Stream.runCollect,
+          Effect.provide(dependencies),
+          Effect.map((results) => results.at(-1)?.result),
+        );
+
+    yield* launch({ instanceId: ProviderInstanceId.make("claudeCloud"), model: "claude-opus-5-5" });
+    expect(launched.map((entry) => entry.mcpServers)).toEqual([mcpServers]);
+
+    expect(
+      yield* launch({ instanceId: ProviderInstanceId.make("empty"), model: "model" }),
+    ).toMatchObject({
+      code: "invalid_request",
+      message:
+        "This thread has MCP servers of its own, which unknownDriver cannot use. Run it on Claude or Claude Cloud.",
+    });
+    expect(
+      yield* launch({ instanceId: ProviderInstanceId.make("missing"), model: "model" }),
+    ).toMatchObject({ code: "invalid_request" });
+    expect(launched).toHaveLength(1);
+
+    const limited = clientLaunchHarness({
+      runtimeModeCeiling: "auto-accept-edits",
+      launched,
+      providers,
+    });
+    const limitedToolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+          Layer.provide(limited.dependencies),
+        ),
+      ),
+    );
+    const refused = yield* limitedToolkit
+      .handle("t3_thread_launch", {
+        title: "Fix",
+        projectId,
+        modelSelection: { instanceId: ProviderInstanceId.make("claudeCloud"), model: "m" },
+        mcpServers,
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(limited.dependencies));
+    expect(refused.at(-1)?.result).toMatchObject({ code: "capability_denied" });
+    expect(launched).toHaveLength(1);
+  }),
+);
+
+it("advertises mcpServers, which `t3 thread start --mcp-config` checks for before launching", () => {
+  const schema = Tool.getJsonSchema(ProjectToolkit.tools.t3_thread_launch) as {
+    readonly properties?: Readonly<Record<string, unknown>>;
+  };
+  expect(schema.properties?.mcpServers).toBeDefined();
+});

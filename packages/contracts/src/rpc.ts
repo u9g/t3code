@@ -122,6 +122,7 @@ import {
   AgentSessionScanResult,
   AgentSessionScanError,
 } from "./agentSessions.ts";
+import { SlackMessagePreview, SlackMessagePreviewInput } from "./slack.ts";
 import {
   AssetAccessError,
   AssetCreateUrlInput,
@@ -491,6 +492,7 @@ export const WS_METHODS = {
   filesystemGetMetadata: "filesystem.getMetadata",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  slackMessagePreview: "slack.messagePreview",
   assetsCreateUrl: "assets.createUrl",
   assetsPersistChatAttachments: "assets.persistChatAttachments",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
@@ -1713,6 +1715,11 @@ const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
   error: Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),
 });
 
+const WsSlackMessagePreviewRpc = Rpc.make(WS_METHODS.slackMessagePreview, {
+  payload: SlackMessagePreviewInput,
+  success: Schema.NullOr(SlackMessagePreview),
+});
+
 const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
   payload: AgentSessionImportInput,
   success: AgentSessionImportResult,
@@ -2549,6 +2556,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemGetMetadataRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsSlackMessagePreviewRpc,
   WsAssetsCreateUrlRpc,
   WsAssetsPersistChatAttachmentsRpc,
   WsAttachmentsCreateUploadUrlRpc,

@@ -5,6 +5,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Config from "effect/Config";
 import * as Console from "effect/Console";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -139,13 +140,16 @@ const makeCloudQueryRunner = Effect.gen(function* () {
   const location = yield* resolveClaudeCloudLoginLocation({ homePath: "" }, environment);
   const login = yield* makeRefreshingClaudeCloudLogin({
     location,
-    binaryPath: process.env.T3_CLAUDE_BIN ?? "claude",
+    binaryPath: yield* Config.String("T3_CLAUDE_BIN").pipe(Config.withDefault("claude")),
     environment,
   });
   const api = yield* ClaudeCloudApi.make({ login, version: packageJson.version });
   const queryRunner = yield* makeClaudeCloudQueryRunner({
     api,
-    environmentId: process.env.T3_CLAUDE_CLOUD_ENVIRONMENT_ID?.trim() || undefined,
+    environmentId:
+      (yield* Config.String("T3_CLAUDE_CLOUD_ENVIRONMENT_ID").pipe(
+        Config.withDefault(""),
+      )).trim() || undefined,
     configDir: location.configDir,
     filesDir: yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-claude-cloud-files-" }),
   }).pipe(

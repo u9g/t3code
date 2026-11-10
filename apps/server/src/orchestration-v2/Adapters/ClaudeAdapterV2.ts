@@ -1019,13 +1019,21 @@ const ClaudePermissionRules = Schema.Struct({
 });
 export type ClaudePermissionRule = (typeof ClaudePermissionRules.Type)["state"]["rules"][number];
 const decodeClaudePermissionRules = Schema.decodeUnknownEffect(ClaudePermissionRules);
+class ClaudeSkippedSettingsFilesError extends Schema.TaggedError<ClaudeSkippedSettingsFilesError>()(
+  "ClaudeSkippedSettingsFilesError",
+  { count: Schema.Number },
+) {
+  override get message(): string {
+    return `Claude skipped ${this.count} settings file(s)`;
+  }
+}
 /** The rules in a `list_permission_rules` reply; a reply missing a settings file's rules fails. */
 export const claudePermissionRulesFromReply = (reply: unknown) =>
   decodeClaudePermissionRules(reply).pipe(
     // A settings file Claude couldn't parse was skipped, so its rules are missing from the list.
     Effect.filterOrFail(
       ({ state }) => (state.errors ?? []).length === 0,
-      ({ state }) => new Error(`Claude skipped ${state.errors?.length} settings file(s)`),
+      ({ state }) => new ClaudeSkippedSettingsFilesError({ count: state.errors?.length ?? 0 }),
     ),
     Effect.map(({ state }) => state.rules),
   );
@@ -3147,9 +3155,10 @@ const inlineClaudeFileAttachment = Effect.fnUntraced(function* (input: {
       ),
     );
   if (bytes.length > budgetBytes) return tooLarge;
-  const text = yield* Effect.try(() =>
-    new TextDecoder("utf-8", { fatal: true }).decode(bytes),
-  ).pipe(Effect.option);
+  const text = yield* Effect.try({
+    try: () => new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    catch: () => "not_utf8" as const,
+  }).pipe(Effect.option);
   if (Option.isNone(text) || text.value.includes("\0")) {
     return notSent("remote sessions only receive UTF-8 text files.");
   }

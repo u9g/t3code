@@ -155,7 +155,7 @@ import {
   readPastedPlainText,
   readPastedComposerClipboard,
 } from "./composerInlineTokenPaste";
-import { ComposerSlackEmbedExtension } from "./composerSlackEmbeds";
+import { ComposerLinkEmbedExtension } from "./composerLinkEmbeds";
 import { didComposerSelectionChangeVisibly } from "./composerSelection";
 import {
   captureComposerAttachmentInsertion,
@@ -955,7 +955,7 @@ function createComposerExtensions(richText: boolean) {
     ComposerCitationExtension,
     ComposerContextReferenceExtension,
     ComposerChipSelectionExtension,
-    ComposerSlackEmbedExtension,
+    ComposerLinkEmbedExtension,
     ...(richText
       ? [
           ComposerMarkdownSourceExtension,

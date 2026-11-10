@@ -1420,8 +1420,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
       >
         <div
           ref={observeLaneWidth}
-          // An HTML preview can run wider than this lane, which stays the chat column's width.
-          className={cn("chat-content-lane", item.kind !== "html-render" && "overflow-x-clip")}
+          // HTML previews and full-width page embeds can extend past the chat column.
+          className={cn(
+            "chat-content-lane",
+            item.kind !== "html-render" &&
+              "overflow-x-clip has-[[data-web-embed-full-width]]:overflow-x-visible",
+          )}
           data-timeline-root="true"
         >
           <AudioPreviewUnmountContext value={onAudioUnmount}>

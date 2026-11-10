@@ -1615,7 +1615,9 @@ const CHAT_MARKDOWN_COMPONENTS = {
         <>
           <SharedTooltipTrigger render={link} label={href} />
           {parseSlackMessageLink(href) === null ? null : <SlackMessageEmbed url={href} />}
-          {isWebEmbedLink(href) ? <WebPageEmbed url={href} height={CHAT_WEB_EMBED_HEIGHT} /> : null}
+          {isWebEmbedLink(href) ? (
+            <WebPageEmbed url={href} height={CHAT_WEB_EMBED_HEIGHT} fullWidth />
+          ) : null}
         </>
       );
     }

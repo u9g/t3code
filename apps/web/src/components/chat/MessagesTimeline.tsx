@@ -1355,7 +1355,8 @@ const ConversationTimeline = memo(function ConversationTimeline({
       >
         <div
           ref={observeLaneWidth}
-          className="chat-content-lane overflow-x-clip"
+          // A full-width page embed reaches past the lane to the pane's edges; the scroller clips it.
+          className="chat-content-lane overflow-x-clip has-[[data-web-embed-full-width]]:overflow-x-visible"
           data-timeline-root="true"
         >
           <AudioPreviewUnmountContext value={onAudioUnmount}>

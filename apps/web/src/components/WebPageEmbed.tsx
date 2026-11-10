@@ -6,13 +6,10 @@ import { observeResize } from "~/lib/observeResize";
 import { useSeenInViewport } from "~/hooks/useSeenInViewport";
 import { usePrimaryEnvironmentId } from "~/state/environments";
 
-// Space kept between a full-width embed and the edges of the chat pane.
-const FULL_WIDTH_GUTTER_PX = 16;
-
 /**
  * The page a Claude artifact or Notion link points at, live in a webview below the link, in the
  * preview browser's default profile (whose logins it shares). Desktop only. Spans: it sits inside
- * paragraphs. `fullWidth` stretches it past the chat column to the edges of the chat pane.
+ * paragraphs. `fullWidth` stretches it past the chat column to the full width of its timeline row.
  */
 export function WebPageEmbed(props: { url: string; height: number; fullWidth?: boolean }) {
   const environmentId = usePrimaryEnvironmentId();
@@ -35,7 +32,7 @@ function WebPageEmbedWebview(props: {
   const config = usePreviewWebviewConfig(props.environmentId);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   // The anchor mounts with the config, so measuring waits for it.
-  const breakout = useChatPaneBreakout(anchorRef, props.fullWidth === true && config !== null);
+  const breakout = useTimelineRowBreakout(anchorRef, props.fullWidth === true && config !== null);
   if (config === null) return null;
   return (
     <span
@@ -62,41 +59,38 @@ function WebPageEmbedWebview(props: {
 }
 
 /**
- * Where the embed must sit, relative to its place in the chat column, to span the chat pane
- * minus whatever the preview panel covers. Null until measured, and when not enabled.
+ * Where the embed must sit, relative to its place in the chat column, to span its timeline row:
+ * the timeline's width inside its padding, which already clears the preview panel. Not the pane,
+ * since the virtualized list paint-contains each row. Null until measured, and when not enabled.
  */
-function useChatPaneBreakout(
+function useTimelineRowBreakout(
   anchorRef: RefObject<HTMLElement | null>,
   enabled: boolean,
 ): { marginLeft: number; width: number } | null {
   const [box, setBox] = useState<{ marginLeft: number; width: number } | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the chat pane's DOM box, which React does not own
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the timeline row's DOM box, which React does not own
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
-    const pane = anchor?.closest<HTMLElement>("[data-chat-canvas]");
-    if (!enabled || !anchor || !pane) {
+    const row = anchor?.closest<HTMLElement>(".messages-timeline-row-frame");
+    if (!enabled || !anchor || !row) {
       setBox(null);
       return;
     }
     const measure = () => {
-      const style = getComputedStyle(pane);
-      const insetStart = Number.parseFloat(style.getPropertyValue("--chat-lane-inset-start")) || 0;
-      const insetEnd = Number.parseFloat(style.getPropertyValue("--chat-lane-inset-end")) || 0;
-      const paneBox = pane.getBoundingClientRect();
+      const rowBox = row.getBoundingClientRect();
       const anchorBox = anchor.getBoundingClientRect();
-      const left = paneBox.left + insetStart + FULL_WIDTH_GUTTER_PX;
-      const right = paneBox.right - insetEnd - FULL_WIDTH_GUTTER_PX;
       const next = {
-        marginLeft: Math.round(left - anchorBox.left),
-        width: Math.round(right - left),
+        // A pixel in from each edge, so subpixel layout never pushes the border into the row's clip.
+        marginLeft: Math.ceil(rowBox.left - anchorBox.left) + 1,
+        width: Math.floor(rowBox.width) - 2,
       };
       setBox((current) =>
         current?.marginLeft === next.marginLeft && current.width === next.width ? current : next,
       );
     };
     measure();
-    // The pane resizes with the window and panels; the column moves inside it with chat width.
-    return observeResize([pane, anchor], measure);
+    // The row resizes with the window and panels; the column moves inside it with chat width.
+    return observeResize([row, anchor], measure);
   }, [anchorRef, enabled]);
   return box;
 }

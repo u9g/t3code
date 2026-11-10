@@ -61,9 +61,11 @@ export const relayedClaudeCloudMcpServers = Effect.fn("relayedClaudeCloudMcpServ
         const refusedId = name === "t3-code" ? fileSecretRequestId(message) : undefined;
         if (refusedId !== undefined) {
           void runPromise(
-            Effect.tryPromise(() =>
-              transport.send({ jsonrpc: "2.0", id: refusedId, result: FILE_SECRET_REFUSAL }),
-            ).pipe(Effect.ignore),
+            Effect.tryPromise({
+              try: () =>
+                transport.send({ jsonrpc: "2.0", id: refusedId, result: FILE_SECRET_REFUSAL }),
+              catch: () => "transport_closed" as const,
+            }).pipe(Effect.ignore),
           );
           return;
         }
@@ -81,9 +83,10 @@ export const relayedClaudeCloudMcpServers = Effect.fn("relayedClaudeCloudMcpServ
           messages: Stream.fromQueue(messages),
           // An answer that comes after the query closed has no one to take it.
           deliver: (message) =>
-            Effect.tryPromise(() =>
-              transport.send(message as Parameters<Transport["send"]>[0]),
-            ).pipe(Effect.ignore),
+            Effect.tryPromise({
+              try: () => transport.send(message as Parameters<Transport["send"]>[0]),
+              catch: () => "transport_closed" as const,
+            }).pipe(Effect.ignore),
         }),
       );
     });

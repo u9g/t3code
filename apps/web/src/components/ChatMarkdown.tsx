@@ -9,6 +9,7 @@ import {
 } from "@t3tools/shared/markdownLinks";
 import { taskListMarkerOffset } from "@t3tools/shared/markdownTaskList";
 import { parseSlackMessageLink } from "@t3tools/shared/slackMessageLinks";
+import { isWebEmbedLink } from "@t3tools/shared/webEmbedLinks";
 import { isHostPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 import {
@@ -231,8 +232,10 @@ import {
 import { reportMarkdownActionFailure } from "./chat/markdownActionFailure";
 import { GitHubLinkPreview } from "./pullRequest/GitHubLinkPreview";
 import { SlackMessageEmbed } from "./SlackMessageEmbed";
+import { WebPageEmbed } from "./WebPageEmbed";
 
 const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
+const CHAT_WEB_EMBED_HEIGHT = 480;
 
 interface ChatMarkdownProps {
   renderInsights?: boolean;
@@ -1418,6 +1421,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             <TooltipPopup side="top">{href}</TooltipPopup>
           </Tooltip>
           {parseSlackMessageLink(href) === null ? null : <SlackMessageEmbed url={href} />}
+          {isWebEmbedLink(href) ? <WebPageEmbed url={href} height={CHAT_WEB_EMBED_HEIGHT} /> : null}
         </>
       );
     }

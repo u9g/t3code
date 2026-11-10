@@ -39,6 +39,10 @@
       "types": "./src/slackMessageLinks.ts",
       "import": "./src/slackMessageLinks.ts"
     },
+    "./webEmbedLinks": {
+      "types": "./src/webEmbedLinks.ts",
+      "import": "./src/webEmbedLinks.ts"
+    },
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"

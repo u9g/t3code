@@ -67,7 +67,9 @@ const threadsShowingFiles = (sql: SqlClient.SqlClient) => sql`
 // A link, including a Windows junction, is neither a directory nor a file to
 // lstat, so the sweep never reaches through one out of the files folder.
 const lstat = (target: string) =>
-  Effect.tryPromise(() => NodeFSP.lstat(target)).pipe(Effect.option);
+  Effect.tryPromise({ try: () => NodeFSP.lstat(target), catch: () => "missing" as const }).pipe(
+    Effect.option,
+  );
 
 /**
  * Removes a deleted thread's downloads, unless a live fork still shows them; the

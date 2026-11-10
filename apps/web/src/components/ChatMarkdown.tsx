@@ -8,6 +8,7 @@ import {
   inlineCodeFilePathCandidate,
 } from "@t3tools/shared/markdownLinks";
 import { taskListMarkerOffset } from "@t3tools/shared/markdownTaskList";
+import { parseSlackMessageLink } from "@t3tools/shared/slackMessageLinks";
 import { isHostPath, resolveWorkspaceFilePath } from "@t3tools/shared/path";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 import {
@@ -229,6 +230,7 @@ import {
 } from "./chat/MarkdownCodeBlock.logic";
 import { reportMarkdownActionFailure } from "./chat/markdownActionFailure";
 import { GitHubLinkPreview } from "./pullRequest/GitHubLinkPreview";
+import { SlackMessageEmbed } from "./SlackMessageEmbed";
 
 const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
 
@@ -1410,10 +1412,13 @@ const CHAT_MARKDOWN_COMPONENTS = {
         return <GitHubLinkPreview link={link} url={href} environmentId={environmentId ?? null} />;
       }
       return (
-        <Tooltip>
-          <TooltipTrigger render={link} />
-          <TooltipPopup side="top">{href}</TooltipPopup>
-        </Tooltip>
+        <>
+          <Tooltip>
+            <TooltipTrigger render={link} />
+            <TooltipPopup side="top">{href}</TooltipPopup>
+          </Tooltip>
+          {parseSlackMessageLink(href) === null ? null : <SlackMessageEmbed url={href} />}
+        </>
       );
     }
 

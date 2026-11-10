@@ -137,6 +137,7 @@ import { ComposerCodeBlockNodeView } from "./chat/ComposerCodeBlockNodeView";
 import { resolveAssistantCitationCommentDismissal } from "./chat/assistantCitationCommentDismissal";
 import { composerCodeBlockHighlight } from "./composerCodeBlockHighlight";
 import { importPastedComposerText, readPastedPlainText } from "./composerInlineTokenPaste";
+import { ComposerSlackEmbedExtension } from "./composerSlackEmbeds";
 import { didComposerSelectionChangeVisibly } from "./composerSelection";
 import type { ComposerDraftContextRecords } from "./composerContextPresentation";
 
@@ -837,6 +838,7 @@ function createComposerExtensions(richText: boolean) {
     ComposerCitationExtension,
     ComposerContextReferenceExtension,
     ComposerChipSelectionExtension,
+    ComposerSlackEmbedExtension,
     ...(richText
       ? [
           ComposerMarkdownSourceExtension,

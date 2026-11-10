@@ -1355,7 +1355,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       >
         <div
           ref={observeLaneWidth}
-          // A full-width page embed reaches past the lane to the pane's edges; the scroller clips it.
+          // A full-width page embed reaches past the lane to the edges of the row.
           className="chat-content-lane overflow-x-clip has-[[data-web-embed-full-width]]:overflow-x-visible"
           data-timeline-root="true"
         >

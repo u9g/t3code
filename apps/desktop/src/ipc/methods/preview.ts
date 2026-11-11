@@ -42,6 +42,7 @@ import * as NodeURL from "node:url";
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import { trackEmbedScroll } from "../../preview/EmbedScroll.ts";
 import * as LoopbackTunnel from "../../preview/LoopbackTunnel.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import { normalizeCaptureFailure } from "../../preview/captureErrors.ts";
@@ -428,6 +429,18 @@ const sharesLoopback = DesktopIpc.makeIpcMethod({
   }),
 });
 
+const trackEmbedScrollMethod = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_TRACK_EMBED_SCROLL_CHANNEL,
+  payload: Schema.Struct({ webContentsId: Schema.Number, key: Schema.String }),
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.preview.trackEmbedScroll")(function* (
+    { webContentsId, key },
+    event,
+  ) {
+    if (event) yield* Effect.sync(() => trackEmbedScroll(webContentsId, event.sender.id, key));
+  }),
+});
+
 export const listBrowserImportSources = DesktopIpc.makeIpcMethod({
   channel: IpcChannels.PREVIEW_IMPORT_SOURCES_CHANNEL,
   payload: Schema.Void,
@@ -576,6 +589,7 @@ export const methods = [
   stopPortForward,
   listPortForwards,
   sharesLoopback,
+  trackEmbedScrollMethod,
   setAnnotationTheme,
   setAnnotationSendEnabled,
   pickElement,

@@ -7,9 +7,7 @@ import { T, useGT, useMessages } from "gt-react";
 import { memo, use, useState, type ReactNode } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
-import { GitForkIcon, ReplyIcon } from "lucide-react";
-import { ChevronDown, ChevronRight } from "lucide";
-import { MorphIcon } from "~/components/MorphIcon";
+import { ChevronDownIcon, ChevronRightIcon, GitForkIcon, ReplyIcon } from "lucide-react";
 import { useClientSettings } from "~/hooks/useSettings";
 import { captureAssistantMessageOpening } from "~/lib/assistantTextSelection";
 import { responseContextRecord } from "~/lib/composerContextRecords";
@@ -244,7 +242,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                 data-scroll-anchor-ignore
                 onClick={() => setFocusExpanded(false)}
               >
-                <MorphIcon className="size-3" icon={ChevronDown} />
+                <ChevronDownIcon className="size-3" />
                 Collapse reply
               </InlineButton>
             ) : (
@@ -256,7 +254,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                     data-scroll-anchor-ignore
                     onClick={() => setFocusExpanded(true)}
                   >
-                    <MorphIcon className="size-3" icon={ChevronRight} />
+                    <ChevronRightIcon className="size-3" />
                     Show full reply
                   </InlineButton>
                 }

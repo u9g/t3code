@@ -9,7 +9,8 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 /**
  * The page a Claude artifact or Notion link points at, live in a webview below the link, in the
  * preview browser's default profile (whose logins it shares). Desktop only. Spans: it sits inside
- * paragraphs. `fullWidth` stretches it past the chat column to the full width of its timeline row.
+ * paragraphs. `fullWidth` fits it to the visible timeline: the full width of its row, and the height
+ * between the top of the timeline and the composer. `height` holds until that is measured.
  */
 export function WebPageEmbed(props: { url: string; height: number; fullWidth?: boolean }) {
   const environmentId = usePrimaryEnvironmentId();
@@ -32,7 +33,7 @@ function WebPageEmbedWebview(props: {
   const config = usePreviewWebviewConfig(props.environmentId);
   const anchorRef = useRef<HTMLSpanElement | null>(null);
   // The anchor mounts with the config, so measuring waits for it.
-  const breakout = useTimelineRowBreakout(anchorRef, props.fullWidth === true && config !== null);
+  const fit = useTimelineFit(anchorRef, props.fullWidth === true && config !== null);
   if (config === null) return null;
   return (
     <span
@@ -42,10 +43,7 @@ function WebPageEmbedWebview(props: {
     >
       <span
         className="block max-w-none overflow-hidden rounded-lg border border-border bg-background"
-        style={{
-          height: props.height,
-          ...(breakout ?? { width: "100%", maxWidth: "48rem" }),
-        }}
+        style={fit ?? { height: props.height, width: "100%", maxWidth: "48rem" }}
       >
         <webview
           src={props.url}
@@ -58,39 +56,61 @@ function WebPageEmbedWebview(props: {
   );
 }
 
+// Space kept between a fitted embed and the top of the timeline or the composer.
+const FIT_GAP_PX = 12;
+const FIT_MIN_HEIGHT_PX = 240;
+
+interface TimelineFit {
+  readonly marginLeft: number;
+  readonly width: number;
+  readonly height: number;
+}
+
 /**
- * Where the embed must sit, relative to its place in the chat column, to span its timeline row:
- * the timeline's width inside its padding, which already clears the preview panel. Not the pane,
- * since the virtualized list paint-contains each row. Null until measured, and when not enabled.
+ * The box that fits the embed to the visible timeline. Across: its timeline row, the timeline's
+ * width inside its padding, which already clears the preview panel (not the pane: the virtualized
+ * list paint-contains each row). Down: from the top of the timeline to the composer floating over
+ * its bottom. Null until measured, and when not enabled.
  */
-function useTimelineRowBreakout(
+function useTimelineFit(
   anchorRef: RefObject<HTMLElement | null>,
   enabled: boolean,
-): { marginLeft: number; width: number } | null {
-  const [box, setBox] = useState<{ marginLeft: number; width: number } | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the timeline row's DOM box, which React does not own
+): TimelineFit | null {
+  const [fit, setFit] = useState<TimelineFit | null>(null);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- measures the timeline's DOM boxes, which React does not own
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
     const row = anchor?.closest<HTMLElement>(".messages-timeline-row-frame");
-    if (!enabled || !anchor || !row) {
-      setBox(null);
+    const scroller = anchor?.closest<HTMLElement>(".messages-timeline-scroll");
+    if (!enabled || !anchor || !row || !scroller) {
+      setFit(null);
       return;
     }
+    const composer = anchor
+      .closest("[data-chat-column]")
+      ?.querySelector<HTMLElement>('[data-chat-composer-stack="true"]');
     const measure = () => {
       const rowBox = row.getBoundingClientRect();
       const anchorBox = anchor.getBoundingClientRect();
-      const next = {
+      const scrollerBox = scroller.getBoundingClientRect();
+      const bottom = composer?.getBoundingClientRect().top ?? scrollerBox.bottom;
+      const next: TimelineFit = {
         // A pixel in from each edge, so subpixel layout never pushes the border into the row's clip.
         marginLeft: Math.ceil(rowBox.left - anchorBox.left) + 1,
         width: Math.floor(rowBox.width) - 2,
+        height: Math.max(FIT_MIN_HEIGHT_PX, Math.floor(bottom - scrollerBox.top) - 2 * FIT_GAP_PX),
       };
-      setBox((current) =>
-        current?.marginLeft === next.marginLeft && current.width === next.width ? current : next,
+      setFit((current) =>
+        current?.marginLeft === next.marginLeft &&
+        current.width === next.width &&
+        current.height === next.height
+          ? current
+          : next,
       );
     };
     measure();
-    // The row resizes with the window and panels; the column moves inside it with chat width.
-    return observeResize([row, anchor], measure);
+    // The window, panels, chat width and composer (as the prompt grows) all move these edges.
+    return observeResize([row, anchor, scroller, ...(composer ? [composer] : [])], measure);
   }, [anchorRef, enabled]);
-  return box;
+  return fit;
 }

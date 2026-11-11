@@ -20,6 +20,8 @@ import { useEnvironment } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
+import { SLACK_MESSAGE_LINKS } from "@t3tools/shared/slackMessageLinks";
+import { WEB_EMBED_LINKS } from "@t3tools/shared/webEmbedLinks";
 import { memo, use, useState, type ReactNode } from "react";
 import {
   createMessageAttachmentPreviewProjector,
@@ -31,7 +33,9 @@ import {
   isImageAttachment,
   isVideoAttachment,
 } from "../../types";
-import ChatMarkdown from "../ChatMarkdown";
+import ChatMarkdown, { CHAT_WEB_EMBED_HEIGHT } from "../ChatMarkdown";
+import { SlackMessageEmbed } from "../SlackMessageEmbed";
+import { WebPageEmbed } from "../WebPageEmbed";
 import {
   CalendarClockIcon,
   ChevronDownIcon,
@@ -1063,7 +1067,39 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           {messageActions}
         </div>
       ) : null}
+      {(!folded || expanded) && !fileCardsOnly && !audioOnly ? (
+        <UserMessageLinkEmbeds text={resolvedContext.text} />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * What the message's Slack, Claude artifact and Notion links point at, below the bubble rather
+ * than inside it: a page embed spans the row, which the bubble's width would squeeze.
+ */
+function UserMessageLinkEmbeds(props: { text: string }) {
+  const links = new Map<string, { index: number; page: boolean }>();
+  for (const [pattern, page] of [
+    [SLACK_MESSAGE_LINKS, false],
+    [WEB_EMBED_LINKS, true],
+  ] as const) {
+    for (const match of props.text.matchAll(pattern)) {
+      if (!links.has(match[0])) links.set(match[0], { index: match.index, page });
+    }
+  }
+  if (links.size === 0) return null;
+  const ordered = Array.from(links).toSorted(([, a], [, b]) => a.index - b.index);
+  return ordered.map(([url, { page }]) =>
+    page ? (
+      <div key={url} className="w-full">
+        <WebPageEmbed url={url} height={CHAT_WEB_EMBED_HEIGHT} fullWidth />
+      </div>
+    ) : (
+      <div key={url} className="max-w-[80%]">
+        <SlackMessageEmbed url={url} />
+      </div>
+    ),
   );
 }
 
@@ -1229,6 +1265,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       className="text-message-foreground user-message-markdown"
       lineBreaks
       parseRawHtml={false}
+      linkEmbeds={false}
       extraRemarkPlugins={USER_MESSAGE_REMARK_PLUGINS}
       renderContextReference={props.renderContextReference}
       headingLevelOffset={MESSAGE_HEADING_LEVEL}

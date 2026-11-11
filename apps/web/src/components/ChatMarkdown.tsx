@@ -250,7 +250,7 @@ import { SlackMessageEmbed } from "./SlackMessageEmbed";
 import { WebPageEmbed } from "./WebPageEmbed";
 
 const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
-const CHAT_WEB_EMBED_HEIGHT = 480;
+export const CHAT_WEB_EMBED_HEIGHT = 480;
 
 interface ChatMarkdownProps {
   renderInsights?: boolean;
@@ -283,6 +283,8 @@ interface ChatMarkdownProps {
   /** The change request's repository, when it can differ from the checkout at `cwd`. */
   sourceControlMediaRepository?: string | undefined;
   headingLevelOffset?: number | undefined;
+  /** Shows what Slack, Claude artifact and Notion links point at below each link. Default on. */
+  linkEmbeds?: boolean | undefined;
 }
 
 export interface ChatMarkdownContextReference {
@@ -549,6 +551,7 @@ function useChatMarkdownState({
   onImageExpand,
   renderContextReference,
   headingLevelOffset = 0,
+  linkEmbeds = true,
   sourceControlMedia = false,
   sourceControlMediaRepository,
 }: ChatMarkdownProps) {
@@ -1035,6 +1038,7 @@ function useChatMarkdownState({
     sourceControlMediaRepository,
     renderContextReference,
     headingLevelOffset,
+    linkEmbeds,
     imageBaseDir,
     workspaceMutationId,
     inlineCodeFileLinkMetaByText,
@@ -1233,6 +1237,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
+      linkEmbeds,
     } = use(ChatMarkdownRendererContext);
     const text = use(ChatMarkdownTextContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
@@ -1521,8 +1526,10 @@ const CHAT_MARKDOWN_COMPONENTS = {
             <TooltipTrigger render={link} />
             <TooltipPopup side="top">{href}</TooltipPopup>
           </Tooltip>
-          {parseSlackMessageLink(href) === null ? null : <SlackMessageEmbed url={href} />}
-          {isWebEmbedLink(href) ? (
+          {!linkEmbeds || parseSlackMessageLink(href) === null ? null : (
+            <SlackMessageEmbed url={href} />
+          )}
+          {linkEmbeds && isWebEmbedLink(href) ? (
             <WebPageEmbed url={href} height={CHAT_WEB_EMBED_HEIGHT} fullWidth />
           ) : null}
         </>

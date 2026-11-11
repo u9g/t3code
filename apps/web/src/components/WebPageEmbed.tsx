@@ -5,6 +5,7 @@ import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "re
 
 import { usePreviewWebviewConfig } from "~/browser/previewWebviewConfigState";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { previewBridge } from "~/components/preview/previewBridge";
 import { observeResize } from "~/lib/observeResize";
 import { cn } from "~/lib/utils";
 import { useSeenInViewport } from "~/hooks/useSeenInViewport";
@@ -42,7 +43,7 @@ function WebPageEmbedWebview(props: {
     false,
     Schema.Boolean,
   );
-  const [title, webviewRef] = usePageTitle(props.url);
+  const { title, bindWebview } = useEmbedPage(props.url);
   // The anchor mounts with the config, so measuring waits for it.
   const fit = useTimelineFit(anchorRef, props.fullWidth === true && config !== null);
   useFitScrollDetent(anchorRef, fit !== null && !minimized);
@@ -56,8 +57,12 @@ function WebPageEmbedWebview(props: {
       className="my-1.5 block"
       {...(props.fullWidth ? { "data-web-embed-full-width": "" } : {})}
     >
+      {/* A window frame: the title bar's strip runs on, half as thick, down both sides and along the bottom. */}
       <span
-        className="relative flex max-w-none flex-col overflow-hidden rounded-lg bg-background"
+        className={cn(
+          "group/web-embed-frame flex max-w-none cursor-pointer flex-col rounded-xl border border-border bg-muted px-4 hover:bg-accent",
+          !minimized && "pb-4",
+        )}
         // :hover does not reach an element whose webview holds the pointer; pointer events do.
         onPointerEnter={(event) =>
           event.currentTarget.toggleAttribute("data-web-embed-hovered", true)
@@ -65,16 +70,19 @@ function WebPageEmbedWebview(props: {
         onPointerLeave={(event) =>
           event.currentTarget.toggleAttribute("data-web-embed-hovered", false)
         }
+        // The whole band minimizes and restores, not only the title. The title bar's click (and
+        // its keyboard activation) bubbles here; the page's own input never reaches the host.
+        onClick={(event) => {
+          if (!(event.target as Element).closest("[data-web-embed-page]")) {
+            setMinimized((value) => !value);
+          }
+        }}
         style={{ ...across, height: minimized ? "auto" : (fit?.height ?? props.height) }}
       >
         <button
           type="button"
           aria-expanded={!minimized}
-          onClick={() => setMinimized((value) => !value)}
-          className={cn(
-            "flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 ps-2.5 pe-3 text-left text-xs text-muted-foreground hover:bg-accent/60",
-            !minimized && "border-b border-border",
-          )}
+          className="-mx-4 flex h-8 shrink-0 cursor-pointer items-center gap-2 rounded-lg ps-2.5 pe-3 text-left text-xs text-muted-foreground group-hover/web-embed-frame:text-foreground"
         >
           <ChevronRightIcon
             className={cn("size-3.5 shrink-0 transition-transform", !minimized && "rotate-90")}
@@ -85,19 +93,24 @@ function WebPageEmbedWebview(props: {
           <span className="truncate">{webEmbedHost(props.url)}</span>
         </button>
         {minimized ? null : (
-          <webview
-            ref={webviewRef}
-            src={props.url}
-            partition={config.partition}
-            webpreferences={config.webPreferences}
-            style={{ display: "flex", width: "100%", flex: "1 1 0", minHeight: 0 }}
-          />
+          <span
+            data-web-embed-page=""
+            className="relative flex min-h-0 flex-1 cursor-auto overflow-hidden rounded-lg bg-background"
+          >
+            <webview
+              ref={bindWebview}
+              src={props.url}
+              partition={config.partition}
+              webpreferences={config.webPreferences}
+              style={{ display: "flex", width: "100%", height: "100%" }}
+            />
+            {/* Drawn over the page, which paints as its own layer and would cover a box border. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 z-10 rounded-lg border border-border"
+            />
+          </span>
         )}
-        {/* Drawn over the page, which paints as its own layer and would cover a box border. */}
-        <span
-          aria-hidden
-          className="pointer-events-none absolute inset-0 z-10 rounded-lg border border-border"
-        />
       </span>
     </span>
   );
@@ -108,21 +121,32 @@ const WEB_EMBED_MINIMIZED_KEY_PREFIX = "t3code:web-embed-minimized:";
 // Page titles seen this session, so a minimized embed (whose page is unloaded) keeps its name.
 const pageTitles = new Map<string, string>();
 
-/** The page's title once it loads, and a ref that hands the webview to it. */
-function usePageTitle(url: string) {
+/**
+ * The page's title once it loads, and a ref that hands the webview to the desktop, which keeps
+ * where the page was scrolled (in every frame) across unloads: thread switches and minimizing.
+ */
+function useEmbedPage(url: string) {
   const [title, setTitle] = useState(() => pageTitles.get(url) ?? null);
-  const ref = (webview: HTMLElement | null) => {
-    if (!webview) return;
+  const bindWebview = (element: HTMLElement | null) => {
+    if (!element) return;
+    const webview = element as HTMLElement & { getWebContentsId: () => number };
     const onTitle = (event: Event) => {
       const next = (event as Event & { title?: string }).title?.trim();
       if (!next) return;
       pageTitles.set(url, next);
       setTitle(next);
     };
+    const onReady = () => {
+      void previewBridge?.trackEmbedScroll(webview.getWebContentsId(), url).catch(() => undefined);
+    };
     webview.addEventListener("page-title-updated", onTitle);
-    return () => webview.removeEventListener("page-title-updated", onTitle);
+    webview.addEventListener("dom-ready", onReady);
+    return () => {
+      webview.removeEventListener("page-title-updated", onTitle);
+      webview.removeEventListener("dom-ready", onReady);
+    };
   };
-  return [title, ref] as const;
+  return { title, bindWebview };
 }
 
 function webEmbedKind(url: string): string {

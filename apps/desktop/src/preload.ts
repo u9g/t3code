@@ -473,6 +473,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       return () =>
         ipcRenderer.removeListener(IpcChannels.PORT_FORWARD_CHANGE_CHANNEL, wrappedListener);
     },
+    trackEmbedScroll: (webContentsId, key) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_TRACK_EMBED_SCROLL_CHANNEL, { webContentsId, key }),
     setAnnotationTheme: (theme) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_ANNOTATION_THEME_CHANNEL, { theme }),
     setAnnotationSendEnabled: (tabId, enabled) =>

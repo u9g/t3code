@@ -235,7 +235,7 @@ import { SlackMessageEmbed } from "./SlackMessageEmbed";
 import { WebPageEmbed } from "./WebPageEmbed";
 
 const isAssetNotFoundError = Schema.is(AssetWorkspaceAssetNotFoundError);
-const CHAT_WEB_EMBED_HEIGHT = 960;
+const CHAT_WEB_EMBED_HEIGHT = 480;
 
 interface ChatMarkdownProps {
   renderInsights?: boolean;

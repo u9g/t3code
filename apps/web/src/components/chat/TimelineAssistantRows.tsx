@@ -1,4 +1,5 @@
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
+import { WEB_EMBED_LINKS } from "@t3tools/shared/webEmbedLinks";
 import { type RunId, type TurnItemId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
 import { agentWorkingDirectories } from "@t3tools/client-runtime/workspace-basename-lookup";
@@ -104,6 +105,12 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     focusLinks.length > 0 ||
     (focusIntro !== null && focusIntro !== row.message.text.trim());
   const focused = collapsible && !focusExpanded;
+  // A collapsed reply still shows the Claude artifacts and Notion pages it links, as embeds.
+  const pageLinks = focused
+    ? [...new Set(Array.from(text.matchAll(WEB_EMBED_LINKS), (match) => match[0]))].filter(
+        (link) => focusIntro === null || !focusIntro.includes(link),
+      )
+    : [];
   const messageText = focused
     ? previousReply
       ? ""
@@ -112,6 +119,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
           ...(focusIntro === null
             ? focusLinks
             : focusLinks.filter((link) => isFocusVideoLink(link) && !focusIntro.includes(link))),
+          ...pageLinks.flatMap((link) => ["", link]),
         ].join("\n")
     : text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
   const focusSections =

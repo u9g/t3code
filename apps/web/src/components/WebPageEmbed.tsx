@@ -102,6 +102,9 @@ function WebPageEmbedWebview(props: {
               src={props.url}
               partition={config.partition}
               webpreferences={config.webPreferences}
+              // Lets the page's link clicks reach the desktop's window-open handler, which opens
+              // them in the default browser. React drops boolean values for unknown attributes.
+              {...({ allowpopups: "true" } as unknown as { readonly allowpopups?: boolean })}
               style={{ display: "flex", width: "100%", height: "100%" }}
             />
             {/* Drawn over the page, which paints as its own layer and would cover a box border. */}
@@ -123,7 +126,8 @@ const pageTitles = new Map<string, string>();
 
 /**
  * The page's title once it loads, and a ref that hands the webview to the desktop, which keeps
- * where the page was scrolled (in every frame) across unloads: thread switches and minimizing.
+ * where the page was scrolled (in every frame) across unloads (thread switches and minimizing) and
+ * opens the links clicked in it in the default browser.
  */
 function useEmbedPage(url: string) {
   const [title, setTitle] = useState(() => pageTitles.get(url) ?? null);
@@ -137,7 +141,7 @@ function useEmbedPage(url: string) {
       setTitle(next);
     };
     const onReady = () => {
-      void previewBridge?.trackEmbedScroll(webview.getWebContentsId(), url).catch(() => undefined);
+      void previewBridge?.attachEmbed(webview.getWebContentsId(), url).catch(() => undefined);
     };
     webview.addEventListener("page-title-updated", onTitle);
     webview.addEventListener("dom-ready", onReady);

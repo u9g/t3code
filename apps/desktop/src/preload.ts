@@ -425,8 +425,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.invoke(IpcChannels.PREVIEW_CLEAR_CACHE_CHANNEL, { environmentId, profileId }),
     getPreviewConfig: (environmentId, profileId) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_GET_CONFIG_CHANNEL, { environmentId, profileId }),
-    trackEmbedScroll: (webContentsId, key) =>
-      ipcRenderer.invoke(IpcChannels.PREVIEW_TRACK_EMBED_SCROLL_CHANNEL, { webContentsId, key }),
+    attachEmbed: (webContentsId, key) =>
+      ipcRenderer.invoke(IpcChannels.PREVIEW_ATTACH_EMBED_CHANNEL, { webContentsId, key }),
     setAnnotationTheme: (theme) =>
       ipcRenderer.invoke(IpcChannels.PREVIEW_SET_ANNOTATION_THEME_CHANNEL, { theme }),
     setAnnotationSendEnabled: (tabId, enabled) =>

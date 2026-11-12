@@ -1297,10 +1297,11 @@ export interface DesktopPreviewBridge {
     profileId?: string,
   ) => Promise<DesktopPreviewWebviewConfig>;
   /**
-   * Scrolls a chat page embed's webview back to where the page at `key` was last left, and keeps
-   * that up to date as it is scrolled.
+   * Hands a chat page embed's webview to the desktop: it scrolls back to where the page at `key`
+   * was last left, keeps that up to date as it is scrolled, and opens the links clicked in it in
+   * the default browser.
    */
-  trackEmbedScroll: (webContentsId: number, key: string) => Promise<void>;
+  attachEmbed: (webContentsId: number, key: string) => Promise<void>;
   listBrowserImportSources: () => Promise<ReadonlyArray<BrowserImportSource>>;
   importBrowserCookies: (input: {
     readonly environmentId: EnvironmentId;

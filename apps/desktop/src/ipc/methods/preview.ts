@@ -29,6 +29,7 @@ import {
   PreviewForwardedShortcut,
   MAX_KEYBINDINGS_COUNT,
 } from "@t3tools/contracts";
+import { webContents } from "electron";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
@@ -36,6 +37,7 @@ import * as NodeURL from "node:url";
 
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
+import { openEmbedLinksExternally } from "../../preview/EmbedLinks.ts";
 import { trackEmbedScroll } from "../../preview/EmbedScroll.ts";
 import * as PreviewManager from "../../preview/Manager.ts";
 import { normalizeCaptureFailure } from "../../preview/captureErrors.ts";
@@ -351,15 +353,19 @@ const getPreviewConfig = DesktopIpc.makeIpcMethod({
   }),
 });
 
-const trackEmbedScrollMethod = DesktopIpc.makeIpcMethod({
-  channel: IpcChannels.PREVIEW_TRACK_EMBED_SCROLL_CHANNEL,
+const attachEmbedMethod = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.PREVIEW_ATTACH_EMBED_CHANNEL,
   payload: Schema.Struct({ webContentsId: Schema.Number, key: Schema.String }),
   result: Schema.Void,
-  handler: Effect.fn("desktop.ipc.preview.trackEmbedScroll")(function* (
-    { webContentsId, key },
-    event,
-  ) {
-    if (event) yield* Effect.sync(() => trackEmbedScroll(webContentsId, event.sender.id, key));
+  handler: Effect.fn("desktop.ipc.preview.attachEmbed")(function* ({ webContentsId, key }, event) {
+    if (!event) return;
+    yield* Effect.sync(() => {
+      // Only a webview the asking window hosts.
+      const guest = webContents.fromId(webContentsId);
+      if (!guest || guest.isDestroyed() || guest.hostWebContents?.id !== event.sender.id) return;
+      openEmbedLinksExternally(guest);
+      trackEmbedScroll(guest, key);
+    });
   }),
 });
 
@@ -505,7 +511,7 @@ export const methods = [
   clearCookies,
   clearCache,
   getPreviewConfig,
-  trackEmbedScrollMethod,
+  attachEmbedMethod,
   setAnnotationTheme,
   setAnnotationSendEnabled,
   pickElement,

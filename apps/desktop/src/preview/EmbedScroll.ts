@@ -1,5 +1,5 @@
 // @effect-diagnostics globalDate:off globalTimers:off - Plain async helpers over Electron frames, outside an Effect runtime.
-import { webContents, type WebFrameMain } from "electron";
+import type { WebFrameMain } from "electron";
 
 /**
  * Where a page embedded in chat was scrolled, in every frame: a Claude artifact scrolls inside a
@@ -63,12 +63,6 @@ const frameKey = (frame: WebFrameMain) => {
   }
 };
 
-/** The guest only when it is a webview the asking window hosts. */
-const embedGuest = (webContentsId: number, hostId: number) => {
-  const guest = webContents.fromId(webContentsId);
-  return guest && !guest.isDestroyed() && guest.hostWebContents?.id === hostId ? guest : null;
-};
-
 async function capture(guest: Electron.WebContents): Promise<FrameScroll[]> {
   const frames = await Promise.all(
     guest.mainFrame.framesInSubtree.map(async (frame): Promise<FrameScroll | null> => {
@@ -128,9 +122,8 @@ const CAPTURE_MAX_WAIT_MS = 1_500;
  * scrolls it. Captures follow the guest's own input, so they need nothing from the window when the
  * embed goes away.
  */
-export function trackEmbedScroll(webContentsId: number, hostId: number, key: string): void {
-  const guest = embedGuest(webContentsId, hostId);
-  if (!guest || tracked.has(guest)) return;
+export function trackEmbedScroll(guest: Electron.WebContents, key: string): void {
+  if (tracked.has(guest)) return;
   tracked.add(guest);
   let userScrolled = false;
   let debounce: ReturnType<typeof setTimeout> | undefined;

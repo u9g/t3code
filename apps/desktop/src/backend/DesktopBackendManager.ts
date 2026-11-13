@@ -20,6 +20,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   SERVER_EXIT_CODE_MANAGED_POLICY,
+  SERVER_EXIT_CODE_PORT_IN_USE,
   SERVER_EXIT_CODE_STATE_DIR_OWNED,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
@@ -681,10 +682,12 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   );
   yield* Ref.set(exitObserved, true);
   yield* options.onExitObserved?.() ?? Effect.void;
-  const stateDirOwned =
-    Exit.isSuccess(exit) &&
-    Option.exists(exit.value.code, (code) => code === SERVER_EXIT_CODE_STATE_DIR_OWNED);
-  if (!stateDirOwned && (yield* Ref.get(ownership)) === undefined) {
+  const exitedWith = (expected: number) =>
+    Exit.isSuccess(exit) && Option.exists(exit.value.code, (code) => code === expected);
+  const stateDirOwned = exitedWith(SERVER_EXIT_CODE_STATE_DIR_OWNED);
+  // The child's own bind failed, so the listener is not ours even if it cannot answer yet.
+  const portInUse = exitedWith(SERVER_EXIT_CODE_PORT_IN_USE);
+  if (!stateDirOwned && !portInUse && (yield* Ref.get(ownership)) === undefined) {
     // A bind failure can exit before the pending descriptor identifies the foreign listener.
     yield* Fiber.await(readinessFiber).pipe(
       Effect.timeoutOption(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
@@ -698,6 +701,13 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     Effect.ignore,
     Effect.withSpan("desktop.backendProcess.drainOutput"),
   );
+  if (portInUse) {
+    return {
+      code: Option.none(),
+      reason: `port ${options.httpBaseUrl.port} is already in use`,
+      portTaken: true,
+    } satisfies BackendProcessExit;
+  }
   if (!stateDirOwned && (yield* Ref.get(ownership)) === "foreign") {
     return {
       code: Option.none(),

@@ -231,6 +231,8 @@ import {
 } from "./chat/MarkdownCodeBlock.logic";
 import { reportMarkdownActionFailure } from "./chat/markdownActionFailure";
 import { GitHubLinkPreview } from "./pullRequest/GitHubLinkPreview";
+import { PullRequestStackMap } from "./pullRequest/PullRequestStackMap";
+import { pullRequestStackMapUrls } from "./pullRequest/pullRequestStackMap.logic";
 import { SlackMessageEmbed } from "./SlackMessageEmbed";
 import { WebPageEmbed } from "./WebPageEmbed";
 
@@ -1059,6 +1061,17 @@ function selectInlineCode(event: ReactMouseEvent<HTMLElement>) {
   window.getSelection()?.selectAllChildren(event.currentTarget);
 }
 
+/** A stack map row's link is its label alone: the row draws the pull request's own icon. */
+const StackMapLinkContext = React.createContext(false);
+const renderStackMapLink = (url: string, label: string) => {
+  const Link = CHAT_MARKDOWN_COMPONENTS.a;
+  return (
+    <StackMapLinkContext value>
+      <Link href={url}>{label}</Link>
+    </StackMapLinkContext>
+  );
+};
+
 const CHAT_MARKDOWN_COMPONENTS = {
   h1: markdownHeadingRenderer(1),
   h2: markdownHeadingRenderer(2),
@@ -1076,8 +1089,18 @@ const CHAT_MARKDOWN_COMPONENTS = {
     }
     return <div {...props}>{children}</div>;
   },
-  p: function MarkdownParagraph({ node: _node, children, ...props }) {
+  p: function MarkdownParagraph({ node, children, ...props }) {
     const { skills, threadRef, environmentId } = use(ChatMarkdownRendererContext);
+    const stackMapUrls = environmentId ? pullRequestStackMapUrls(node) : null;
+    if (environmentId && stackMapUrls !== null) {
+      return (
+        <PullRequestStackMap
+          urls={stackMapUrls}
+          environmentId={environmentId}
+          renderLink={renderStackMapLink}
+        />
+      );
+    }
     return (
       <p {...props}>
         {renderSkillInlineMarkdownChildren(children, skills, threadRef, environmentId)}
@@ -1219,7 +1242,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
       : null;
     if (!fileLinkMeta) {
       const faviconHost = resolveExternalWebLinkHost(href);
-      const hasText = hastHasText(node);
+      const stackMapLink = use(StackMapLinkContext);
+      const hasText = stackMapLink || hastHasText(node);
       const pullRequestAutolink = String(
         (props as Record<string, unknown>)["data-pull-request-autolink"] ?? "",
       );
@@ -1380,7 +1404,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             });
           }}
         >
-          {faviconHost && hasText && !isPullRequestAutolink ? (
+          {faviconHost && hasText && !isPullRequestAutolink && !stackMapLink ? (
             <MarkdownExternalLinkContent host={faviconHost} plainText={plainHastText(node)}>
               {linkChildren}
             </MarkdownExternalLinkContent>

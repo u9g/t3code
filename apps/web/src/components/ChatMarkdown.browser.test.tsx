@@ -351,6 +351,36 @@ describe("ChatMarkdown favicon privacy", () => {
   });
 });
 
+describe("ChatMarkdown pull request stack map", () => {
+  const first = "https://github.com/pingdotgg/t3code/pull/1";
+  const second = "https://github.com/pingdotgg/t3code/pull/2";
+
+  it("draws a paragraph of only pull request links as a stack map", async () => {
+    setup();
+    await using screen = await renderText(`Published.\n\n${first}, ${second}`, {
+      environmentId: EnvironmentId.make("workspace"),
+    });
+    const map = screen.container.querySelector("[data-pull-request-stack-map]");
+    expect(map?.querySelector("span")?.textContent).toBe("t3code");
+    expect(
+      [...map!.querySelectorAll("a")].map((link) => [link.textContent, link.getAttribute("href")]),
+    ).toEqual([
+      ["#1", first],
+      ["#2", second],
+    ]);
+    expect(map?.querySelector("img")).toBeNull();
+  });
+
+  it("leaves pull request links in prose as links", async () => {
+    setup();
+    await using screen = await renderText(`See ${first} and ${second}.`, {
+      environmentId: EnvironmentId.make("workspace"),
+    });
+    expect(screen.container.querySelector("[data-pull-request-stack-map]")).toBeNull();
+    expect(screen.container.querySelectorAll("a")).toHaveLength(2);
+  });
+});
+
 describe("ChatMarkdown external link labels", () => {
   it("keeps a leading emoji whole", async () => {
     setup();

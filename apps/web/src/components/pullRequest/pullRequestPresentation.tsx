@@ -73,7 +73,7 @@ export function PullRequestLabelChip({
   );
 }
 
-function reviewDecisionPresentation(decision: PullRequestReviewDecision) {
+export function reviewDecisionPresentation(decision: PullRequestReviewDecision) {
   switch (decision) {
     case "approved":
       return {

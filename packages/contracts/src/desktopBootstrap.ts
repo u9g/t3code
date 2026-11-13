@@ -6,6 +6,8 @@ import { PortSchema, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts
 export const SERVER_EXIT_CODE_STATE_DIR_OWNED = 78;
 // A server the managed policy refused, so the desktop app blames the policy rather than the release.
 export const SERVER_EXIT_CODE_MANAGED_POLICY = 77;
+// A server whose port was already bound, so a supervisor can move it instead of asking the listener who it is.
+export const SERVER_EXIT_CODE_PORT_IN_USE = 79;
 
 export const DesktopBackendBootstrap = Schema.Struct({
   mode: Schema.Literal("desktop"),

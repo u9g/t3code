@@ -1,5 +1,6 @@
 import {
   SERVER_EXIT_CODE_MANAGED_POLICY,
+  SERVER_EXIT_CODE_PORT_IN_USE,
   SERVER_EXIT_CODE_STATE_DIR_OWNED,
   DesktopBackendBootstrap,
   DesktopTelemetryControlMessage,
@@ -555,6 +556,48 @@ describe("DesktopBackendManager", () => {
         assert.isTrue((yield* Fiber.join(run)).portTaken);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
+  );
+
+  it.effect(
+    "reports a port collision when the child's bind fails while the listener still answers 503",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const requestStarted = yield* Deferred.make<void>();
+          const layerSpawner = Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() =>
+              Effect.succeed(
+                makeProcess({
+                  exitCode: Deferred.await(requestStarted).pipe(
+                    Effect.as(ChildProcessSpawner.ExitCode(SERVER_EXIT_CODE_PORT_IN_USE)),
+                  ),
+                }),
+              ),
+            ),
+          );
+          // Another app's server that is still starting: it holds the port but cannot identify itself.
+          const layerHttp = layerHttpClient((request) =>
+            Deferred.succeed(requestStarted, void 0).pipe(
+              Effect.as(
+                HttpClientResponse.fromWeb(request, new Response("starting", { status: 503 })),
+              ),
+            ),
+          );
+          const run = yield* DesktopBackendManager.runBackendProcess({
+            ...baseConfig,
+            desktopTelemetryStream: Stream.empty,
+          }).pipe(
+            Effect.provide(Layer.merge(layerSpawner, layerHttp)),
+            Effect.scoped,
+            Effect.forkChild,
+          );
+
+          const exit = yield* Fiber.join(run);
+          assert.isTrue(exit.portTaken);
+          assert.include(exit.reason, "already in use");
+        }).pipe(Effect.provide(TestClock.layer())),
+      ),
   );
 
   it.effect("restarts on the port the spec moves to after another server took its port", () =>

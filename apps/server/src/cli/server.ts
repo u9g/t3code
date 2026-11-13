@@ -1,7 +1,10 @@
+import { SERVER_EXIT_CODE_PORT_IN_USE } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Runtime from "effect/Runtime";
 import * as Schema from "effect/Schema";
 import { Command, GlobalFlag } from "effect/cli";
 import * as CliError from "effect/cli/CliError";
@@ -15,6 +18,24 @@ import * as AutomaticPort from "./automaticPort.ts";
 import { type CliServerFlags, resolveServerConfig, sharedServerCommandFlags } from "./config.ts";
 
 const encodeCommand = Schema.encodeEffect(Schema.fromJsonString(Schema.String));
+
+export class ServerPortInUseError extends Schema.TaggedError<ServerPortInUseError>()(
+  "ServerPortInUseError",
+  { host: Schema.optional(Schema.String), port: Schema.Number },
+) {
+  // A distinct exit code tells a supervisor the port is taken even while its listener cannot answer yet.
+  override readonly [Runtime.errorExitCode] = SERVER_EXIT_CODE_PORT_IN_USE;
+
+  override get message(): string {
+    return `Port ${this.port}${this.host === undefined ? "" : ` on ${this.host}`} is already in use. Stop the process listening there, or choose another port with --port, then retry.`;
+  }
+}
+
+export const isAddressInUse = (error: unknown): boolean =>
+  Predicate.isTagged(error, "ServeError") &&
+  Predicate.hasProperty(error, "cause") &&
+  Predicate.hasProperty(error.cause, "code") &&
+  error.cause.code === "EADDRINUSE";
 
 const runServerCommand = Effect.fn("server.runServerCommand")(function* (
   flags: CliServerFlags,
@@ -30,7 +51,12 @@ const runServerCommand = Effect.fn("server.runServerCommand")(function* (
   const selectAutomaticPort = yield* AutomaticPort.make.pipe(Effect.provide(ProcessRunner.layer));
   const config = yield* resolveServerConfig(flags, logLevel, { ...options, selectAutomaticPort });
   const run = Effect.raceFirst(
-    runServer.pipe(Effect.provideService(ServerConfig.ServerConfig, config)),
+    runServer.pipe(
+      Effect.provideService(ServerConfig.ServerConfig, config),
+      Effect.catchIf(isAddressInUse, () =>
+        Effect.fail(new ServerPortInUseError({ host: config.host, port: config.port })),
+      ),
+    ),
     awaitServiceLauncherStop().pipe(Effect.andThen(Effect.interrupt)),
   ).pipe(
     // Settings' Reclaim stops the server; repair once the database is closed, before the restart.

@@ -20,6 +20,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
   SERVER_EXIT_CODE_MANAGED_POLICY,
+  SERVER_EXIT_CODE_PORT_IN_USE,
   SERVER_EXIT_CODE_STATE_DIR_OWNED,
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
@@ -784,10 +785,11 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     const forgetProcess = yield* Fiber.join(tracking);
     yield* forgetProcess;
   }
-  const stateDirOwned =
-    Exit.isSuccess(exit) &&
-    Option.exists(exit.value.code, (code) => code === SERVER_EXIT_CODE_STATE_DIR_OWNED);
-  if (!stateDirOwned && (yield* Ref.get(ownership)) === undefined) {
+  const exitedWith = (expected: number) =>
+    Exit.isSuccess(exit) && Option.exists(exit.value.code, (code) => code === expected);
+  const stateDirOwned = exitedWith(SERVER_EXIT_CODE_STATE_DIR_OWNED);
+  const portInUse = exitedWith(SERVER_EXIT_CODE_PORT_IN_USE);
+  if (!stateDirOwned && !portInUse && (yield* Ref.get(ownership)) === undefined) {
     // Check for a foreign listener if the child exited before reporting readiness.
     if (usesControlChannel) {
       const listener = yield* checkBackendOwnership(ownershipProbe).pipe(Effect.option);
@@ -806,6 +808,13 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     Effect.ignore,
     Effect.withSpan("desktop.backendProcess.drainOutput"),
   );
+  if (portInUse) {
+    return {
+      code: Option.none(),
+      reason: `port ${options.httpBaseUrl.port} is already in use`,
+      portTaken: true,
+    } satisfies BackendProcessExit;
+  }
   if (!stateDirOwned && (yield* Ref.get(ownership)) === "foreign") {
     return {
       code: Option.none(),

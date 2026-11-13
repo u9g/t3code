@@ -72,7 +72,7 @@ export function PullRequestLabelChip({
   return <SharedTooltipTrigger render={badge} label={label.description} />;
 }
 
-function reviewDecisionPresentation(decision: PullRequestReviewDecision) {
+export function reviewDecisionPresentation(decision: PullRequestReviewDecision) {
   switch (decision) {
     case "approved":
       return {

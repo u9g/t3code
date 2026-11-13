@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  collapsedFocusLinks,
   extractFocusIntro,
   extractFocusLinks,
   isFocusVideoLink,
@@ -104,5 +105,20 @@ describe("extractFocusIntro", () => {
     expect(
       extractFocusIntro("- https://github.com/a/b/pull/1\n- https://github.com/a/b/pull/2"),
     ).toBeNull();
+  });
+});
+
+describe("collapsedFocusLinks", () => {
+  const pr = "https://github.com/u9g/t3code/pull/1";
+  const video = "https://example.com/demo.mp4";
+
+  it("keeps GitHub links the intro does not already carry", () => {
+    expect(collapsedFocusLinks([pr, video], "Opened a PR.", false)).toEqual([pr, video]);
+    expect(collapsedFocusLinks([pr, video], `Opened ${pr}.`, false)).toEqual([video]);
+    expect(collapsedFocusLinks([pr, video], null, false)).toEqual([pr, video]);
+  });
+
+  it("keeps an earlier reply's GitHub links but not its videos", () => {
+    expect(collapsedFocusLinks([pr, video], null, true)).toEqual([pr]);
   });
 });

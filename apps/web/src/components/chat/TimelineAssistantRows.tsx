@@ -29,9 +29,9 @@ import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PreviewCard, PreviewCardPopup, PreviewCardTrigger } from "~/components/ui/preview-card";
 import {
+  collapsedFocusLinks,
   extractFocusIntro,
   extractFocusLinks,
-  isFocusVideoLink,
   splitFocusSections,
 } from "@t3tools/shared/focusMode";
 import { cn } from "~/lib/utils";
@@ -110,15 +110,11 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
       )
     : [];
   const messageText = focused
-    ? previousReply
-      ? ""
-      : [
-          ...(focusIntro === null ? [] : [focusIntro, ""]),
-          ...(focusIntro === null
-            ? focusLinks
-            : focusLinks.filter((link) => isFocusVideoLink(link) && !focusIntro.includes(link))),
-          ...pageLinks.flatMap((link) => ["", link]),
-        ].join("\n")
+    ? [
+        ...(focusIntro === null ? [] : [focusIntro, ""]),
+        ...collapsedFocusLinks(focusLinks, focusIntro, previousReply),
+        ...(previousReply ? [] : pageLinks.flatMap((link) => ["", link])),
+      ].join("\n")
     : text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
   const focusSections =
     focusModeEnabled && !row.assistantCopyStreaming && !collapsible

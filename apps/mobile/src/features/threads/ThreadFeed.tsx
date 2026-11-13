@@ -203,9 +203,9 @@ import {
 
 import { AppText as Text } from "../../components/ui/AppText";
 import {
+  collapsedFocusLinks,
   extractFocusIntro,
   extractFocusLinks,
-  isFocusVideoLink,
   splitFocusSections,
 } from "@t3tools/shared/focusMode";
 import { VideoPreviewModal, type VideoPreviewSource } from "../../components/ui/VideoPreviewModal";
@@ -1976,9 +1976,8 @@ function RunFoldButton({
 }
 
 /**
- * Focus mode for one finished assistant reply. Earlier replies collapse to a "Show full reply"
- * control; the latest collapses to its first paragraph and videos (or to its links when it has no
- * paragraph). A reply with neither collapses to its headings, which a tap opens one at a time.
+ * Focus mode for one finished assistant reply. Earlier replies collapse to their GitHub links and a
+ * "Show full reply" control; the latest collapses to its first paragraph and its links. A reply with neither collapses to its headings, which a tap opens one at a time.
  */
 function FocusAssistantMarkdown(props: {
   readonly text: string;
@@ -1992,13 +1991,10 @@ function FocusAssistantMarkdown(props: {
 
   if (props.previous || links.length > 0 || (intro !== null && intro !== props.text.trim())) {
     // Blank lines keep each link on its own line: the native renderer joins single newlines.
-    const summary = props.previous
-      ? ""
-      : [
-          ...(intro === null
-            ? links
-            : [intro, ...links.filter((link) => isFocusVideoLink(link) && !intro.includes(link))]),
-        ].join("\n\n");
+    const summary = [
+      ...(intro === null ? [] : [intro]),
+      ...collapsedFocusLinks(links, intro, props.previous),
+    ].join("\n\n");
     return (
       <>
         {expanded
@@ -2027,7 +2023,7 @@ function FocusAssistantMarkdown(props: {
     }
     const open = openSections.has(index);
     return (
-      <View key={`${index}:${section.heading}`}>
+      <View key={`${section.heading}\n${section.body}`}>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}

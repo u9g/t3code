@@ -22,6 +22,20 @@ export function isFocusVideoLink(link: string): boolean {
   return /\.mp4(?:[?#)]|$)/iu.test(link);
 }
 
+/**
+ * Links a collapsed reply shows above its "Show full reply" control: every link the intro does not
+ * already carry. An earlier reply, which shows no intro, keeps its GitHub links but not its videos.
+ */
+export function collapsedFocusLinks(
+  links: ReadonlyArray<string>,
+  intro: string | null,
+  previous: boolean,
+): ReadonlyArray<string> {
+  return links.filter(
+    (link) => !(previous && isFocusVideoLink(link)) && !(intro?.includes(link) ?? false),
+  );
+}
+
 /** The reply's first prose paragraph: headings, lists, quotes, tables and code blocks are skipped. */
 export function extractFocusIntro(text: string): string | null {
   for (const block of text.split(/\n\s*\n/u)) {

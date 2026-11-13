@@ -112,9 +112,13 @@ const makeInstance = Effect.gen(function* () {
       isRepositoryStarred: makeIsRepositoryStarred,
       starRepository: makeStarRepository,
       linkPreview: Effect.map(
-        GitHubRest.GitHubRest,
-        (github) => (url: string) =>
-          gitHubLinkPreview(url).pipe(Effect.provideService(GitHubRest.GitHubRest, github)),
+        Effect.all([GitHubRest.GitHubRest, GitHubPullRequestApi.GitHubPullRequestApi]),
+        ([github, api]) =>
+          (url: string) =>
+            gitHubLinkPreview(url).pipe(
+              Effect.provideService(GitHubRest.GitHubRest, github),
+              Effect.provideService(GitHubPullRequestApi.GitHubPullRequestApi, api),
+            ),
       ),
     }),
     services,

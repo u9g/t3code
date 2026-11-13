@@ -521,6 +521,17 @@ export const GitHubLinkPreview = Schema.Struct({
   createdAt: Schema.NullOr(IsoDateTime),
   /** The lines a file link's `#L` anchor selects. */
   code: Schema.optional(Schema.Struct({ startLine: PositiveInt, text: Schema.String })),
+  /** A pull request link's place in its stack, with the review and checks it stands at. */
+  pullRequest: Schema.optional(
+    Schema.Struct({
+      headBranch: TrimmedNonEmptyString,
+      baseBranch: TrimmedNonEmptyString,
+      reviewDecision: Schema.NullOr(PullRequestReviewDecision),
+      checksState: Schema.NullOr(PullRequestChecksState),
+      /** The pull request whose head is this base branch; null on the default branch. */
+      parentUrl: Schema.NullOr(TrimmedNonEmptyString),
+    }),
+  ),
 });
 export type GitHubLinkPreview = typeof GitHubLinkPreview.Type;
 

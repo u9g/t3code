@@ -1,4 +1,5 @@
 import type { GitHubLinkPreview, PullRequestActor } from "@t3tools/contracts";
+import * as GitHubPullRequestApi from "./GitHubPullRequestApi.ts";
 import * as GitHubRest from "./GitHubRest.ts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -17,6 +18,15 @@ const IssueOrPull = Schema.Struct({
   user: Schema.NullOr(Account),
   created_at: Schema.String,
 });
+const Pull = Schema.Struct({
+  ...IssueOrPull.fields,
+  head: Schema.Struct({ ref: Schema.String }),
+  base: Schema.Struct({
+    ref: Schema.String,
+    repo: Schema.Struct({ default_branch: Schema.String }),
+  }),
+});
+const PullUrls = Schema.Array(Schema.Struct({ html_url: Schema.String }));
 const Commit = Schema.Struct({
   sha: Schema.String,
   author: Schema.NullOr(Account),
@@ -108,26 +118,60 @@ export const gitHubLinkPreview = Effect.fn("PullRequests.gitHubLinkPreview")(
     const repository = `${owner}/${repo}`;
     if ((section === "pull" || section === "issues") && id !== undefined && /^\d+$/u.test(id)) {
       const item = yield* read(IssueOrPull, `repos/${repository}/issues/${id}`);
-      const pull = item.pull_request !== undefined;
       const details =
-        pull && item.merged_at === undefined
-          ? yield* read(IssueOrPull, `repos/${repository}/pulls/${id}`)
-          : item;
+        item.pull_request === undefined
+          ? null
+          : yield* read(Pull, `repos/${repository}/pulls/${id}`);
+      const state = details ?? item;
+      // A base off the default branch is another pull request's head when this one is stacked.
+      const [summary, parents] =
+        details === null
+          ? [null, []]
+          : yield* Effect.all(
+              [
+                Effect.flatMap(GitHubPullRequestApi.GitHubPullRequestApi, (api) =>
+                  api.getPullRequestSummary({
+                    cwd: "",
+                    repository,
+                    host: "github.com",
+                    number: Number(id),
+                  }),
+                ).pipe(Effect.orElseSucceed(() => null)),
+                details.base.ref === details.base.repo.default_branch
+                  ? Effect.succeed([])
+                  : read(
+                      PullUrls,
+                      `repos/${repository}/pulls?state=all&per_page=1&head=${owner}:${encodeURIComponent(details.base.ref)}`,
+                    ).pipe(Effect.orElseSucceed(() => [])),
+              ],
+              { concurrency: "unbounded" },
+            );
       return {
-        kind: pull ? "pull-request" : "issue",
+        kind: details === null ? "issue" : "pull-request",
         context: `${repository} #${id}`,
         title: item.title,
         description: null,
         state:
-          details.merged_at != null
+          state.merged_at != null
             ? "merged"
-            : details.state === "closed"
+            : state.state === "closed"
               ? "closed"
-              : details.draft === true
+              : state.draft === true
                 ? "draft"
                 : "open",
         author: actor(item.user),
         createdAt: item.created_at,
+        ...(details === null
+          ? {}
+          : {
+              pullRequest: {
+                headBranch: details.head.ref,
+                baseBranch: details.base.ref,
+                reviewDecision: summary?.reviewDecision ?? null,
+                checksState: summary?.checksState ?? null,
+                parentUrl: parents[0]?.html_url ?? null,
+              },
+            }),
       } satisfies GitHubLinkPreview;
     }
 

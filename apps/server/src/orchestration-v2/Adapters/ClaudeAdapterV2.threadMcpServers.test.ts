@@ -215,6 +215,7 @@ describe.each(["local"] as const)("ClaudeAdapterV2 %s thread MCP servers", (tran
                 readMcpResource: () => Effect.die("unused readMcpResource"),
                 callMcpTool: () => Effect.die("unused callMcpTool"),
                 listPermissionRules: Effect.die("unused listPermissionRules"),
+                renameSession: () => Effect.void,
                 interrupt: Effect.void,
                 close: Effect.void,
               };

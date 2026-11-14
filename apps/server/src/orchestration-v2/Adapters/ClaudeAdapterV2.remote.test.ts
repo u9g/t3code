@@ -180,6 +180,7 @@ describe("ClaudeAdapterV2 remote transport", () => {
             readMcpResource: () => Effect.die("unexpected MCP resource read"),
             callMcpTool: () => Effect.die("unexpected MCP tool call"),
             listPermissionRules: Effect.die("unexpected permission rules read"),
+            renameSession: () => Effect.void,
             stopTask: () => Effect.void,
             interrupt: Effect.void,
             close: Effect.void,

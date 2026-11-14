@@ -124,6 +124,7 @@ const CONTROL_FAILURES = {
   readMcpResource: "request_failed",
   callMcpTool: "request_failed",
   listPermissionRules: "request_failed",
+  renameSession: "request_failed",
 } as const satisfies Record<string, ClaudeCloudFailureReason>;
 type ControlMethod = keyof typeof CONTROL_FAILURES;
 const LOGIN_FAILURES = {
@@ -1363,6 +1364,11 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
             result_not_for_model: true,
           }),
         ),
+      // The session's CLI renames itself, which claude.ai shows as the session title.
+      renameSession: (title) =>
+        control("renameSession", (query) =>
+          sendClaudeControlRequest(query, { subtype: "rename_session", title, source: "host" }),
+        ).pipe(Effect.asVoid),
       listPermissionRules: control("listPermissionRules", (query) =>
         sendClaudeControlRequest(query, { subtype: "list_permission_rules" }),
       ).pipe(

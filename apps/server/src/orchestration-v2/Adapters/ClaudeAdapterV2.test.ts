@@ -4039,7 +4039,6 @@ describe("ClaudeAdapterV2 background wake turns", () => {
       return {
         adapter,
         attachmentsDir,
-        adapter,
         runtime,
         providerThread,
         threadId,

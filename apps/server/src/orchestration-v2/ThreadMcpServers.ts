@@ -103,8 +103,9 @@ export const layer = Layer.effect(
           Effect.mapError(fail("read", threadId)),
         );
       }),
-      remove: (threadId) =>
-        secrets.remove(secretName(threadId)).pipe(Effect.mapError(fail("remove", threadId))),
+      remove: Effect.fn("ThreadMcpServers.remove")(function* (threadId) {
+        yield* secrets.remove(secretName(threadId)).pipe(Effect.mapError(fail("remove", threadId)));
+      }),
     };
   }),
 );

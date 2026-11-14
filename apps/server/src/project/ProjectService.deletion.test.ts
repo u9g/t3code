@@ -22,7 +22,7 @@ import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as EventStore from "../orchestration-v2/EventStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as LegacyV1ThreadImporter from "../orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
-import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenance.ts";
+import * as ProjectionReplay from "../orchestration-v2/testkit/ProjectionReplay.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ThreadCommandExecutor from "../orchestration-v2/ThreadCommandExecutor.ts";
@@ -40,7 +40,7 @@ const layerEventPersistence = EventSink.layer.pipe(
 );
 const layerServices = Layer.mergeAll(
   LegacyV1ThreadImporter.layer.pipe(Layer.provideMerge(layerEventPersistence)),
-  ProjectionMaintenance.layer.pipe(Layer.provide(layerEventPersistence)),
+  ProjectionReplay.layer.pipe(Layer.provide(layerEventPersistence)),
   ProjectStore.layer,
   IdAllocator.layer,
   ThreadCommandExecutor.layer,
@@ -204,6 +204,7 @@ it.effect("retries a partial project deletion without repeating child events or 
         partialCleanup.map((effect) => [effect.thread_id, effect.effect_type]),
         [
           [firstThreadId, "preview.cleanup"],
+          [firstThreadId, "provider-files.cleanup"],
           [firstThreadId, "scheduled-tasks.cleanup"],
           [firstThreadId, "terminal.cleanup"],
         ],
@@ -228,7 +229,7 @@ it.effect("retries a partial project deletion without repeating child events or 
       assert.deepEqual(finalEvents[0], partialEvents[0]);
       assert.equal(finalEvents[2]?.command_id, commandId);
       const finalCleanup = yield* readCleanup;
-      assert.lengthOf(finalCleanup, 6);
+      assert.lengthOf(finalCleanup, 8);
       assert.deepEqual(
         finalCleanup.filter((effect) => effect.thread_id === firstThreadId),
         partialCleanup,
@@ -243,6 +244,12 @@ it.effect("retries a partial project deletion without repeating child events or 
               thread_id: threadId,
               command_id: expectedCommandId,
               effect_type: "preview.cleanup",
+            },
+            {
+              effect_id: `effect:${expectedCommandId}:provider-files.cleanup`,
+              thread_id: threadId,
+              command_id: expectedCommandId,
+              effect_type: "provider-files.cleanup",
             },
             {
               effect_id: `effect:${expectedCommandId}:scheduled-tasks.cleanup`,
@@ -310,7 +317,7 @@ it.effect(
 
       yield* Effect.gen(function* () {
         const importer = yield* LegacyV1ThreadImporter.LegacyV1ThreadImporter;
-        const maintenance = yield* ProjectionMaintenance.ProjectionMaintenanceV2;
+        const maintenance = yield* ProjectionReplay.ProjectionReplay;
         const projections = yield* ProjectionStore.ProjectionStoreV2;
         const service = yield* ProjectService.make;
         assert.deepEqual(yield* importer.reconcileShells, {

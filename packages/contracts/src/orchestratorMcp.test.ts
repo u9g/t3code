@@ -4,10 +4,13 @@ import * as Schema from "effect/Schema";
 import {
   OrchestratorMcpDelegateTaskInput,
   OrchestratorMcpDelegateTaskResult,
+  OrchestratorMcpThreadWaitResult,
+  ThreadMcpServers,
 } from "./orchestratorMcp.ts";
 
 const decodeDelegateTaskInput = Schema.decodeUnknownSync(OrchestratorMcpDelegateTaskInput);
 const decodeDelegateTaskResult = Schema.decodeUnknownSync(OrchestratorMcpDelegateTaskResult);
+const decodeThreadWaitResult = Schema.decodeUnknownSync(OrchestratorMcpThreadWaitResult);
 
 describe("orchestrator MCP contracts", () => {
   it("decodes cross-provider delegated task requests and durable results", () => {
@@ -65,5 +68,40 @@ describe("orchestrator MCP contracts", () => {
         pendingApproval: { ...pendingApproval, kind: "user_input" },
       }),
     ).toThrow();
+  });
+
+  it("decodes a running-task next written by another version", () => {
+    const next = "Completion wakes this thread, so end your turn. Do not wait on it or poll it.";
+    expect(
+      decodeThreadWaitResult({
+        threadId: "thread-child-1",
+        runId: "run-child-1",
+        status: "running",
+        timedOut: true,
+        next,
+      }).next,
+    ).toBe(next);
+  });
+});
+
+describe("ThreadMcpServers", () => {
+  const isThreadMcpServers = Schema.is(ThreadMcpServers);
+  const http = { type: "http", url: "http://127.0.0.1:7341/mcp" };
+
+  it("takes named HTTP servers with string headers", () => {
+    expect(
+      isThreadMcpServers({ gem: { ...http, headers: { Authorization: "Bearer x" } }, docs: http }),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["no servers", {}],
+    ["T3 Code's own name", { "t3-code": http }],
+    ["a name Claude rewrites in tool names", { "gem server": http }],
+    ["a stdio server", { gem: { type: "stdio", command: "gem" } }],
+    ["a URL that is not HTTP", { gem: { ...http, url: "file:///mcp" } }],
+    ["a header that is not a string", { gem: { ...http, headers: { Authorization: 1 } } }],
+  ])("rejects %s", (_reason, servers) => {
+    expect(isThreadMcpServers(servers)).toBe(false);
   });
 });

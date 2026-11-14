@@ -183,7 +183,8 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
   }
 
   for (const session of projection.providerSessions) {
-    if (session.status === "stopped" || session.status === "error") continue;
+    // An errored session can still own a reusable live runtime.
+    if (session.status === "stopped") continue;
     yield* emitEvent({
       type: "provider-session.detached",
       threadId: command.threadId,
@@ -235,5 +236,14 @@ export const planThreadDeletion = Effect.fn("ThreadDeletion.planThreadDeletion")
       request: { type: "attachment.cleanup", attachmentIds },
     });
   }
+  // Every thread, not only Claude Cloud ones: a thread that switched providers keeps the
+  // files an earlier provider downloaded. Queued last because a thread's effects run in
+  // order, and a file another app holds open keeps this one retrying.
+  effects.push({
+    id: `effect:${command.commandId}:provider-files.cleanup`,
+    commandId: command.commandId,
+    threadId: command.threadId,
+    request: { type: "provider-files.cleanup" },
+  });
   return { events, effects };
 });

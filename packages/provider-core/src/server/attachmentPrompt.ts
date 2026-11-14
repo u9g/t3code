@@ -166,10 +166,13 @@ export const providerMessageTextWithAttachmentPaths = Effect.fn(
   readonly resolveExtractedTextPath?:
     | ((path: string) => Effect.Effect<string | undefined>)
     | undefined;
+  // The message itself carries each attachment or a note that it was not sent.
+  readonly attachmentsSentInline?: boolean;
 }) {
   let text = input.text;
   // The text-input budget must never hide the existence of an attachment.
   for (const attachment of input.attachments) {
+    if (input.attachmentsSentInline) continue;
     const path = input.resolveAttachmentPath(attachment);
     const extracted =
       path === null || !input.resolveExtractedTextPath

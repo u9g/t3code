@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { markdownFilePathDestination } from "@t3tools/shared/markdownLinks";
+
 import { classifyMarkdownImageSource } from "./markdownImages.js";
 
 describe("classifyMarkdownImageSource", () => {
@@ -16,6 +18,7 @@ describe("classifyMarkdownImageSource", () => {
     expect(classifyMarkdownImageSource(source, workspaceRoot)).toEqual({
       _tag: "WorkspaceFile",
       path,
+      ...(source.startsWith("file:") ? {} : { relative: true }),
     });
   });
 
@@ -25,6 +28,22 @@ describe("classifyMarkdownImageSource", () => {
       expect(classifyMarkdownImageSource(source)).toEqual({ _tag: "Blocked" });
     },
   );
+
+  it.each([
+    [
+      "C:\\Users\\Jo Smith\\.t3\\userdata\\files\\clip (1) #2%.mp4",
+      "C:/Users/Jo Smith/.t3/userdata/files/clip (1) #2%.mp4",
+    ],
+    [
+      "/home/jo smith/.t3/userdata/files/clip (1) #2%.mp4",
+      "/home/jo smith/.t3/userdata/files/clip (1) #2%.mp4",
+    ],
+  ])("reads a destination built from %s back as the file", (path, expected) => {
+    expect(classifyMarkdownImageSource(markdownFilePathDestination(path))).toEqual({
+      _tag: "WorkspaceFile",
+      path: expected,
+    });
+  });
 
   // Loading these makes Windows send the user's NTLM credentials to the named host.
   it.each([

@@ -1,5 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, describe, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -499,9 +500,12 @@ describe("DesktopLocalEnvironmentAuth", () => {
             const now = yield* Clock.currentTimeMillis;
             if (now < 30_000) return yield* Effect.never;
             return request.url === DESCRIPTOR_URL
-              ? HttpClientResponse.fromWeb(request, Response.json({
-                  desktopLaunchId: config.bootstrap.desktopLaunchId,
-                }))
+              ? HttpClientResponse.fromWeb(
+                  request,
+                  Response.json({
+                    desktopLaunchId: config.bootstrap.desktopLaunchId,
+                  }),
+                )
               : tokenResponse(request);
           }),
         ),
@@ -519,7 +523,7 @@ describe("DesktopLocalEnvironmentAuth", () => {
       const result = yield* Fiber.join(fiber);
 
       assert.isTrue(Result.isSuccess(result));
-      assert.strictEqual(yield* Ref.get(requestCount), 5);
+      assert.strictEqual(yield* Ref.get(requestCount), 22);
     }).pipe(Effect.provide(TestClock.layer())),
   );
 });

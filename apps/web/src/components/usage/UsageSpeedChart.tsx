@@ -51,8 +51,8 @@ function buildSpeedSeries(
   pick: (model: ModelSpeed) => readonly (SpeedTotals | undefined)[],
 ): readonly SpeedSeries[] {
   return speed.slice(0, SERIES_COLORS.length).map((model, index) => ({
-    key: `${model.provider} ${model.model}`,
-    label: model.model,
+    key: `${model.provider} ${model.model} ${model.tier}`,
+    label: model.tier === "standard" ? model.model : `${model.model} (${model.tier})`,
     color: SERIES_COLORS[index]!,
     overall: tokensPerSecond(model),
     values: pick(model).map(sampleRate),

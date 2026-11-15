@@ -12,7 +12,11 @@ import type {
   UsageTokenTotals,
 } from "@t3tools/contracts";
 
-import { EMPTY_TOTALS, type UsageRecord } from "@t3tools/provider-core/server/usage";
+import {
+  EMPTY_TOTALS,
+  type UsageRecord,
+  type UsageSpeed,
+} from "@t3tools/provider-core/server/usage";
 import { cacheSavingsUsd, lookupRate, priceUsage, type RateTable } from "./usagePricing.ts";
 
 // en-CA gives ISO-ordered parts in the requested zone; Date getters are host-local.
@@ -82,8 +86,8 @@ interface MutableBucket {
   speedPremiumUsd: number;
   records: number;
   prompts: number;
-  /** Indexed by local hour of day; created on the first timed response. */
-  speed: { outputTokens: number; generationMs: number }[] | null;
+  /** Keyed by service tier, then indexed by local hour of day; created on the first timed response. */
+  speed: Map<UsageSpeed, { outputTokens: number; generationMs: number }[]> | null;
   unpricedRecords: number;
   unpricedTokens: number;
   providerReportedRecords: number;
@@ -353,8 +357,13 @@ export class UsageAggregator {
     bucket.records += 1;
     bucket.prompts += record.prompts ?? 0;
     if (record.generationMs !== undefined && record.totals.outputTokens > 0) {
-      bucket.speed ??= Array.from({ length: 24 }, () => ({ outputTokens: 0, generationMs: 0 }));
-      const sample = bucket.speed[this.#toHourOfDay(record.timestampMs)]!;
+      bucket.speed ??= new Map();
+      let hours = bucket.speed.get(record.speed);
+      if (hours === undefined) {
+        hours = Array.from({ length: 24 }, () => ({ outputTokens: 0, generationMs: 0 }));
+        bucket.speed.set(record.speed, hours);
+      }
+      const sample = hours[this.#toHourOfDay(record.timestampMs)]!;
       sample.outputTokens += record.totals.outputTokens;
       sample.generationMs += record.generationMs;
     }
@@ -511,16 +520,19 @@ export class UsageAggregator {
         ...(bucket.speed === null
           ? {}
           : {
-              speed: bucket.speed.flatMap((sample, hour) =>
-                sample.generationMs === 0
-                  ? []
-                  : [
-                      {
-                        hour,
-                        outputTokens: sample.outputTokens,
-                        generationMs: Math.round(sample.generationMs),
-                      },
-                    ],
+              speed: [...bucket.speed].flatMap(([tier, hours]) =>
+                hours.flatMap((sample, hour) =>
+                  sample.generationMs === 0
+                    ? []
+                    : [
+                        {
+                          hour,
+                          outputTokens: sample.outputTokens,
+                          generationMs: Math.round(sample.generationMs),
+                          ...(tier === "standard" ? {} : { tier }),
+                        },
+                      ],
+                ),
               ),
             }),
         unpricedRecords: bucket.unpricedRecords,

@@ -99,6 +99,8 @@ export function tokensPerSecond(totals: SpeedTotals | undefined): number | null 
 export interface ModelSpeed extends SpeedTotals {
   readonly provider: UsageProviderKind;
   readonly model: string;
+  /** Service tier, so a model's fast turns get their own series. */
+  readonly tier: "standard" | "fast" | "ultrafast";
   /** Keyed by day, or by hourStart for hourly summaries. */
   readonly byPeriod: ReadonlyMap<string, SpeedTotals>;
   /** Indexed by local hour of day, 0 to 23. */
@@ -500,6 +502,7 @@ export function mergeUsage(
     {
       provider: UsageProviderKind;
       model: string;
+      tier: ModelSpeed["tier"];
       outputTokens: number;
       generationMs: number;
       byPeriod: Map<string, { outputTokens: number; generationMs: number }>;
@@ -624,13 +627,15 @@ export function mergeUsage(
       reasoningTokens += bucket.totals.reasoningTokens;
       records += bucket.records;
       prompts += bucket.prompts ?? 0;
-      if (bucket.speed !== undefined && bucket.speed.length > 0) {
-        const speedKey = `${bucket.provider} ${bucket.model}`;
+      for (const sample of bucket.speed ?? []) {
+        const tier = sample.tier ?? "standard";
+        const speedKey = `${bucket.provider} ${bucket.model} ${tier}`;
         let speed = speedAccumulator.get(speedKey);
         if (speed === undefined) {
           speed = {
             provider: bucket.provider,
             model: bucket.model,
+            tier,
             outputTokens: 0,
             generationMs: 0,
             byPeriod: new Map(),
@@ -640,17 +645,15 @@ export function mergeUsage(
         }
         const periodKey = bucket.hourStart ?? bucket.day;
         const period = speed.byPeriod.get(periodKey) ?? { outputTokens: 0, generationMs: 0 };
-        for (const sample of bucket.speed) {
-          speed.outputTokens += sample.outputTokens;
-          speed.generationMs += sample.generationMs;
-          period.outputTokens += sample.outputTokens;
-          period.generationMs += sample.generationMs;
-          const hour = speed.byHourOfDay[sample.hour];
-          if (hour === undefined) continue;
-          hour.outputTokens += sample.outputTokens;
-          hour.generationMs += sample.generationMs;
-        }
         speed.byPeriod.set(periodKey, period);
+        speed.outputTokens += sample.outputTokens;
+        speed.generationMs += sample.generationMs;
+        period.outputTokens += sample.outputTokens;
+        period.generationMs += sample.generationMs;
+        const hour = speed.byHourOfDay[sample.hour];
+        if (hour === undefined) continue;
+        hour.outputTokens += sample.outputTokens;
+        hour.generationMs += sample.generationMs;
       }
       unpricedRecords += bucket.unpricedRecords;
       if (bucket.costSource === "providerReported") providerReportedRecords += bucket.records;

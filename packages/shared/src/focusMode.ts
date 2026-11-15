@@ -36,9 +36,20 @@ export function collapsedFocusLinks(
   );
 }
 
-/** Markdown paragraphs for the links retained by a collapsed reply. */
+/** Adjacent PR links share a paragraph so the inline stack map can render them together. */
 export function focusLinkParagraphs(links: ReadonlyArray<string>): ReadonlyArray<string> {
-  return links.length > 0 ? [links.join("\n")] : [];
+  const paragraphs: Array<string> = [];
+  let previousWasPullRequest = false;
+  for (const link of links) {
+    const isPullRequest = /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+\/?$/u.test(link);
+    if (isPullRequest && previousWasPullRequest) {
+      paragraphs[paragraphs.length - 1] += `\n${link}`;
+    } else {
+      paragraphs.push(link);
+    }
+    previousWasPullRequest = isPullRequest;
+  }
+  return paragraphs;
 }
 
 /** The reply's first prose paragraph: headings, lists, quotes, tables and code blocks are skipped. */

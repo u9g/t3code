@@ -1,3 +1,4 @@
+import { focusLinkParagraphs } from "@t3tools/shared/focusMode";
 import { MISSING_FILE_ACCESS_MESSAGE } from "@t3tools/client-runtime/state/assets";
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
@@ -400,6 +401,22 @@ describe("ChatMarkdown pull request stack map", () => {
       ["#2", second],
     ]);
     expect(map?.querySelector("img")).toBeNull();
+  });
+
+  it("keeps a PR stack inline beside a collapsed reply's commit link", async () => {
+    setup();
+    const commit = "https://github.com/pingdotgg/t3code/commit/abc123";
+    const markdown = ["Published.", ...focusLinkParagraphs([commit, first, second])].join("\n\n");
+    await using screen = await renderText(markdown, {
+      environmentId: EnvironmentId.make("workspace"),
+    });
+    const map = screen.container.querySelector("[data-pull-request-stack-map]");
+    expect(map).not.toBeNull();
+    expect([...map!.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href"))).toEqual([
+      first,
+      second,
+    ]);
+    expect(screen.container.querySelector(`a[href="${commit}"]`)).not.toBeNull();
   });
 
   it("leaves pull request links in prose as links", async () => {

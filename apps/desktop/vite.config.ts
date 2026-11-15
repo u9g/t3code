@@ -31,13 +31,14 @@ export default defineConfig({
     tasks: {
       build: {
         command:
-          "node scripts/build-browser-secret.mjs && node scripts/build-apple-speech.mjs && node scripts/build-preview-annotation-css.mjs && vp pack",
+          "node scripts/build-browser-secret.mjs && node scripts/build-apple-speech.mjs && node scripts/build-preview-annotation-css.mjs && vp pack && node scripts/write-runtime-schema.mjs",
         dependsOn: ["t3#build"],
         cache: false,
       },
       // CI bundle jobs skip the Linux browser secret helper; packaging stages one per arch.
       "build:bundle": {
-        command: "node scripts/build-preview-annotation-css.mjs && vp pack",
+        command:
+          "node scripts/build-preview-annotation-css.mjs && vp pack && node scripts/write-runtime-schema.mjs",
         dependsOn: ["t3#build"],
         cache: false,
       },

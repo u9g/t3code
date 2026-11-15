@@ -209,6 +209,17 @@ describe("UsageAggregator", () => {
     expect(aggregate([record()]).buckets[0]).not.toHaveProperty("speed");
   });
 
+  it("tags timed output from fast responses with its tier", () => {
+    const [bucket] = aggregate([
+      record({ generationMs: 1000 }),
+      record({ generationMs: 500, speed: "fast" }),
+    ]).buckets;
+    expect(bucket?.speed?.map(({ tier, generationMs }) => ({ tier, generationMs }))).toEqual([
+      { tier: undefined, generationMs: 1000 },
+      { tier: "fast", generationMs: 500 },
+    ]);
+  });
+
   it("finds the day at a quarter-hour zone's midnight across interleaved buckets", () => {
     const result = aggregate(
       [

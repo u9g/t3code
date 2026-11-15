@@ -751,6 +751,37 @@ describe("mergeUsage server prompts", () => {
     expect(tokensPerSecond(model?.byHourOfDay[0])).toBeNull();
   });
 
+  it("gives a model's fast turns their own speed series", () => {
+    const source = { provider: "codex" as const, hostId: "mac", homePath: "/Users/me/.codex" };
+    const merged = mergeUsage(
+      [
+        environment(
+          "mac",
+          decodeSummary(
+            summary(
+              [
+                bucket({
+                  provider: "codex",
+                  model: "gpt-6.1-sol",
+                  speed: [
+                    { hour: 9, outputTokens: 1000, generationMs: 10_000 },
+                    { hour: 9, outputTokens: 3000, generationMs: 10_000, tier: "fast" },
+                  ],
+                }),
+              ],
+              [source],
+            ),
+          ),
+        ),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+    expect(merged.speed.map((model) => [model.model, model.tier, tokensPerSecond(model)])).toEqual([
+      ["gpt-6.1-sol", "fast", 300],
+      ["gpt-6.1-sol", "standard", 100],
+    ]);
+  });
+
   it("adds each server's scheduled prompts to the totals, providers, models and days", () => {
     const source = { provider: "claude" as const, hostId: "mac", homePath: "/Users/me/.claude" };
     const withScheduled = (count: number): UsageSummary => ({

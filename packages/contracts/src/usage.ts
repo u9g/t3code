@@ -55,6 +55,8 @@ export const UsageSpeedSample = Schema.Struct({
   hour: NonNegativeInt.check(Schema.isLessThan(24)),
   outputTokens: NonNegativeInt,
   generationMs: NonNegativeInt,
+  /** Service tier the responses ran at; absent for standard. */
+  tier: Schema.optionalKey(Schema.Literals(["fast", "ultrafast"])),
 });
 export type UsageSpeedSample = typeof UsageSpeedSample.Type;
 

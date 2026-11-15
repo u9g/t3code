@@ -99,6 +99,15 @@ export const UsageServerPrompts = Schema.Struct({
 });
 export type UsageServerPrompts = typeof UsageServerPrompts.Type;
 
+export const UsageTurnTimings = Schema.Struct({
+  provider: UsageProviderKind,
+  model: TrimmedNonEmptyString,
+  tier: Schema.Literals(["standard", "fast", "ultrafast"]),
+  /** Completed T3 runs, from submission through completion; kept as samples so environments merge exactly. */
+  durationsMs: Schema.Array(NonNegativeInt),
+});
+export type UsageTurnTimings = typeof UsageTurnTimings.Type;
+
 export const UsageSourceFingerprint = Schema.Struct({
   hostId: TrimmedNonEmptyString,
   provider: UsageProviderKind,
@@ -191,6 +200,8 @@ export const UsageSummary = Schema.Struct({
   scheduledPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageServerPrompts)),
   /** Prompts another thread's agent sent, as `delegate_task` and `t3_thread_send` do. */
   delegatedPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageServerPrompts)),
+  /** Absent on older servers. Independent of transcript-source ownership. */
+  turnTimings: Schema.optionalKey(ForwardCompatibleArray(UsageTurnTimings)),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 

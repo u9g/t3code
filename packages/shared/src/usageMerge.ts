@@ -105,6 +105,7 @@ export interface ModelSpeed extends SpeedTotals {
   readonly byPeriod: ReadonlyMap<string, SpeedTotals>;
   /** Indexed by local hour of day, 0 to 23. */
   readonly byHourOfDay: readonly SpeedTotals[];
+  readonly turnDurationsMs?: readonly number[];
 }
 
 export interface CostQuality {
@@ -507,11 +508,30 @@ export function mergeUsage(
       generationMs: number;
       byPeriod: Map<string, { outputTokens: number; generationMs: number }>;
       byHourOfDay: { outputTokens: number; generationMs: number }[];
+      turnDurationsMs: number[];
     }
   >();
   const contributingEnvironments: EnvironmentId[] = [];
 
   for (const environment of current) {
+    for (const timing of environment.summary.turnTimings ?? []) {
+      const key = `${timing.provider} ${timing.model} ${timing.tier}`;
+      let model = speedAccumulator.get(key);
+      if (model === undefined) {
+        model = {
+          provider: timing.provider,
+          model: timing.model,
+          tier: timing.tier,
+          outputTokens: 0,
+          generationMs: 0,
+          byPeriod: new Map(),
+          byHourOfDay: Array.from({ length: 24 }, () => ({ outputTokens: 0, generationMs: 0 })),
+          turnDurationsMs: [],
+        };
+        speedAccumulator.set(key, model);
+      }
+      for (const duration of timing.durationsMs) model.turnDurationsMs.push(duration);
+    }
     const { buckets, sessionsByProvider } = ownedContribution(
       environment,
       ownerScanByFingerprint,
@@ -640,6 +660,7 @@ export function mergeUsage(
             generationMs: 0,
             byPeriod: new Map(),
             byHourOfDay: Array.from({ length: 24 }, () => ({ outputTokens: 0, generationMs: 0 })),
+            turnDurationsMs: [],
           };
           speedAccumulator.set(speedKey, speed);
         }

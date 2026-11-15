@@ -10,6 +10,7 @@ import type {
   UsageServerPromptKind,
   UsageServerPrompts,
   UsageTokenTotals,
+  UsageTurnTimings,
 } from "@t3tools/contracts";
 
 import {
@@ -136,7 +137,10 @@ export function resolveModelAliases(
 }
 
 /** Matches original IDs, so an alias cannot pull excluded usage into a kept model. */
-function keepsUsageRecord(filter: UsageModelFilter | undefined, record: UsageRecord): boolean {
+function keepsUsageRecord(
+  filter: UsageModelFilter | undefined,
+  record: Pick<UsageRecord, "model" | "provider">,
+): boolean {
   if (filter === undefined) return true;
   const model = record.model.trim();
   const matches = (selector: UsageModelSelector) =>
@@ -169,6 +173,7 @@ export function canonicalModelFilter(
 
 export interface AggregateResult {
   readonly buckets: readonly UsageBucket[];
+  readonly turnTimings: readonly UsageTurnTimings[];
   /** Only the kinds with at least one prompt in the window. */
   readonly serverPrompts: Partial<Record<UsageServerPromptKind, readonly UsageServerPrompts[]>>;
   readonly duplicatesDropped: number;
@@ -255,6 +260,10 @@ interface Contribution {
 export class UsageAggregator {
   readonly #buckets = new Map<string, MutableBucket>();
   readonly #serverPrompts = new Map<UsageServerPromptKind, Map<string, number>>();
+  readonly #turnTimings = new Map<
+    string,
+    { provider: UsageProviderKind; model: string; tier: UsageSpeed; durationsMs: number[] }
+  >();
   readonly #seen = new Map<string, Contribution>();
   readonly #toDay: (timestampMs: number) => string;
   readonly #toHourOfDay: (timestampMs: number) => number;
@@ -376,6 +385,30 @@ export class UsageAggregator {
         record.totals.outputTokens;
     }
     if (priced.costSource === "providerReported") bucket.providerReportedRecords += 1;
+  }
+
+  addCompletedTurn(
+    timestampMs: number,
+    provider: UsageProviderKind,
+    model: string,
+    tier: UsageSpeed,
+    durationMs: number,
+  ): void {
+    if (
+      this.#slotFor(timestampMs) === null ||
+      !Number.isFinite(durationMs) ||
+      durationMs < 0 ||
+      !keepsUsageRecord(this.#options.modelFilter, { provider, model })
+    )
+      return;
+    const mapped = this.#options.modelAliases?.get(model) ?? model;
+    const key = `${provider}\u0000${mapped}\u0000${tier}`;
+    let entry = this.#turnTimings.get(key);
+    if (entry === undefined) {
+      entry = { provider, model: mapped, tier, durationsMs: [] };
+      this.#turnTimings.set(key, entry);
+    }
+    entry.durationsMs.push(Math.round(durationMs));
   }
 
   /** A prompt from the server's own records; counted apart from usage records and their de-duplication. */
@@ -565,6 +598,7 @@ export class UsageAggregator {
     return {
       buckets,
       serverPrompts,
+      turnTimings: [...this.#turnTimings.values()],
       duplicatesDropped: this.#duplicatesDropped,
       outOfWindow: this.#outOfWindow,
     };

@@ -46,14 +46,14 @@ function sampleRate(totals: SpeedTotals | undefined): number | null {
     : tokensPerSecond(totals);
 }
 
-function buildSpeedSeries(
+export function buildSpeedSeries(
   speed: readonly ModelSpeed[],
   pick: (model: ModelSpeed) => readonly (SpeedTotals | undefined)[],
 ): readonly SpeedSeries[] {
-  return speed.slice(0, SERIES_COLORS.length).map((model, index) => ({
+  return speed.map((model, index) => ({
     key: `${model.provider} ${model.model} ${model.tier}`,
     label: model.tier === "standard" ? model.model : `${model.model} (${model.tier})`,
-    color: SERIES_COLORS[index]!,
+    color: SERIES_COLORS[index % SERIES_COLORS.length]!,
     overall: tokensPerSecond(model),
     values: pick(model).map(sampleRate),
   }));
@@ -364,11 +364,7 @@ export function UsageSpeedSection({
       <p className="text-xs text-muted-foreground">
         Output tokens (including reasoning) over the time from a request&apos;s input to its last
         output, so time to first token counts. Points with under{" "}
-        {formatTokens(MIN_SPEED_SAMPLE_TOKENS)} timed output tokens are left out
-        {speed.length > SERIES_COLORS.length
-          ? `; showing the ${SERIES_COLORS.length} models with the most output`
-          : ""}
-        .
+        {formatTokens(MIN_SPEED_SAMPLE_TOKENS)} timed output tokens are left out.
       </p>
     </div>
   );

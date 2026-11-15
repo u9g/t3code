@@ -15268,9 +15268,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                         : Effect.void,
                     ),
                   );
-                  const settled = transport === "remote"
-                    ? handled.pipe(Effect.andThen(settleRemoteBackgroundWorkWaiters))
-                    : handled;
+                  const settled =
+                    transport === "remote"
+                      ? handled.pipe(Effect.andThen(settleRemoteBackgroundWorkWaiters))
+                      : handled;
                   const reportedCwd = turnInput.runtimePolicy.cwd;
                   if (!firstInit || reportedCwd === null || !adapterOptions.onSessionInit) {
                     return settled;

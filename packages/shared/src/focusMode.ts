@@ -36,6 +36,11 @@ export function collapsedFocusLinks(
   );
 }
 
+/** Markdown paragraphs for the links retained by a collapsed reply. */
+export function focusLinkParagraphs(links: ReadonlyArray<string>): ReadonlyArray<string> {
+  return links.length > 0 ? [links.join("\n")] : [];
+}
+
 /** The reply's first prose paragraph: headings, lists, quotes, tables and code blocks are skipped. */
 export function extractFocusIntro(text: string): string | null {
   for (const block of text.split(/\n\s*\n/u)) {

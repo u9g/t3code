@@ -24,6 +24,7 @@ import {
   collapsedFocusLinks,
   extractFocusIntro,
   extractFocusLinks,
+  focusLinkParagraphs,
   splitFocusSections,
 } from "@t3tools/shared/focusMode";
 import { cn } from "~/lib/utils";
@@ -105,7 +106,9 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const messageText = focused
     ? [
         ...(focusIntro === null ? [] : [focusIntro, ""]),
-        ...collapsedFocusLinks(focusLinks, focusIntro, previousReply),
+        ...focusLinkParagraphs(collapsedFocusLinks(focusLinks, focusIntro, previousReply)).flatMap(
+          (paragraph) => [paragraph, ""],
+        ),
         ...(previousReply ? [] : pageLinks.flatMap((link) => ["", link])),
       ].join("\n")
     : text || (row.message.streaming || row.suppressEmptyResponse ? "" : gt("(empty response)"));

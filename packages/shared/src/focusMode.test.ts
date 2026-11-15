@@ -4,6 +4,7 @@ import {
   collapsedFocusLinks,
   extractFocusIntro,
   extractFocusLinks,
+  focusLinkParagraphs,
   isFocusVideoLink,
   splitFocusSections,
 } from "./focusMode.ts";
@@ -120,5 +121,55 @@ describe("collapsedFocusLinks", () => {
 
   it("keeps an earlier reply's GitHub links but not its videos", () => {
     expect(collapsedFocusLinks([pr, video], null, true)).toEqual([pr]);
+  });
+});
+
+describe("focusLinkParagraphs", () => {
+  const pr = "https://github.com/acme/web/pull/1";
+  const otherPr = "https://github.com/acme/web/pull/2";
+  const commit = "https://github.com/acme/web/commit/abc123";
+  const video = "https://example.com/demo.mp4";
+
+  it.each([
+    [[pr, otherPr], [`${pr}\n${otherPr}`]],
+    [
+      [pr, commit],
+      [pr, commit],
+    ],
+    [
+      [pr, video],
+      [pr, video],
+    ],
+    [
+      [commit, pr],
+      [commit, pr],
+    ],
+    [
+      [commit, commit],
+      [commit, commit],
+    ],
+    [
+      [commit, video],
+      [commit, video],
+    ],
+    [
+      [video, pr],
+      [video, pr],
+    ],
+    [
+      [video, commit],
+      [video, commit],
+    ],
+    [
+      [video, video],
+      [video, video],
+    ],
+    [
+      [pr, commit, otherPr],
+      [pr, commit, otherPr],
+    ],
+    [[], []],
+  ])("keeps only adjacent PR links in one paragraph: %j", (links, expected) => {
+    expect(focusLinkParagraphs(links)).toEqual(expected);
   });
 });

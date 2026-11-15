@@ -37,6 +37,7 @@ import * as DesktopShellEnvironment from "../shell/DesktopShellEnvironment.ts";
 import * as DesktopStartupRecovery from "./DesktopStartupRecovery.ts";
 import * as DesktopState from "./DesktopState.ts";
 import * as DesktopRemoteUpdates from "../updates/DesktopRemoteUpdates.ts";
+import * as DesktopRuntimeUpdates from "../updates/DesktopRuntimeUpdates.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopSnapShot from "../snapShot/DesktopSnapShot.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
@@ -176,7 +177,10 @@ const startLocalBackend = Effect.gen(function* () {
     scheme: ElectronProtocol.getDesktopScheme(environment.isDevelopment),
     ...(environment.isDevelopment
       ? { targetOrigin: Option.getOrThrow(environment.devServerUrl) }
-      : { assetDirectory: environment.clientAssetsDir }),
+      : {
+          assetDirectory: environment.clientAssetsDir,
+          resolveAssetDirectory: () => environment.clientAssetsDir,
+        }),
     clerkFrontendApiHostname: DesktopClerk.desktopClerkFrontendApiHostname,
   });
   yield* installDesktopIpcHandlers();
@@ -400,6 +404,7 @@ const startup = Effect.gen(function* () {
   const backendStarted = yield* startLocalBackend.pipe(
     Effect.catchCause((cause) => fatalStartupCause("bootstrap", cause)),
   );
+  if (backendStarted) yield* DesktopRuntimeUpdates.listen();
   yield* previewPasskeys.configure;
   yield* applicationMenu.configure;
   // Portal identity is prepared pre-ready; MIME helpers must not gate the backend or window.

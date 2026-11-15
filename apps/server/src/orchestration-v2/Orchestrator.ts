@@ -1,3 +1,5 @@
+import * as ServerConfig from "../config.ts";
+import { makeRuntimeMaintenanceGate } from "../desktopUpdate/runtimeMaintenance.ts";
 import type {
   OrchestrationV2ThreadLinkMetadata,
   GuestShareId,
@@ -1702,6 +1704,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     );
 
   const fileSystem = yield* FileSystem.FileSystem;
+  const runtimeConfig = yield* Effect.serviceOption(ServerConfig.ServerConfig);
+  const runtimeMaintenance = Option.isSome(runtimeConfig)
+    ? yield* makeRuntimeMaintenanceGate(runtimeConfig.value.baseDir)
+    : undefined;
+  const isClientCommand = Schema.is(OrchestrationV2Command);
   const path = yield* Path.Path;
   const providerAdapters = yield* ProviderAdapterRegistryV2;
   const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
@@ -16663,7 +16670,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   });
 
   /** `sideChatIds` are the live side chats a delete, archive, or unarchive cascades to, read under their locks. */
-  const dispatchWithReceiptEffect = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
+  const dispatchReceiptCore = Effect.fn("orchestrationV2.dispatch.withReceipt")(function* (
     command: OrchestrationV2ServerCommand,
     sideChatIds: ReadonlyArray<ThreadId> = [],
     cancelledTask?: OrchestrationV2Subagent,
@@ -16673,6 +16680,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       "orchestration_v2.command_type": command.type,
       "orchestration_v2.thread_id": commandThreadId(command),
     });
+
+    if (isClientCommand(command) && runtimeMaintenance && (yield* runtimeMaintenance.active)) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: new Error("T3 Code is applying an update. Retry when it reconnects."),
+      });
+    }
 
     const existingReceipt = yield* commandReceipts.getByCommandId(command.commandId).pipe(
       Effect.mapError(
@@ -16944,6 +16959,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...(committed.committed ? {} : { replayed: true as const }),
     } satisfies OrchestratorV2DispatchResult;
   }, withCommandMetrics);
+
+  const dispatchWithReceiptEffect = (...args: Parameters<typeof dispatchReceiptCore>) => {
+    const effect = dispatchReceiptCore(...args);
+    return runtimeMaintenance ? runtimeMaintenance.withAdmission(effect) : effect;
+  };
 
   // Follow-up intake and Stop serialize on the parent before taking the child lock.
   const withSubagentParentLock = <A, E, R>(threadId: ThreadId, dispatch: Effect.Effect<A, E, R>) =>

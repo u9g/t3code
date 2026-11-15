@@ -16,6 +16,7 @@ import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveLinuxDesktopEntryName } from "./DesktopEarlyElectronStartup.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
+import { loadCompatibleRuntime, type RuntimeBundle } from "../updates/runtimeBundle.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
 
 export interface MakeDesktopEnvironmentInput {
@@ -54,6 +55,12 @@ export class DesktopEnvironment extends Context.Service<
     readonly browserArtifactsDir: string;
     readonly rootDir: string;
     readonly appRoot: string;
+    readonly runtimeBundles?:
+      | {
+          readonly current: () => RuntimeBundle | null;
+          readonly select: (runtime: RuntimeBundle | null) => void;
+        }
+      | undefined;
     readonly serverRoot: string;
     readonly backendEntryPath: string;
     readonly clientAssetsDir: string;
@@ -168,6 +175,19 @@ const make = Effect.fn("desktop.environment.make")(function* (
     input.isPackaged && input.platform === "win32"
       ? path.join(input.resourcesPath, "server.asar")
       : appRoot;
+  let runtime =
+    input.isPackaged && input.platform === "darwin"
+      ? loadCompatibleRuntime(baseDir, appRoot)
+      : null;
+  const runtimeBundles =
+    input.isPackaged && input.platform === "darwin"
+      ? {
+          current: () => runtime,
+          select: (selected: RuntimeBundle | null) => {
+            runtime = selected;
+          },
+        }
+      : undefined;
   const branding = resolveDesktopAppBranding({
     isDevelopment,
     appVersion: input.appVersion,
@@ -207,9 +227,16 @@ const make = Effect.fn("desktop.environment.make")(function* (
     browserArtifactsDir: path.join(stateDir, "browser-artifacts"),
     rootDir,
     appRoot,
-    serverRoot,
-    backendEntryPath: path.join(serverRoot, "apps/server/dist/bin.mjs"),
-    clientAssetsDir: path.join(serverRoot, "apps/server/dist/client"),
+    runtimeBundles,
+    get serverRoot() {
+      return runtime?.appRoot ?? serverRoot;
+    },
+    get backendEntryPath() {
+      return path.join(runtime?.appRoot ?? serverRoot, "apps/server/dist/bin.mjs");
+    },
+    get clientAssetsDir() {
+      return path.join(runtime?.appRoot ?? serverRoot, "apps/server/dist/client");
+    },
     backendCwd: input.isPackaged ? homeDirectory : appRoot,
     preloadPath: path.join(input.dirname, "preload.cjs"),
     previewPickPreloadPath: path.join(input.dirname, "preview-pick-preload.cjs"),

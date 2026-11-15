@@ -171,10 +171,12 @@ export class UsageService extends Context.Service<
   }
 >()("t3/usage/UsageService") {}
 
+const isUsageProviderKind = Schema.is(UsageProviderKind);
+
 /** Usage groups providers by product; a run records the driver that ran it. */
 function usageProviderForDriver(driver: string): UsageProviderKind | null {
   if (driver === "claudeAgent") return "claude";
-  return Schema.is(UsageProviderKind)(driver) ? driver : null;
+  return isUsageProviderKind(driver) ? driver : null;
 }
 
 export const make = Effect.gen(function* () {
@@ -228,6 +230,36 @@ export const make = Effect.gen(function* () {
       WHERE (json_extract(message.payload_json, '$.scheduledTaskId') IS NOT NULL
           OR json_extract(message.payload_json, '$.senderThreadId') IS NOT NULL)
         AND json_extract(run.payload_json, '$.startedAt') >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
+    `.pipe(Effect.orElseSucceed(() => []));
+
+  const readCompletedTurns = (sinceMs: number, untilMs: number) =>
+    sql<{
+      readonly provider: string;
+      readonly model: string | null;
+      readonly requested_at: string;
+      readonly completed_at: string;
+      readonly tier: "standard" | "fast" | "ultrafast";
+    }>`
+      SELECT run.provider,
+        json_extract(run.payload_json, '$.modelSelection.model') AS model,
+        run.requested_at,
+        COALESCE(run.completed_at, json_extract(run.payload_json, '$.completedAt')) AS completed_at,
+        CASE
+          WHEN EXISTS (SELECT 1 FROM json_each(json_extract(run.payload_json, '$.modelSelection.options')) AS option
+            WHERE json_extract(option.value, '$.id') = 'serviceTier'
+              AND json_extract(option.value, '$.value') = 'ultrafast') THEN 'ultrafast'
+          WHEN EXISTS (SELECT 1 FROM json_each(json_extract(run.payload_json, '$.modelSelection.options')) AS option
+            WHERE (json_extract(option.value, '$.id') = 'serviceTier'
+              AND json_extract(option.value, '$.value') IN ('priority', 'fast'))
+              OR (json_extract(option.value, '$.id') = 'fastMode'
+                AND json_extract(option.value, '$.value') = 1)) THEN 'fast'
+          ELSE 'standard'
+        END AS tier
+      FROM orchestration_v2_projection_runs AS run
+      WHERE run.status = 'completed'
+        AND run.requested_at >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
+        AND run.requested_at < ${DateTime.formatIso(DateTime.makeUnsafe(untilMs))}
+        AND COALESCE(run.completed_at, json_extract(run.payload_json, '$.completedAt')) IS NOT NULL
     `.pipe(Effect.orElseSucceed(() => []));
 
   const fileCache: ScanCache = new Map();
@@ -1223,6 +1255,19 @@ export const make = Effect.gen(function* () {
       if (provider === null || row.model === null || Number.isNaN(timestampMs)) continue;
       aggregator.addServerPrompt(row.kind, timestampMs, provider, row.model);
     }
+    for (const row of yield* readCompletedTurns(windowStartMs, windowEndMs)) {
+      const provider = usageProviderForDriver(row.provider);
+      const requestedMs = Date.parse(row.requested_at);
+      const completedMs = Date.parse(row.completed_at);
+      if (provider === null || row.model === null || !Number.isFinite(requestedMs)) continue;
+      aggregator.addCompletedTurn(
+        requestedMs,
+        provider,
+        row.model,
+        row.tier,
+        completedMs - requestedMs,
+      );
+    }
     const aggregated = aggregator.finish();
     const readAt = yield* DateTime.now;
     const finishedAtMs = yield* Clock.currentTimeMillis;
@@ -1239,6 +1284,7 @@ export const make = Effect.gen(function* () {
       scanDurationMs: Math.max(0, finishedAtMs - startedAtMs),
       ...(input.modelFilter === undefined ? {} : { modelFilter: input.modelFilter }),
       ...aggregated.serverPrompts,
+      turnTimings: aggregated.turnTimings,
     } satisfies UsageSummary;
     return { summary, fromMemory };
   });

@@ -567,13 +567,7 @@ export function UsagePage() {
                 ))}
               </div>
             ) : metric === "speed" ? (
-              <UsageSpeedSection
-                speed={merged.speed}
-                periods={shownHourly ? hours : days}
-                resolution={shownHourly ? "hour" : "day"}
-                timeZone={shownWindow.timeZone}
-                hour12={hour12}
-              />
+              <UsageSpeedSection speed={merged.speed} />
             ) : (
               <UsageOverview
                 merged={merged}

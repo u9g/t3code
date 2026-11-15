@@ -87,6 +87,48 @@ function environment(id: string, usageSummary: UsageSummary): EnvironmentUsage {
 }
 
 describe("mergeUsage", () => {
+  it("merges completed-turn samples across environments independently of shared transcript ownership", () => {
+    const source = { provider: "codex" as const, hostId: "same", homePath: "/sessions" };
+    const usage = summary(
+      [
+        bucket({
+          provider: "codex",
+          model: "test",
+          speed: [{ hour: 1, outputTokens: 1000, generationMs: 1000 }],
+        }),
+      ],
+      [source],
+    );
+    const result = mergeUsage(
+      [
+        environment("one", {
+          ...usage,
+          turnTimings: [
+            { provider: "codex", model: "test", tier: "standard", durationsMs: [1000, 2000] },
+          ],
+        }),
+        environment("two", {
+          ...usage,
+          sources: usage.sources.map((source) => ({ ...source })),
+          turnTimings: [
+            { provider: "codex", model: "test", tier: "standard", durationsMs: [3000] },
+            { provider: "codex", model: "test", tier: "fast", durationsMs: [500] },
+          ],
+        }),
+      ],
+      USAGE_CONTRACT_VERSION,
+    );
+    expect(result.speed.find((row) => row.tier === "standard")?.turnDurationsMs).toEqual([
+      1000, 2000, 3000,
+    ]);
+    expect(result.speed.find((row) => row.tier === "fast")?.turnDurationsMs).toEqual([500]);
+    expect(result.speed.find((row) => row.tier === "standard")?.outputTokens).toBe(1000);
+    expect(
+      mergeUsage([environment("old", usage)], USAGE_CONTRACT_VERSION).speed[0]?.turnDurationsMs ??
+        [],
+    ).toEqual([]);
+  });
+
   it("counts a Cursor account once across servers while retaining each server's other providers", () => {
     const account = {
       provider: "cursor" as const,

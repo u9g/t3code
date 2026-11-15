@@ -120,6 +120,7 @@ function keepUsage(
   const kept: { -readonly [Key in keyof UsageSummary]: UsageSummary[Key] } = {
     ...summary,
     buckets: summary.buckets.filter(keep),
+    ...(summary.turnTimings === undefined ? {} : { turnTimings: summary.turnTimings.filter(keep) }),
   };
   for (const kind of USAGE_SERVER_PROMPT_KINDS) {
     const prompts = summary[kind];

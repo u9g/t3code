@@ -526,6 +526,35 @@ describe("Codex usage history", () => {
 });
 
 describe("UsageService", () => {
+  it.effect(
+    "reports completed run timings with recorded service tiers and excludes other run states",
+    () =>
+      Effect.gen(function* () {
+        const { home, settings } = yield* setup;
+        yield* Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const options = [
+            [],
+            [{ id: "serviceTier", value: "priority" }],
+            [{ id: "serviceTier", value: "ultrafast" }],
+            [{ id: "fastMode", value: true }],
+          ];
+          for (const [index, selected] of options.entries()) {
+            for (const status of ["completed", "failed", "cancelled", "running"] as const) {
+              yield* sql`INSERT INTO orchestration_v2_projection_runs ${sql.insert({ run_id: `timing-${index}-${status}`, thread_id: `thread-${index}-${status}`, ordinal: index + 1, provider: "codex", status, requested_at: "2026-08-01T10:00:00.000Z", completed_at: "2026-08-01T10:00:01.000Z", payload_json: encodeUnknownJsonString({ modelSelection: { model: "gpt-6.1-sol", options: selected } }) })}`;
+            }
+          }
+          const service = yield* UsageService.make;
+          const result = yield* service.readSummary(WINDOW);
+          assert.deepStrictEqual(result.turnTimings, [
+            { provider: "codex", model: "gpt-6.1-sol", tier: "standard", durationsMs: [1000] },
+            { provider: "codex", model: "gpt-6.1-sol", tier: "fast", durationsMs: [1000, 1000] },
+            { provider: "codex", model: "gpt-6.1-sol", tier: "ultrafast", durationsMs: [1000] },
+          ]);
+        }).pipe(Effect.provide(layerService({ prefix: "turn-timings", home, settings })));
+      }).pipe(Effect.scoped),
+  );
+
   it.effect("keeps pricing metadata paired with the rates used during a concurrent refresh", () =>
     Effect.gen(function* () {
       const { home, settings } = yield* setup;

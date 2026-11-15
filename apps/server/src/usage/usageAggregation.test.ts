@@ -350,6 +350,36 @@ describe("resolveModelAliases", () => {
 });
 
 describe("server prompts", () => {
+  it("keeps completed-turn durations inside the exact window, filtered before aliases and separated by tier", () => {
+    for (const resolution of ["day", "hour"] as const) {
+      const aggregator = new UsageAggregator({
+        timeZone: "America/Los_Angeles",
+        sinceDay: "2026-08-01",
+        untilDay: "2026-08-01",
+        resolution,
+        sinceTimeMs: Date.parse("2026-08-01T07:00:00Z"),
+        untilTimeMs: Date.parse("2026-08-02T07:00:00Z"),
+        rates,
+        modelAliases: resolveModelAliases({ preview: "aliased" }),
+        modelFilter: { exclude: [{ model: "excluded" }] },
+      });
+      for (const [at, model, tier, ms] of [
+        ["2026-08-01T06:59:59Z", "preview", "standard", 900],
+        ["2026-08-01T07:00:00Z", "preview", "standard", 1000],
+        ["2026-08-02T06:59:59Z", "preview", "fast", 2000],
+        ["2026-08-02T07:00:00Z", "preview", "standard", 900],
+        ["2026-08-01T08:00:00Z", "excluded", "standard", 900],
+        ["2026-08-01T08:00:00Z", "preview", "standard", -1],
+        ["2026-08-01T08:00:00Z", "preview", "standard", NaN],
+      ] as const)
+        aggregator.addCompletedTurn(Date.parse(at), "codex", model, tier, ms);
+      expect(aggregator.finish().turnTimings).toEqual([
+        { provider: "codex", model: "aliased", tier: "standard", durationsMs: [1000] },
+        { provider: "codex", model: "aliased", tier: "fast", durationsMs: [2000] },
+      ]);
+    }
+  });
+
   it("counts each kind by day, provider and aliased model, inside the window only", () => {
     const aggregator = new UsageAggregator({
       timeZone: "UTC",

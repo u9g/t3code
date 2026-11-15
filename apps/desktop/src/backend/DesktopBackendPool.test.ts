@@ -565,7 +565,10 @@ describe("DesktopBackendPool", () => {
             ),
             httpClient: HttpClient.make((request) =>
               Effect.succeed(
-                HttpClientResponse.fromWeb(request, new Response(null, { status: 200 })),
+                HttpClientResponse.fromWeb(
+                  request,
+                  Response.json({ desktopLaunchId: runningConfig.bootstrap.desktopLaunchId }),
+                ),
               ),
             ),
             onMainContentsCommand: (command) => Effect.sync(() => void events.push(command)),

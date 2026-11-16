@@ -673,6 +673,35 @@ describe("ThreadTitleRegenerationService", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("stores the icon picked with the title, even when the title is unchanged", () =>
+    Effect.gen(function* () {
+      const harness = makeHarness({
+        generateTitle: () => Effect.succeed({ title: "Seed title", icon: "key-round" }),
+      });
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadManagement.ThreadManagementService;
+        const titleRegeneration = yield* ThreadTitleRegeneration.ThreadTitleRegenerationService;
+        const threadId = yield* createThread({
+          command: "command:title:icon:create",
+          thread: "thread:title:icon",
+        });
+        yield* dispatchUserMessage({
+          command: "command:title:icon:message",
+          threadId,
+          text: "Why does Claude sign-in fail?",
+        });
+        const requestId = yield* armRegeneration({ command: "command:title:icon:1", threadId });
+
+        yield* titleRegeneration.execute({ threadId, requestId, kind: { type: "regenerate" } });
+
+        const projection = yield* threads.getThreadProjection(threadId);
+        assert.equal(projection.thread.title, "Seed title");
+        assert.equal(projection.thread.icon, "key-round");
+        assert.deepInclude(projection.thread.lastTitleRegeneration, { status: "unchanged" });
+      }).pipe(Effect.provide(harness.layer));
+    }),
+  );
+
   it.effect.each([
     { name: "its first message", followUp: true },
     { name: "no message of its own yet", followUp: false },

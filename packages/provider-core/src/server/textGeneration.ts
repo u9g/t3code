@@ -77,6 +77,8 @@ export interface ThreadTitleGenerationInput {
 export interface ThreadTitleGenerationResult {
   title: string;
   needsRefinement?: boolean | undefined;
+  /** A kebab-case Lucide icon name for the thread, when the model picked one. */
+  icon?: string | undefined;
 }
 
 export interface ReviewGuideStackLayer {

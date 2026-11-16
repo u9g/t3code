@@ -157,6 +157,8 @@ export interface EnvironmentThreadShell {
   readonly id: ThreadId;
   readonly projectId: ProjectId;
   readonly title: string;
+  /** A Lucide icon name chosen with the title; null until a title generation picks one. */
+  readonly icon: string | null;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelSelection: OrchestrationV2ThreadShell["modelSelection"];
   readonly runtimeMode: OrchestrationV2ThreadShell["runtimeMode"];
@@ -308,6 +310,7 @@ export function presentThreadShell(
       thread.lineage.relationshipToParent === "subagent"
         ? formatSubagentDisplayTitle(thread.title)
         : thread.title,
+    icon: thread.icon ?? null,
     providerInstanceId: thread.providerInstanceId,
     modelSelection: thread.modelSelection,
     runtimeMode: thread.runtimeMode,

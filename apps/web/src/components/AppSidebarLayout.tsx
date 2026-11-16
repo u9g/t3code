@@ -33,7 +33,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { cn, isMacPlatform } from "../lib/utils";
 import { primaryServerKeybindingsAtom } from "../state/server";
-import { useEnvironmentIdentificationMode } from "../hooks/useSettings";
+import { useClientSettings, useEnvironmentIdentificationMode } from "../hooks/useSettings";
 import {
   PanelAnimationSuppressionProvider,
   usePanelAnimationSettings,
@@ -425,6 +425,8 @@ export function AppSidebarLayout({
 }) {
   const gt = useGT();
   const sidebarArea = workspaceAreaProps("sidebar", 0, gt("Threads"));
+  // Card rows lead with thread icons, so the sidebar rests as a rail of them; folder rows do not.
+  const iconRail = !useClientSettings((settings) => settings.boringSidebarEnabled);
   const [sidebarRouteReveal] = useState<SidebarRouteReveal>(() => ({
     observedKey: null,
     pendingKey: null,
@@ -479,6 +481,7 @@ export function AppSidebarLayout({
               side="left"
               collapsible="offcanvas"
               data-app-sidebar=""
+              data-icon-rail={iconRail ? "" : undefined}
               {...sidebarArea}
               role="navigation"
               aria-label={gt("Threads")}

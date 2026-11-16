@@ -50,9 +50,10 @@ export class ThreadTitleRegenerationService extends Context.Service<
   }
 >()("t3/orchestration-v2/ThreadTitleRegenerationService") {}
 
+// An unchanged title can still bring a new icon, so threads titled before icons existed get one.
 type Outcome =
-  | { readonly status: "renamed"; readonly title: string }
-  | { readonly status: "unchanged" }
+  | { readonly status: "renamed"; readonly title: string; readonly icon?: string }
+  | { readonly status: "unchanged"; readonly icon?: string }
   | { readonly status: "failed"; readonly message: string };
 
 const MAX_FAILURE_MESSAGE_LENGTH = 300;
@@ -101,6 +102,9 @@ const make = Effect.gen(function* () {
         threadId: input.threadId,
         requestId: input.requestId,
         ...(input.outcome.status === "renamed" ? { title: input.outcome.title } : {}),
+        ...(input.outcome.status !== "failed" && input.outcome.icon !== undefined
+          ? { icon: input.outcome.icon }
+          : {}),
         ...(input.kind.type === "regenerate"
           ? {
               outcome: {
@@ -237,10 +241,11 @@ const make = Effect.gen(function* () {
         projectId: projection.thread.projectId,
       });
       const generatedTitle = result.title.trim();
+      const icon = result.icon === undefined ? {} : { icon: result.icon };
       return generatedTitle === "New thread" ||
         (input.kind.type === "regenerate" && generatedTitle === projection.thread.title.trim())
-        ? { status: "unchanged" as const }
-        : { status: "renamed" as const, title: result.title };
+        ? { status: "unchanged" as const, ...icon }
+        : { status: "renamed" as const, title: result.title, ...icon };
     }).pipe(
       Effect.retry({
         times: input.kind.type === "initial" ? 2 : 0,

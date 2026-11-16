@@ -2733,3 +2733,45 @@ code {
 .messages-timeline-scroll:focus-visible {
   outline: none;
 }
+
+/*
+ * The thread sidebar rests as a rail of thread icons and widens over the page on hover or
+ * keyboard focus, like Chrome's vertical tabs. The gap keeps the page at the rail's width,
+ * so opening the rail covers the page instead of pushing it.
+ */
+@media (min-width: 768px) {
+  [data-slot="sidebar"][data-state="expanded"]:has(> [data-icon-rail]) > [data-slot="sidebar-gap"] {
+    width: 54px !important;
+  }
+  [data-slot="sidebar"][data-state="expanded"] > [data-slot="sidebar-container"][data-icon-rail] {
+    width: 54px !important;
+    overflow: hidden;
+    z-index: 60;
+    transition:
+      width 160ms ease-out,
+      box-shadow 160ms ease-out;
+  }
+  [data-slot="sidebar"][data-state="expanded"]
+    > [data-slot="sidebar-container"][data-icon-rail]:is(:hover, :has(:focus-visible)) {
+    width: var(--sidebar-width) !important;
+    box-shadow: 0 12px 48px rgb(0 0 0 / 0.18);
+  }
+  [data-slot="sidebar-container"][data-icon-rail] > [data-slot="sidebar-inner"] {
+    width: var(--sidebar-width);
+    min-width: var(--sidebar-width);
+  }
+  [data-slot="sidebar-container"][data-icon-rail] [data-slot="sidebar-inner"] * {
+    transition: color 120ms ease-out;
+  }
+  /* At rest only the thread icons show; everything else fades in as the rail opens. */
+  [data-slot="sidebar-container"][data-icon-rail]:not(:hover, :has(:focus-visible))
+    [data-slot="sidebar-inner"]
+    *:not([data-thread-icon], [data-thread-icon] *) {
+    color: transparent !important;
+  }
+  [data-slot="sidebar-container"][data-icon-rail]:not(:hover, :has(:focus-visible))
+    [data-slot="sidebar-inner"]
+    ::placeholder {
+    color: transparent !important;
+  }
+}

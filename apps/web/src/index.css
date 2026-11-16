@@ -2688,10 +2688,10 @@ code {
     width: var(--sidebar-width);
     min-width: var(--sidebar-width);
   }
-  [data-slot="sidebar-container"][data-icon-rail] [data-slot="sidebar-inner"] * {
-    transition: color 120ms ease-out;
-  }
-  /* At rest only the thread icons show; everything else fades in as the rail opens. */
+  /*
+   * At rest only the thread icons show; the rest appears as the rail opens. No color transition:
+   * one per element runs hundreds of animations at once and stalls the open for ~300ms.
+   */
   [data-slot="sidebar-container"][data-icon-rail]:not(:hover, :has(:focus-visible))
     [data-slot="sidebar-inner"]
     *:not([data-thread-icon], [data-thread-icon] *) {

@@ -9,6 +9,7 @@ import {
   formatSpeedValue,
   nextSpeedSort,
   sortSpeedRows,
+  speedAxis,
   speedBaseline,
   speedValues,
   TURN_PERCENTILES,
@@ -17,6 +18,68 @@ import {
   type SpeedSortColumn,
   type TurnPercentile,
 } from "./UsageSpeedChart.logic";
+
+function SpeedBar({
+  value,
+  maximum,
+  color,
+  display,
+}: {
+  readonly value: number | null;
+  readonly maximum: number;
+  readonly color: string;
+  readonly display: SpeedDisplay;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="relative h-4 min-w-0 flex-1" aria-hidden>
+        {value === null ? null : (
+          <div
+            className="h-full rounded-sm transition-[width] duration-150 motion-reduce:transition-none"
+            style={{ width: `${(value / maximum) * 100}%`, backgroundColor: color }}
+          />
+        )}
+        {display === "relative" ? (
+          <div
+            className="absolute -top-0.5 h-5 w-px bg-muted-foreground/35"
+            style={{ left: `${(100 / maximum) * 100}%` }}
+          />
+        ) : null}
+      </div>
+      <span className="w-18 shrink-0 text-right tabular-nums">
+        {formatSpeedValue(value, display)}
+      </span>
+    </div>
+  );
+}
+
+function SpeedTicks({
+  maximum,
+  display,
+}: {
+  readonly maximum: number;
+  readonly display: SpeedDisplay;
+}) {
+  return (
+    <div
+      className="flex items-center gap-3 pt-3 text-3xs text-muted-foreground tabular-nums"
+      aria-hidden
+    >
+      <div className="flex min-w-0 flex-1 justify-between">
+        {[0, 0.5, 1].map((fraction) => (
+          <span key={fraction}>
+            {display === "relative"
+              ? `${fraction * maximum}%`
+              : maximum * fraction >= 60_000
+                ? `${(maximum * fraction) / 60_000}m`
+                : `${(maximum * fraction) / 1000}s`}
+          </span>
+        ))}
+      </div>
+      <span className="w-18 shrink-0" />
+    </div>
+  );
+}
 
 export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpeed[] }) {
   const [display, setDisplay] = useState<SpeedDisplay>("absolute");
@@ -31,6 +94,14 @@ export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpe
           row,
           ...speedValues(row, baseline, display, percentile),
         }));
+  const outputMaximum = speedAxis(
+    Math.max(0, ...values.map((value) => value.output ?? 0)),
+    display,
+  );
+  const finishMaximum = speedAxis(
+    Math.max(0, ...values.map((value) => value.finish ?? 0)),
+    display,
+  );
   const relativeLabel = `${baseline?.label ?? "Baseline"} = 100% · higher is faster`;
 
   const sortHeader = (column: SpeedSortColumn, label: string) => (
@@ -69,10 +140,10 @@ export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpe
         <div className="overflow-x-auto">
           <table className="w-full min-w-160 table-fixed text-xs" aria-label="Model speed">
             <colgroup>
-              <col className="w-[30%]" />
-              <col className="w-[12%]" />
-              <col className="w-[28%]" />
-              <col className="w-[30%]" />
+              <col className="w-[23%]" />
+              <col className="w-[8%]" />
+              <col className="w-[34.5%]" />
+              <col className="w-[34.5%]" />
             </colgroup>
             <thead>
               <tr className="align-top text-left font-normal">
@@ -94,7 +165,7 @@ export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpe
                 <th
                   scope="col"
                   aria-sort={sortDirection("output")}
-                  className="pb-4 pe-5 text-right font-normal"
+                  className="pb-4 pe-5 font-normal"
                 >
                   {sortHeader("output", "Output speed")}
                   <span className="mt-1.5 block text-3xs text-muted-foreground">
@@ -103,12 +174,8 @@ export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpe
                       : "Time / 1,000 tokens · lower is faster"}
                   </span>
                 </th>
-                <th
-                  scope="col"
-                  aria-sort={sortDirection("finish")}
-                  className="pb-4 text-right font-normal"
-                >
-                  <div className="flex items-center justify-end gap-1">
+                <th scope="col" aria-sort={sortDirection("finish")} className="pb-4 font-normal">
+                  <div className="flex items-center gap-1">
                     <Select
                       value={String(percentile)}
                       onValueChange={(value) => {
@@ -154,15 +221,37 @@ export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpe
                   <td className="py-3 pe-5 text-right text-muted-foreground tabular-nums">
                     {row.turns.toLocaleString()}
                   </td>
-                  <td className="py-3 pe-5 text-right tabular-nums">
-                    {formatSpeedValue(output, display)}
+                  <td className="py-3 pe-5">
+                    <SpeedBar
+                      value={output}
+                      maximum={outputMaximum}
+                      color={row.color}
+                      display={display}
+                    />
                   </td>
-                  <td className="py-3 text-right tabular-nums">
-                    {formatSpeedValue(finish, display)}
+                  <td className="py-3">
+                    <SpeedBar
+                      value={finish}
+                      maximum={finishMaximum}
+                      color={row.color}
+                      display={display}
+                    />
                   </td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <td />
+                <td />
+                <td className="pe-5">
+                  <SpeedTicks maximum={outputMaximum} display={display} />
+                </td>
+                <td>
+                  <SpeedTicks maximum={finishMaximum} display={display} />
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}

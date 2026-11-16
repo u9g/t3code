@@ -128,6 +128,17 @@ export function speedValues(
   };
 }
 
+export function speedAxis(maximum: number, display: SpeedDisplay): number {
+  if (display === "relative") return Math.max(100, Math.ceil(maximum / 50) * 50);
+  const seconds = maximum / 1000;
+  return (
+    ([
+      5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 300, 600, 900, 1200, 1800, 2400, 3600, 7200, 14400,
+      28800, 86400,
+    ].find((value) => value >= seconds) ?? seconds) * 1000
+  );
+}
+
 export function formatSpeedValue(value: number | null, display: SpeedDisplay): string {
   if (value === null) return "n/a";
   if (display === "relative") return `${Math.round(value)}%`;

@@ -46,6 +46,10 @@
     "./server/CursorSdk": {
       "types": "./src/server/CursorSdk.ts",
       "import": "./src/server/CursorSdk.ts"
+    },
+    "./server/CursorGenerationHistory": {
+      "types": "./src/server/CursorGenerationHistory.ts",
+      "import": "./src/server/CursorGenerationHistory.ts"
     }
   },
   "scripts": {

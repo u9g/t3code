@@ -33,7 +33,6 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -48,7 +47,6 @@ import * as Stream from "effect/Stream";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { backgroundWorkNotification } from "@t3tools/provider-core/server/notification";
-import { generationMs } from "@t3tools/provider-core/server/usage";
 import { mcpToolPresentation } from "@t3tools/provider-core/server/mcpToolPresentation";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
@@ -997,11 +995,6 @@ interface ActiveCursorTurn {
   readonly session: CursorAgentSdk.CursorAgentSdkSession;
   /** What Cursor billed for this run, summed over its turn-ended updates. */
   usage: CursorTurnUsage | undefined;
-  generationStartedAtMs: number | undefined;
-  pendingGenerationMs: number;
-  generationStepObserved: boolean;
-  generationComplete: boolean;
-  generationUsage: OrchestrationV2ProviderTurn["generationUsage"];
 }
 
 type CursorTurnUsage = NonNullable<Extract<InteractionUpdate, { type: "turn-ended" }>["usage"]>;
@@ -2392,60 +2385,15 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
         const handleInteractionUpdate = Effect.fnUntraced(function* (
           context: ActiveCursorTurn,
           update: InteractionUpdate,
-          observedAtMs: number,
         ) {
           if (context.finalized) {
             return;
-          }
-          if (update.type === "step-started") {
-            context.generationStartedAtMs ??= observedAtMs;
-            context.generationStepObserved = true;
-          } else if (
-            update.type === "tool-requests-listed" ||
-            update.type === "tool-call-started" ||
-            update.type === "step-completed" ||
-            update.type === "turn-ended"
-          ) {
-            if (context.generationStartedAtMs !== undefined) {
-              const elapsed = generationMs(context.generationStartedAtMs, observedAtMs);
-              context.pendingGenerationMs += elapsed ?? 0;
-              if (elapsed === undefined) context.generationComplete = false;
-              context.generationStartedAtMs = undefined;
-            }
-          }
-          if (
-            (update.type === "text-delta" ||
-              update.type === "thinking-delta" ||
-              update.type === "partial-tool-call" ||
-              update.type === "tool-call-started") &&
-            !context.generationStepObserved
-          ) {
-            context.generationComplete = false;
-          }
-          if (update.type === "step-completed") {
-            if (!context.generationStepObserved) context.generationComplete = false;
-            context.generationStepObserved = false;
           }
           if (update.type === "turn-ended") {
             context.turnEnded = true;
             if (update.usage !== undefined) {
               context.usage = addCursorTurnUsage(context.usage, update.usage);
-              if (
-                context.generationComplete &&
-                context.pendingGenerationMs > 0 &&
-                update.usage.outputTokens > 0
-              ) {
-                context.generationUsage = {
-                  outputTokens:
-                    (context.generationUsage?.outputTokens ?? 0) + update.usage.outputTokens,
-                  generationMs:
-                    (context.generationUsage?.generationMs ?? 0) + context.pendingGenerationMs,
-                };
-              }
             }
-            context.pendingGenerationMs = 0;
-            context.generationComplete = true;
-            context.generationStepObserved = false;
           } else if (
             update.type === "step-started" ||
             update.type === "user-message-appended" ||
@@ -2577,9 +2525,6 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
           startedAt: input.context.startedAt,
           completedAt: input.completedAt,
           ...(input.tokenUsage === undefined ? {} : { tokenUsage: input.tokenUsage }),
-          ...(input.completedAt === null || input.context.generationUsage === undefined
-            ? {}
-            : { generationUsage: input.context.generationUsage }),
           ...(input.completedAt === null || input.context.usage === undefined
             ? {}
             : {
@@ -3046,10 +2991,7 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                       dropped?.text,
                     );
             const compacted = resume === undefined && prompt === undefined;
-            const pendingUpdates: Array<{
-              readonly update: InteractionUpdate;
-              readonly observedAtMs: number;
-            }> = [];
+            const pendingUpdates: Array<InteractionUpdate> = [];
             let context: ActiveCursorTurn | null = null;
             // A send-time set replaces the create-time set, so the workspace servers go only here and are
             // read again each turn from mcp.json and mcp-disabled.json; both merge with settingSources.
@@ -3073,15 +3015,14 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
                     ? {}
                     : { mcpServers: turnMcpServers }),
                 },
-                // Streaming callbacks share the active turn's tracing span.
-                onDelta: Effect.fnUntraced(function* (update, receivedAtMs) {
-                  const observedAtMs = receivedAtMs ?? (yield* Clock.currentTimeMillis);
+                onDelta: (update) => {
                   if (context === null) {
-                    pendingUpdates.push({ update, observedAtMs });
-                    return;
+                    return Effect.sync(() => {
+                      pendingUpdates.push(update);
+                    });
                   }
-                  yield* handleInteractionUpdate(context, update, observedAtMs);
-                }),
+                  return handleInteractionUpdate(context, update);
+                },
                 onBackgroundShell: (shell) => onBackgroundShell(turnInput, shell),
               })
               .pipe(Effect.mapError(classifyCursorModelRejection(turnInput.modelSelection)));
@@ -3135,11 +3076,6 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               turnEnded: false,
               session: agent.session,
               usage: undefined,
-              generationStartedAtMs: undefined,
-              pendingGenerationMs: 0,
-              generationStepObserved: false,
-              generationComplete: true,
-              generationUsage: undefined,
             };
             yield* Ref.set(activeTurn, context);
             latestRunId = turnInput.runId;
@@ -3158,8 +3094,8 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
               status: "active",
               updatedAt: startedAt,
             });
-            for (const { update, observedAtMs } of pendingUpdates) {
-              yield* handleInteractionUpdate(context, update, observedAtMs);
+            for (const update of pendingUpdates) {
+              yield* handleInteractionUpdate(context, update);
             }
 
             yield* sdkRun.wait.pipe(

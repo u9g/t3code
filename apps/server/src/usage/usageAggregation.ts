@@ -405,6 +405,7 @@ export class UsageAggregator {
     tier: UsageSpeed,
     outputTokens: number,
     generationMs: number,
+    estimated = false,
   ): void {
     const slot = this.#slotFor(timestampMs);
     if (
@@ -430,6 +431,7 @@ export class UsageAggregator {
       ...(tier === "standard" ? {} : { tier }),
       outputTokens: (held?.outputTokens ?? 0) + outputTokens,
       generationMs: (held?.generationMs ?? 0) + Math.round(generationMs),
+      ...(estimated || held?.estimated ? { estimated: true } : {}),
     });
   }
 

@@ -199,7 +199,9 @@ describe("mergeUsage", () => {
       ["mac", "linux", "offline"].map((id) =>
         environment(id, {
           ...summary([], id === "offline" ? [] : [account]),
-          generationTimings: [timing],
+          generationTimings: [
+            { ...timing, ...(id === "offline" ? { estimated: true as const } : {}) },
+          ],
         }),
       ),
       USAGE_CONTRACT_VERSION,
@@ -209,6 +211,7 @@ describe("mergeUsage", () => {
       model: "composer-2.5",
       outputTokens: 300,
       generationMs: 6000,
+      estimated: true,
     });
     expect(merged.speed[0]?.byHourOfDay[10]).toEqual({ outputTokens: 300, generationMs: 6000 });
     expect(merged.costUsd).toBe(0);

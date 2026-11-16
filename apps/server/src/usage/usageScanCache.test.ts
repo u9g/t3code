@@ -122,6 +122,7 @@ describe("scan cache round trip", () => {
           provider: "grok",
           model: "grok-4.5-build",
           modelCalls: 8,
+          generationMs: 1200,
           dedupeKey: "s:p:grok-4.5-build",
         }),
         record({ provider: "grok", model: "<synthetic>", dedupeKey: "s:p:<synthetic>" }),
@@ -276,15 +277,64 @@ describe("scan cache round trip", () => {
         size: -1,
         position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
       });
-      expect(restored.get("/gone-pi.jsonl")).toEqual(
-        version >= 6
-          ? original.get("/gone-pi.jsonl")
-          : {
-              ...original.get("/gone-pi.jsonl"),
-              size: -1,
-              position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
-            },
-      );
+      expect(restored.get("/gone-pi.jsonl")).toEqual({
+        ...original.get("/gone-pi.jsonl"),
+        size: -1,
+        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+      });
+    },
+  );
+
+  it.each([
+    { version: 18, slots: [8], preserved: { modelCalls: 8 } },
+    { version: 19, slots: [null, 1200], preserved: { generationMs: 1200 } },
+  ])(
+    "migrates v$version Grok usage and marks the transcript for a re-read",
+    ({ version, slots, preserved }) => {
+      const grok = record({ provider: "grok", model: "grok-4.7" });
+      const entry: CachedFile = {
+        size: 100,
+        mtimeMs: 100,
+        provider: "grok",
+        records: [grok],
+        tailRecords: [],
+        malformedRecords: [],
+        position: position(),
+      };
+      const encoded = parse(makeScanCacheWriter()(new Map([["/grok.jsonl", entry]]), {}));
+      encoded.files["/grok.jsonl"].r[0].push(null, null, ...slots);
+
+      expect(decodeScanCache({ ...encoded, version }, TEST_FORMAT_MAP).get("/grok.jsonl")).toEqual({
+        ...entry,
+        size: -1,
+        records: [{ ...grok, ...preserved }],
+        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+      });
+    },
+  );
+
+  it.each(["pi", "grok"] as const)(
+    "re-parses v18 %s history to recover generation timing",
+    (provider) => {
+      const entry: CachedFile = {
+        size: 100,
+        mtimeMs: 100,
+        provider,
+        records: [record({ provider })],
+        tailRecords: [],
+        malformedRecords: [],
+        position: position({ state: provider === "pi" ? { sessionId: "session-a" } : null }),
+      };
+      const cache: ScanCache = new Map([["/session.jsonl", entry]]);
+      const encoded = parse(makeScanCacheWriter()(cache, {}));
+      expect(
+        decodeScanCache({ ...encoded, version: 18 }, TEST_FORMAT_MAP).get("/session.jsonl"),
+      ).toEqual({
+        ...entry,
+        size: -1,
+        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+      });
+      expect(decodeScanCache(encoded, TEST_FORMAT_MAP).get("/session.jsonl")).toEqual(entry);
     },
   );
 

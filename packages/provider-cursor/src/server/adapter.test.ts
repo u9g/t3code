@@ -31,6 +31,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { vi } from "vite-plus/test";
 
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
@@ -525,8 +526,73 @@ describe("CursorAdapterV2", () => {
       // The checkpoint holds the context fill; billed input counts every step.
       contextFill: { usedTokens: 8_304, maxTokens: 200_000 },
     },
-  ])("ends the turn with $reason", ({ updates = [], wait, failure, answers, usage, contextFill }) =>
+    {
+      reason: "generation time excludes tools and pairs only timed output with its duration",
+      updates: [
+        { type: "step-started", stepId: 1 },
+        { type: "text-delta", text: "Checking." },
+        { type: "tool-requests-listed", callCount: 1 },
+        { type: "step-completed", stepId: 1, stepDurationMs: 99_000 },
+        { type: "step-started", stepId: 2 },
+        { type: "text-delta", text: "Done." },
+        { type: "step-completed", stepId: 2, stepDurationMs: 99_000 },
+        {
+          type: "turn-ended",
+          usage: { inputTokens: 10, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+        { type: "step-started", stepId: 3 },
+        { type: "text-delta", text: "Another answer." },
+        { type: "step-completed", stepId: 3, stepDurationMs: 99_000 },
+        {
+          type: "turn-ended",
+          usage: { inputTokens: 10, outputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+        {
+          type: "turn-ended",
+          usage: { inputTokens: 10, outputTokens: 500, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+        { type: "step-started", stepId: 4 },
+        { type: "step-completed", stepId: 4, stepDurationMs: 99_000 },
+        { type: "turn-ended" },
+        { type: "step-started", stepId: 5 },
+        { type: "step-completed", stepId: 5, stepDurationMs: 99_000 },
+        { type: "step-started", stepId: 6 },
+        { type: "step-completed", stepId: 6, stepDurationMs: 660_000 },
+        {
+          type: "turn-ended",
+          usage: { inputTokens: 10, outputTokens: 1000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+        { type: "step-started", stepId: 7 },
+        { type: "step-completed", stepId: 7, stepDurationMs: 99_000 },
+        { type: "text-delta", text: "Missing request start." },
+        {
+          type: "turn-ended",
+          usage: { inputTokens: 10, outputTokens: 1000, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        },
+      ] satisfies ReadonlyArray<InteractionUpdate>,
+      wait: Effect.succeed({
+        id: "native-cursor-run",
+        requestId: "native-request",
+        status: "finished" as const,
+        model: { id: "claude-fable-5" },
+        durationMs: 99_000,
+      }),
+      failure: null,
+      generationUsage: { outputTokens: 300, generationMs: 6000 },
+      advances: Array.from({ length: 20 }, (_, index) => (index === 19 ? 660_000 : 1000)),
+    },
+  ])("ends the turn with $reason", (testCase) =>
     Effect.gen(function* () {
+      const {
+        updates = [],
+        wait,
+        failure,
+        answers,
+        usage,
+        contextFill,
+        generationUsage,
+        advances,
+      } = testCase;
       const fileSystem = yield* FileSystem.FileSystem;
       const workspace = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "cursor-v2-failure-",
@@ -553,7 +619,9 @@ describe("CursorAdapterV2", () => {
               close: Effect.void,
               send: (input) =>
                 Effect.gen(function* () {
-                  for (const update of updates) {
+                  for (const [index, update] of updates.entries()) {
+                    if (generationUsage !== undefined)
+                      yield* TestClock.adjust(advances?.[index] ?? 1000);
                     yield* input.onDelta!(update).pipe(Effect.orDie);
                   }
                   return {
@@ -628,6 +696,12 @@ describe("CursorAdapterV2", () => {
       assert.equal(terminal?.status, failure === null ? "completed" : "failed");
       assert.equal(terminal?.failure?.class, failure?.class);
       assert.equal(terminal?.failure?.message, failure?.message);
+      const timedTurn = events.findLast(
+        (event) =>
+          event.type === "provider_turn.updated" && event.providerTurn.completedAt !== null,
+      );
+      assert(timedTurn?.type === "provider_turn.updated");
+      assert.deepEqual(timedTurn.providerTurn.generationUsage, generationUsage);
       if (answers !== undefined) {
         assert.deepEqual(
           events.flatMap((event) =>

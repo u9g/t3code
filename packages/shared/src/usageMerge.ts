@@ -637,18 +637,13 @@ export function mergeUsage(
       providerAccumulator.set(providerKind, provider);
     }
 
-    for (const bucket of buckets) {
-      const tokens = bucketTokens(bucket);
-
-      costUsd += bucket.costUsd;
-      cacheSavingsUsd += bucket.cacheSavingsUsd;
-      uncachedInputTokens += bucket.totals.uncachedInputTokens;
-      cachedInputTokens += bucket.totals.cachedInputTokens;
-      cacheCreationTokens += bucket.totals.cacheCreationTokens;
-      outputTokens += bucket.totals.outputTokens;
-      reasoningTokens += bucket.totals.reasoningTokens;
-      records += bucket.records;
-      prompts += bucket.prompts ?? 0;
+    for (const bucket of [
+      ...buckets,
+      ...(environment.summary.generationTimings ?? []).map((sample) => ({
+        ...sample,
+        speed: [sample],
+      })),
+    ]) {
       for (const sample of bucket.speed ?? []) {
         const tier = sample.tier ?? "standard";
         const speedKey = `${bucket.provider} ${bucket.model} ${tier}`;
@@ -678,6 +673,20 @@ export function mergeUsage(
         hour.outputTokens += sample.outputTokens;
         hour.generationMs += sample.generationMs;
       }
+    }
+
+    for (const bucket of buckets) {
+      const tokens = bucketTokens(bucket);
+
+      costUsd += bucket.costUsd;
+      cacheSavingsUsd += bucket.cacheSavingsUsd;
+      uncachedInputTokens += bucket.totals.uncachedInputTokens;
+      cachedInputTokens += bucket.totals.cachedInputTokens;
+      cacheCreationTokens += bucket.totals.cacheCreationTokens;
+      outputTokens += bucket.totals.outputTokens;
+      reasoningTokens += bucket.totals.reasoningTokens;
+      records += bucket.records;
+      prompts += bucket.prompts ?? 0;
       unpricedRecords += bucket.unpricedRecords;
       if (bucket.costSource === "providerReported") providerReportedRecords += bucket.records;
       if (bucket.categoryCostUsd !== undefined) {

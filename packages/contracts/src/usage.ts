@@ -60,6 +60,15 @@ export const UsageSpeedSample = Schema.Struct({
 });
 export type UsageSpeedSample = typeof UsageSpeedSample.Type;
 
+export const UsageGenerationTiming = Schema.Struct({
+  ...UsageSpeedSample.fields,
+  day: UsageDay,
+  hourStart: Schema.optionalKey(TrimmedNonEmptyString),
+  provider: UsageProviderKind,
+  model: TrimmedNonEmptyString,
+});
+export type UsageGenerationTiming = typeof UsageGenerationTiming.Type;
+
 export const UsageBucket = Schema.Struct({
   day: UsageDay,
   hourStart: Schema.optional(TrimmedNonEmptyString),
@@ -202,6 +211,8 @@ export const UsageSummary = Schema.Struct({
   delegatedPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageServerPrompts)),
   /** Absent on older servers. Independent of transcript-source ownership. */
   turnTimings: Schema.optionalKey(ForwardCompatibleArray(UsageTurnTimings)),
+  /** Model requests measured by this server, independent of shared billing-source ownership. */
+  generationTimings: Schema.optionalKey(ForwardCompatibleArray(UsageGenerationTiming)),
 });
 export type UsageSummary = typeof UsageSummary.Type;
 

@@ -1385,6 +1385,13 @@ export const OrchestrationV2ProviderTurn = Schema.Struct({
   completedAt: Schema.NullOr(Schema.DateTimeUtc),
   tokenUsage: Schema.optional(OrchestrationV2ProviderTurnTokenUsage),
   turnTokenUsage: Schema.optional(TurnTokenUsage),
+  /** Output tokens paired with measured model request time, excluding tool execution. */
+  generationUsage: Schema.optionalKey(
+    Schema.Struct({
+      outputTokens: NonNegativeInt,
+      generationMs: NonNegativeInt,
+    }),
+  ),
   /** The model the provider reported running this turn's root agent, which can differ from the requested one. */
   model: Schema.optional(TrimmedNonEmptyString),
   /** True when the provider dropped this turn's request before persisting it to native history. */

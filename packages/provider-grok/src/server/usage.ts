@@ -29,11 +29,13 @@ interface GrokUsageTotals {
   readonly reasoningTokens: number;
   readonly modelCalls: number;
   readonly costUsdTicks: number | null;
+  readonly generationMs?: number;
 }
 
 function readGrokUsageTotals(value: unknown): GrokUsageTotals | null {
   if (typeof value !== "object" || value === null) return null;
   const record = value as Record<string, unknown>;
+  const apiDurationMs = tokenCount(record["apiDurationMs"]);
   return {
     inputTokens: tokenCount(record["inputTokens"]),
     outputTokens: tokenCount(record["outputTokens"]),
@@ -41,6 +43,7 @@ function readGrokUsageTotals(value: unknown): GrokUsageTotals | null {
     cacheCreationTokens: tokenCount(record["cacheCreationTokens"]),
     reasoningTokens: tokenCount(record["reasoningTokens"]),
     modelCalls: tokenCount(record["modelCalls"]),
+    ...(apiDurationMs > 0 ? { generationMs: apiDurationMs } : {}),
     costUsdTicks:
       typeof record["costUsdTicks"] === "number" && Number.isFinite(record["costUsdTicks"])
         ? record["costUsdTicks"]
@@ -139,6 +142,7 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
         reportedCostUsd: grokCostTicksToUsd(topLevel.costUsdTicks),
         speed: "standard",
         ...(topLevel.modelCalls > 1 ? { modelCalls: topLevel.modelCalls } : {}),
+        ...(topLevel.generationMs === undefined ? {} : { generationMs: topLevel.generationMs }),
         // No prompt id means we cannot tell two same-second updates apart.
         dedupeKey: promptId === null ? null : `${sessionId}:${promptId}:${timestampMs}:grok`,
       },
@@ -185,6 +189,9 @@ function parseGrokRecord(parsed: unknown): readonly UsageRecord[] {
       reportedCostUsd,
       speed: "standard",
       ...(calls > 1 ? { modelCalls: calls } : {}),
+      ...(entry.totals.generationMs === undefined
+        ? {}
+        : { generationMs: entry.totals.generationMs }),
       dedupeKey:
         promptId === null ? null : `${sessionId}:${promptId}:${timestampMs}:${entry.model}`,
     });

@@ -356,10 +356,10 @@ export function decodeScanCache(
     ) {
       continue;
     }
-    // Upstream caches through v18 could lack the fork's prompt counts and response times.
+    // Keep deleted history while live files gain usage fields missing from older caches.
     const legacy =
-      ((entry.p === "claude" || entry.p === "codex") && version < 19) ||
-      (entry.p === "grok" && version < 18) ||
+      ((entry.p === "claude" || entry.p === "codex" || entry.p === "pi") && version < 19) ||
+      (entry.p === "grok" && version < 20) ||
       (format.state !== undefined && version < 6);
     // A corrupt state disqualifies the entry: resuming with it would attach
     // appended usage to the wrong model or replay fork-copied history.

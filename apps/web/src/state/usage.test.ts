@@ -39,7 +39,6 @@ describe("mergeAnsweredUsage", () => {
           isConnected: true,
           error: null,
           summary,
-          needsCursorKeychainAccess: false,
         },
       ],
       (entry) => entry.provider === "codex" && entry.model === "gpt-6-sol",

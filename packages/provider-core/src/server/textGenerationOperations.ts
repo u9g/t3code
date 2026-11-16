@@ -71,6 +71,14 @@ export const decodeJsonReply = <S extends Schema.Top>(
   );
 };
 
+/** A kebab-case icon name, or nothing when the model returned something else. Clients check it is a real icon. */
+export const generatedThreadIcon = (raw: string): { icon?: string } => {
+  const icon = raw.trim().toLowerCase();
+  return /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(icon) && icon.length <= 48 && icon !== "icon"
+    ? { icon }
+    : {};
+};
+
 export const generatedThreadTitle = (raw: string) => {
   const title = sanitizeThreadTitle(raw);
   // Some models echo the output schema's key instead of a title.
@@ -168,6 +176,7 @@ export function fromRunner(name: string, run: Runner): ProviderTextGeneration {
     return {
       title: yield* generatedThreadTitle(generated.title),
       ...(generated.needsRefinement ? { needsRefinement: true } : {}),
+      ...generatedThreadIcon(generated.icon),
     };
   });
 

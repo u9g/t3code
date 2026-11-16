@@ -390,8 +390,9 @@ function initialThreadTitlePrompt(
   hasInstructions: boolean,
 ): string {
   return `Generate a title that will help the user recognize this T3 Code thread weeks later.
-Return JSON with keys title and needsRefinement.
+Return JSON with keys title, needsRefinement and icon.
 Set needsRefinement to true only if the subject is still unknown, such as an unresolved link, "fix this", or an unexplained attachment. Otherwise set it to false.
+Also pick an icon: one Lucide icon (lucide.dev) by its kebab-case name, such as key-round, gauge or git-merge. The user should recognize the thread by its icon at a glance, without reading the title, so pick the most concrete picture of the subject. Avoid generic icons such as message-square, bot, sparkles, file, code, terminal, circle and check.
 
 Before answering, silently reduce the request to:
 - Subject: What system, feature, or problem is this really about?
@@ -425,7 +426,8 @@ function regenerateThreadTitlePrompt(
 ): string {
   return `Regenerate the title for an existing T3 Code thread so the user can recognize it weeks later.
 The previous title was ${JSON.stringify(previousTitle)}.
-Return JSON with keys title and needsRefinement. Set needsRefinement to false.
+Return JSON with keys title, needsRefinement and icon. Set needsRefinement to false.
+Also pick an icon: one Lucide icon (lucide.dev) by its kebab-case name, such as key-round, gauge or git-merge. The user should recognize the thread by its icon at a glance, without reading the title, so pick the most concrete picture of the subject. Avoid generic icons such as message-square, bot, sparkles, file, code, terminal, circle and check.
 
 Determine the title in this order:
 1. Read the USER messages first. Identify the latest explicit durable goal. The original subject remains the subject until the user clearly changes what the thread is about.
@@ -516,6 +518,7 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
   const outputSchema = Schema.Struct({
     title: Schema.String,
     needsRefinement: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+    icon: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   });
 
   return { prompt, outputSchema };

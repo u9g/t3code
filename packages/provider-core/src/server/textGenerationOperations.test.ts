@@ -26,3 +26,27 @@ it.effect("fails a thread title reply that is only the schema key", () =>
     assert.strictEqual(outcome.operation, "generateThreadTitle");
   }),
 );
+
+it.effect("returns the icon picked with a title, and drops one that is not an icon name", () =>
+  Effect.gen(function* () {
+    const titleWithIcon = (icon: string) =>
+      fromRunner("Stub", (request) =>
+        decodeJsonReply(
+          request,
+          "Stub",
+          JSON.stringify({ title: "Claude Sign-In Failure", needsRefinement: false, icon }),
+        ),
+      ).generateThreadTitle({
+        cwd: process.cwd(),
+        message: "why does claude sign-in fail?",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("pi"),
+          model: "anthropic/claude-haiku-4-5",
+        },
+      });
+
+    assert.strictEqual((yield* titleWithIcon(" Key-Round ")).icon, "key-round");
+    assert.isUndefined((yield* titleWithIcon("a key")).icon);
+    assert.isUndefined((yield* titleWithIcon("")).icon);
+  }),
+);

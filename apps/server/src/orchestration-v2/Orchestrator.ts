@@ -5462,6 +5462,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                 ...(command.title === undefined
                   ? {}
                   : { title: command.title, titleRenamed: false, titleSource: "auto" as const }),
+                ...(command.icon === undefined ? {} : { icon: command.icon }),
                 ...(command.outcome === undefined
                   ? {}
                   : {

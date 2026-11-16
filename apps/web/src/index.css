@@ -2754,7 +2754,8 @@ code {
   [data-slot="sidebar"][data-state="expanded"] > [data-slot="sidebar-container"][data-icon-rail] {
     width: var(--icon-rail-width) !important;
     overflow: clip;
-    z-index: 60;
+    /* Over the page's own overlays (z-40), under the sidebar toggle, dialogs and popovers (z-50+). */
+    z-index: 45;
     transition:
       width 160ms ease-out,
       box-shadow 160ms ease-out;

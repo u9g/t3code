@@ -2656,16 +2656,24 @@ code {
 
 /*
  * The thread sidebar rests as a rail of thread icons and widens over the page on hover or
- * keyboard focus, like Chrome's vertical tabs. The gap keeps the page at the rail's width,
- * so opening the rail covers the page instead of pushing it.
+ * keyboard focus, like Chrome's vertical tabs. The rail is as wide as the icon plus the same
+ * inset on both sides, so icons sit centered at rest and stay put as the rail opens. The gap
+ * keeps the page at the rail's width, so opening the rail covers the page instead of pushing it.
  */
 @media (min-width: 768px) {
-  [data-slot="sidebar"][data-state="expanded"]:has(> [data-icon-rail]) > [data-slot="sidebar-gap"] {
-    width: 54px !important;
+  [data-slot="sidebar-container"][data-icon-rail],
+  [data-slot="sidebar"]:has(> [data-icon-rail]) {
+    --icon-rail-width: calc(
+      2 * (var(--sidebar-content-inset) + var(--sidebar-row-content-inset)) + 2.25rem
+    );
   }
+  [data-slot="sidebar"][data-state="expanded"]:has(> [data-icon-rail]) > [data-slot="sidebar-gap"] {
+    width: var(--icon-rail-width) !important;
+  }
+  /* clip, not hidden: a hidden overflow can still be scrolled sideways by focus, shifting every icon. */
   [data-slot="sidebar"][data-state="expanded"] > [data-slot="sidebar-container"][data-icon-rail] {
-    width: 54px !important;
-    overflow: hidden;
+    width: var(--icon-rail-width) !important;
+    overflow: clip;
     z-index: 60;
     transition:
       width 160ms ease-out,
@@ -2693,5 +2701,16 @@ code {
     [data-slot="sidebar-inner"]
     ::placeholder {
     color: transparent !important;
+  }
+  /* Row cards would show as slivers cut off at the rail's edge; the open thread rings its icon. */
+  [data-slot="sidebar-container"][data-icon-rail]:not(:hover, :has(:focus-visible))
+    [data-sidebar-row] {
+    background-color: transparent !important;
+    box-shadow: none !important;
+  }
+  [data-slot="sidebar-container"][data-icon-rail]:not(:hover, :has(:focus-visible))
+    [data-sidebar-row][aria-current="page"]
+    [data-thread-icon] {
+    box-shadow: 0 0 0 2px var(--ring);
   }
 }

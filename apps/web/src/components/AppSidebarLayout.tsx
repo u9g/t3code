@@ -485,20 +485,25 @@ export function AppSidebarLayout({
               {...sidebarArea}
               role="navigation"
               aria-label={gt("Threads")}
-              resizable={{
-                collapseOnResize: true,
-                maxWidth: sidebarMaximumWidth,
-                minWidth: sidebarMinimumWidth,
-                shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
-                  nextWidth <= currentWidth ||
-                  wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
-                storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
-                onResize: setSidebarWidth,
-              }}
+              // The rail opens on hover over the page, so there is no edge to drag.
+              resizable={
+                iconRail
+                  ? false
+                  : {
+                      collapseOnResize: true,
+                      maxWidth: sidebarMaximumWidth,
+                      minWidth: sidebarMinimumWidth,
+                      shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>
+                        nextWidth <= currentWidth ||
+                        wrapper.clientWidth - nextWidth >= THREAD_MAIN_CONTENT_MIN_WIDTH,
+                      storageKey: THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
+                      onResize: setSidebarWidth,
+                    }
+              }
               style={windowControlsInsetStyle}
             >
               <ThreadSidebar routeReveal={sidebarRouteReveal} />
-              <SidebarRail onDoubleClick={resetSidebarWidth} />
+              {iconRail ? null : <SidebarRail onDoubleClick={resetSidebarWidth} />}
             </Sidebar>
           </>
         ) : null}

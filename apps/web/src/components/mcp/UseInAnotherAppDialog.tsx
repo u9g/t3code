@@ -42,6 +42,7 @@ import { readLocalApi } from "~/localApi";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import {
   type EnvironmentPresentation,
+  useEnvironmentHttpBaseUrl,
   useEnvironmentIdentities,
   usePrimaryEnvironmentId,
 } from "~/state/environments";
@@ -92,22 +93,94 @@ function UseInAnotherAppDialog({ requested }: { readonly requested: EnvironmentI
       <WizardPopup>
         {environment !== null && hasCloudPublicConfig() ? (
           <Wizard key={environment.environmentId} environment={environment} title={title} />
+        ) : environment !== null ? (
+          <LocalSetup key={environment.environmentId} environment={environment} title={title} />
         ) : (
           <>
             <WizardHeader title={title} />
             <WizardPanel>
-              <GateMessage
-                title={
-                  environment === null
-                    ? gt("Connect to an environment first.")
-                    : gt("T3 Connect is not available in this build.")
-                }
-              />
+              <GateMessage title={gt("Connect to an environment first.")} />
             </WizardPanel>
           </>
         )}
       </WizardPopup>
     </Dialog>
+  );
+}
+
+/**
+ * Without T3 Connect a build has no public address for cloud apps, but apps on a machine that
+ * reaches the environment directly (Claude Code, Codex) sign in at its own address with a code.
+ */
+function LocalSetup({
+  environment,
+  title,
+}: {
+  readonly environment: EnvironmentPresentation;
+  readonly title: string;
+}) {
+  const gt = useGT();
+  const httpBaseUrl = useEnvironmentHttpBaseUrl(environment.environmentId);
+  const levels = useGrantableLevels(environment);
+  const [picked, setPicked] = useState<AuthMcpClientAccess | null>(null);
+  const access = picked ?? DEFAULT_LEVELS.find((level) => levels.get(level) === undefined) ?? null;
+  const mcpUrl = httpBaseUrl === null ? null : new URL("/mcp", httpBaseUrl).toString();
+  return (
+    <>
+      <WizardHeader title={title} />
+      <WizardPanel>
+        {mcpUrl === null ? (
+          <GateMessage title={gt("Connect to {environment} first.", { environment: environment.label })} />
+        ) : (
+          <section className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              <T>
+                Apps that can reach <Var>{environment.label}</Var> directly, like Claude Code or
+                Codex, sign in at its own address. Cloud apps need T3 Connect, which this build
+                does not include.
+              </T>
+            </p>
+            <CopyRow label={gt("URL")} value={mcpUrl} />
+            <div className="space-y-2">
+              <CommandBlock command={`claude mcp add --transport http t3code ${mcpUrl}`} />
+              <CommandBlock command={`codex mcp add t3code --url ${mcpUrl}`} />
+            </div>
+            <ol className="list-decimal space-y-1 ps-5 text-sm">
+              <li><T>Run the command for your app, then sign in from it (/mcp in Claude Code).</T></li>
+              <li><T>Paste the code below on the sign-in page that opens.</T></li>
+            </ol>
+            <RadioGroup
+              aria-label={gt("What can the app do?")}
+              value={access}
+              onValueChange={(value) => setPicked(value as AuthMcpClientAccess)}
+            >
+              {AuthMcpClientAccess.literals.map((level) => (
+                <AccessOption
+                  key={level}
+                  access={level}
+                  selected={level === access}
+                  disabledReason={levels.get(level)}
+                  description={
+                    level === "full-access" ? gt("Runs commands and edits files without asking") : null
+                  }
+                />
+              ))}
+            </RadioGroup>
+            {access === null ? null : (
+              <ApprovalCode
+                key={access}
+                environmentId={environment.environmentId}
+                name={environment.label}
+                access={access}
+              />
+            )}
+          </section>
+        )}
+      </WizardPanel>
+      <WizardFooter leading={<ManageAccessButton environment={environment} />}>
+        <Button onClick={close}><T>Done</T></Button>
+      </WizardFooter>
+    </>
   );
 }
 

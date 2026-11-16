@@ -5,13 +5,16 @@ import { userEvent } from "vite-plus/test/browser";
 import "~/index.css";
 import { act, fakeTimers, render } from "../../../test/render";
 
-// Asks to close twice when told to, and answers only the first teardown, so
+// Reports the height it is told to. Asks to close twice when told to, and answers only the first teardown, so
 // the second one is left to finish on the host's timeout.
 const APP_HTML = `<script>
 let answered = false;
 addEventListener("message", (event) => {
   const message = event.data;
-  if (message === "close") {
+  if (typeof message === "string" && message.startsWith("height:")) {
+    const height = Number(message.slice("height:".length));
+    parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height } }, "*");
+  } else if (message === "close") {
     parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/request-teardown" }, "*");
     parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/request-teardown" }, "*");
   } else if (message?.method === "ui/resource-teardown" && !answered) {
@@ -42,25 +45,43 @@ const nextInitializedFrom = () =>
     window.addEventListener("message", listen);
   });
 
+const renderDemoApp = () =>
+  render(
+    <McpAppFrame
+      environmentId={EnvironmentId.make("environment")}
+      threadId={ThreadId.make("thread")}
+      conversationThreadId={ThreadId.make("thread")}
+      itemId={TurnItemId.make("item")}
+      revision="1"
+      app={{
+        attachmentId: "attachment",
+        server: "Demo",
+        tool: "show",
+        resourceUri: "ui://demo/app",
+      }}
+      onSendMessage={undefined}
+    />,
+  );
+
 describe("McpAppFrame", () => {
+  it("takes no space while the app reports a height of 0, and returns when it reports one", async () => {
+    const initialized = nextInitializedFrom();
+    await using screen = await renderDemoApp();
+    const app = (await initialized) as Window;
+    const box = () => screen.container.querySelector<HTMLElement>("[style*='height']")!;
+
+    app.postMessage("height:0", "*");
+    await expect.poll(() => box().getBoundingClientRect().height).toBe(0);
+    expect(box().hasAttribute("data-mcp-app-hidden")).toBe(true);
+
+    app.postMessage("height:200", "*");
+    await expect.poll(() => box().getBoundingClientRect().height).toBe(200);
+    expect(box().hasAttribute("data-mcp-app-hidden")).toBe(false);
+  });
+
   it("keeps a reopened app when the old document's second teardown finishes late", async () => {
     const firstInitialized = nextInitializedFrom();
-    await using screen = await render(
-      <McpAppFrame
-        environmentId={EnvironmentId.make("environment")}
-        threadId={ThreadId.make("thread")}
-        conversationThreadId={ThreadId.make("thread")}
-        itemId={TurnItemId.make("item")}
-        revision="1"
-        app={{
-          attachmentId: "attachment",
-          server: "Demo",
-          tool: "show",
-          resourceUri: "ui://demo/app",
-        }}
-        onSendMessage={undefined}
-      />,
-    );
+    await using screen = await renderDemoApp();
     const firstApp = await firstInitialized;
     using _timers = fakeTimers();
 

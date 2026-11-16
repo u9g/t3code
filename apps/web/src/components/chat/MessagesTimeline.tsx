@@ -1661,6 +1661,8 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
                   row.kind === "viewed-images"
                 ? "pb-2"
                 : "pb-4",
+        // A hidden MCP app takes no space, padding included.
+        row.kind === "mcp-app" && "has-data-mcp-app-hidden:pb-0",
         (row.kind === "message" && row.message.role === "assistant") ||
           row.kind === "assistant-meta"
           ? "group/assistant"

@@ -260,8 +260,10 @@ export function mcpAppAllowAttribute(permissions: McpAppPermissions | undefined)
   return features.join("; ");
 }
 
+/** A height of 0 is an app hiding itself, as Datadog's does when it has no charts. */
 export function clampMcpAppHeight(height: number): number {
   if (!Number.isFinite(height)) return MCP_APP_DEFAULT_HEIGHT;
+  if (height <= 0) return 0;
   return Math.round(Math.min(MCP_APP_MAX_HEIGHT, Math.max(MCP_APP_MIN_HEIGHT, height)));
 }
 

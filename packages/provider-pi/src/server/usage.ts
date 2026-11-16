@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import {
+  generationMs,
   parseTimestampMs,
   tokenCount,
   totalTokens,
@@ -36,6 +37,7 @@ const Entry = Schema.Union([
       Schema.Struct({
         ...Model,
         role: Schema.Literal("assistant"),
+        timestamp: Schema.optional(Schema.Unknown),
         responseModel: Schema.optional(Schema.NonEmptyString),
         usage: Usage,
       }),
@@ -85,6 +87,13 @@ function parseRecord(parsed: unknown, state: typeof PiScanState.Type): readonly 
   const reportedCostUsd =
     typeof cost === "number" && Number.isFinite(cost) && cost > 0 ? cost : null;
   if (totalTokens(totals) === 0 && reportedCostUsd === null) return [];
+  // Pi timestamps the message before requesting it and the session entry after message_end.
+  const elapsedMs =
+    entry.type === "message" &&
+    entry.message.role === "assistant" &&
+    typeof entry.message.timestamp === "number"
+      ? generationMs(entry.message.timestamp, timestampMs)
+      : undefined;
   return [
     {
       provider: "pi",
@@ -95,6 +104,7 @@ function parseRecord(parsed: unknown, state: typeof PiScanState.Type): readonly 
       totals,
       reportedCostUsd,
       speed: "standard",
+      ...(elapsedMs === undefined ? {} : { generationMs: elapsedMs }),
       // Forks preserve IDs/timestamps; short random IDs need timestamp/model to avoid cross-session collisions.
       dedupeKey: JSON.stringify(["pi", entry.id, entry.timestamp, model]),
     },
@@ -109,7 +119,14 @@ export const piUsageFormat: TranscriptUsageFormat<typeof PiScanState.Type> = {
     provider: true,
     model: true,
     usage: true,
-    message: { role: true, provider: true, model: true, responseModel: true, usage: true },
+    message: {
+      role: true,
+      timestamp: true,
+      provider: true,
+      model: true,
+      responseModel: true,
+      usage: true,
+    },
   },
   usageMarkers: ['"usage"', '"session"'],
   parseLine: (line, state) => {

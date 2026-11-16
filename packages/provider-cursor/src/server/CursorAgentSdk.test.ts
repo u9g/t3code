@@ -2,6 +2,7 @@ import type { ListRunsOptions } from "@cursor/sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ProviderSessionId, ThreadId } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -478,6 +479,39 @@ describe("CursorAgentSdkRunner", () => {
           outputPath: "/terminals/20.txt",
         },
       ]);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("preserves arrival times for updates buffered while a run starts", () =>
+    Effect.gen(function* () {
+      let nowMs = 1000;
+      const clock = yield* Clock.Clock;
+      const originalSend = cursorSdkMock.send.getMockImplementation()!;
+      cursorSdkMock.send.mockImplementationOnce(async (message, options) => {
+        await options.onDelta?.({ update: { type: "step-started", stepId: 1 } });
+        nowMs += 2000;
+        await options.onDelta?.({ update: { type: "tool-requests-listed", callCount: 1 } });
+        nowMs += 3000;
+        return originalSend(message, {});
+      });
+      const runner = yield* CursorAgentSdk.CursorAgentSdkRunner;
+      const session = yield* runner.open({
+        operation: "create",
+        options: {},
+        threadId: ThreadId.make("timed-buffer"),
+        providerSessionId: ProviderSessionId.make("timed-buffer"),
+      });
+      const times: Array<number | undefined> = [];
+      const run = yield* session
+        .send({
+          message: "hello",
+          onDelta: (_update, observedAtMs) => Effect.sync(() => times.push(observedAtMs)),
+        })
+        .pipe(
+          Effect.provideService(Clock.Clock, { ...clock, currentTimeMillisUnsafe: () => nowMs }),
+        );
+      yield* run.wait;
+      assert.deepEqual(times, [1000, 3000]);
     }).pipe(Effect.provide(layerTest)),
   );
 

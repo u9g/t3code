@@ -8,6 +8,7 @@ describe("parseGrokLine", () => {
     promptId?: string;
     timestamp?: number;
     agentTimestampMs?: number;
+    elapsedMs?: number;
     usage?: Record<string, unknown>;
     modelUsage?: Record<string, Record<string, unknown>> | null;
   }): string {
@@ -35,6 +36,7 @@ describe("parseGrokLine", () => {
           sessionUpdate: "turn_completed",
           prompt_id: overrides?.promptId ?? "prompt-1",
           stop_reason: "end_turn",
+          elapsed_ms: overrides?.elapsedMs,
           usage: {
             inputTokens: 20_272,
             outputTokens: 272,
@@ -75,6 +77,50 @@ describe("parseGrokLine", () => {
     expect(record?.dedupeKey).toBe(
       "019fec1a-12f7-72f2-9b1f-7778a00aea3c:prompt-1:1786372566485:grok-4.5-build",
     );
+  });
+
+  it("keeps each model's API duration separate from the turn's elapsed time", () => {
+    const records = parseGrokLine(
+      turnCompleted({
+        elapsedMs: 120_000,
+        usage: { apiDurationMs: 12_000 },
+        modelUsage: {
+          "grok-4.7": { outputTokens: 100, apiDurationMs: 5_000 },
+          "grok-fast": { outputTokens: 200, apiDurationMs: 7_000 },
+        },
+      }),
+    );
+    expect(records.map(({ model, generationMs }) => ({ model, generationMs }))).toEqual([
+      { model: "grok-4.7", generationMs: 5_000 },
+      { model: "grok-fast", generationMs: 7_000 },
+    ]);
+  });
+
+  it.each([undefined, 0, -1, null, "1000", Number.NaN, Number.POSITIVE_INFINITY, 1_500, 900_000])(
+    "reads a valid API duration (%s) without estimating missing timing",
+    (apiDurationMs) => {
+      const expected =
+        typeof apiDurationMs === "number" && Number.isFinite(apiDurationMs) && apiDurationMs > 0
+          ? apiDurationMs
+          : undefined;
+      const [record] = parseGrokLine(turnCompleted({ modelUsage: null, usage: { apiDurationMs } }));
+      expect(record?.generationMs).toBe(expected);
+    },
+  );
+
+  it("does not assign total API duration to models without their own timing", () => {
+    const [single] = parseGrokLine(turnCompleted({ usage: { apiDurationMs: 3_000 } }));
+    expect(single?.generationMs).toBeUndefined();
+    const multiple = parseGrokLine(
+      turnCompleted({
+        usage: { apiDurationMs: 3_000 },
+        modelUsage: {
+          "grok-4.7": { outputTokens: 100 },
+          "grok-fast": { outputTokens: 200 },
+        },
+      }),
+    );
+    expect(multiple.every((record) => record.generationMs === undefined)).toBe(true);
   });
 
   it("emits one record per model when modelUsage has several entries", () => {

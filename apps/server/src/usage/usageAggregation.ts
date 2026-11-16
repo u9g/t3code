@@ -3,6 +3,7 @@ import type {
   UsageBucket,
   UsageCategoryCost,
   UsageDay,
+  UsageGenerationTiming,
   UsageModelFilter,
   UsageModelSelector,
   UsageProviderKind,
@@ -174,6 +175,7 @@ export function canonicalModelFilter(
 export interface AggregateResult {
   readonly buckets: readonly UsageBucket[];
   readonly turnTimings: readonly UsageTurnTimings[];
+  readonly generationTimings: readonly UsageGenerationTiming[];
   /** Only the kinds with at least one prompt in the window. */
   readonly serverPrompts: Partial<Record<UsageServerPromptKind, readonly UsageServerPrompts[]>>;
   readonly duplicatesDropped: number;
@@ -233,12 +235,20 @@ export function mergeUsageCopies(held: UsageRecord, copy: UsageRecord): UsageRec
 function smallestGrokCopy(held: UsageRecord, copy: UsageRecord): UsageRecord {
   const a = held.totals;
   const b = copy.totals;
+  const generationMs =
+    a.outputTokens === b.outputTokens
+      ? (held.generationMs ?? copy.generationMs)
+      : a.outputTokens < b.outputTokens
+        ? held.generationMs
+        : copy.generationMs;
+  const { generationMs: _untimed, ...base } = held;
   const reportedCostUsd =
     held.reportedCostUsd === null || copy.reportedCostUsd === null
       ? (held.reportedCostUsd ?? copy.reportedCostUsd)
       : Math.min(held.reportedCostUsd, copy.reportedCostUsd);
   return {
-    ...held,
+    ...base,
+    ...(generationMs === undefined ? {} : { generationMs }),
     totals: {
       uncachedInputTokens: Math.min(a.uncachedInputTokens, b.uncachedInputTokens),
       cachedInputTokens: Math.min(a.cachedInputTokens, b.cachedInputTokens),
@@ -260,6 +270,7 @@ interface Contribution {
 export class UsageAggregator {
   readonly #buckets = new Map<string, MutableBucket>();
   readonly #serverPrompts = new Map<UsageServerPromptKind, Map<string, number>>();
+  readonly #generationTimings = new Map<string, UsageGenerationTiming>();
   readonly #turnTimings = new Map<
     string,
     { provider: UsageProviderKind; model: string; tier: UsageSpeed; durationsMs: number[] }
@@ -385,6 +396,41 @@ export class UsageAggregator {
         record.totals.outputTokens;
     }
     if (priced.costSource === "providerReported") bucket.providerReportedRecords += 1;
+  }
+
+  addGenerationUsage(
+    timestampMs: number,
+    provider: UsageProviderKind,
+    model: string,
+    tier: UsageSpeed,
+    outputTokens: number,
+    generationMs: number,
+  ): void {
+    const slot = this.#slotFor(timestampMs);
+    if (
+      slot === null ||
+      !Number.isFinite(generationMs) ||
+      generationMs <= 0 ||
+      !Number.isFinite(outputTokens) ||
+      outputTokens <= 0 ||
+      !keepsUsageRecord(this.#options.modelFilter, { provider, model })
+    )
+      return;
+    const mapped = this.#options.modelAliases?.get(model) ?? model;
+    const hourStart = this.#hourStartFor(slot.hourIndex);
+    const hour = this.#toHourOfDay(timestampMs);
+    const key = `${slot.day}\u0000${hourStart}\u0000${provider}\u0000${mapped}\u0000${tier}\u0000${hour}`;
+    const held = this.#generationTimings.get(key);
+    this.#generationTimings.set(key, {
+      day: slot.day as UsageDay,
+      ...(hourStart === "" ? {} : { hourStart }),
+      provider,
+      model: mapped,
+      hour,
+      ...(tier === "standard" ? {} : { tier }),
+      outputTokens: (held?.outputTokens ?? 0) + outputTokens,
+      generationMs: (held?.generationMs ?? 0) + Math.round(generationMs),
+    });
   }
 
   addCompletedTurn(
@@ -599,6 +645,7 @@ export class UsageAggregator {
       buckets,
       serverPrompts,
       turnTimings: [...this.#turnTimings.values()],
+      generationTimings: [...this.#generationTimings.values()],
       duplicatesDropped: this.#duplicatesDropped,
       outOfWindow: this.#outOfWindow,
     };

@@ -261,15 +261,36 @@ describe("scan cache round trip", () => {
         size: -1,
         position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
       });
-      expect(restored.get("/gone-pi.jsonl")).toEqual(
-        version >= 6
-          ? original.get("/gone-pi.jsonl")
-          : {
-              ...original.get("/gone-pi.jsonl"),
-              size: -1,
-              position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
-            },
-      );
+      expect(restored.get("/gone-pi.jsonl")).toEqual({
+        ...original.get("/gone-pi.jsonl"),
+        size: -1,
+        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+      });
+    },
+  );
+
+  it.each(["pi", "grok"] as const)(
+    "re-parses v18 %s history to recover generation timing",
+    (provider) => {
+      const entry: CachedFile = {
+        size: 100,
+        mtimeMs: 100,
+        provider,
+        records: [record({ provider })],
+        tailRecords: [],
+        malformedRecords: 0,
+        position: position({ state: provider === "pi" ? { sessionId: "session-a" } : null }),
+      };
+      const cache: ScanCache = new Map([["/session.jsonl", entry]]);
+      const encoded = parse(makeScanCacheWriter()(cache, {}));
+      expect(
+        decodeScanCache({ ...encoded, version: 18 }, TEST_FORMAT_MAP).get("/session.jsonl"),
+      ).toEqual({
+        ...entry,
+        size: -1,
+        position: { resumeOffset: 0, guardLength: 0, guardHash: 0, state: null },
+      });
+      expect(decodeScanCache(encoded, TEST_FORMAT_MAP).get("/session.jsonl")).toEqual(entry);
     },
   );
 

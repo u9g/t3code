@@ -257,6 +257,32 @@ export const make = Effect.gen(function* () {
         AND COALESCE(run.completed_at, json_extract(run.payload_json, '$.completedAt')) IS NOT NULL
     `.pipe(Effect.orElseSucceed(() => []));
 
+  const readGenerationUsage = (sinceMs: number, untilMs: number) =>
+    sql<{
+      readonly provider: string;
+      readonly model: string | null;
+      readonly started_at: string;
+      readonly output_tokens: number;
+      readonly generation_ms: number;
+    }>`
+      SELECT run.provider,
+        COALESCE(json_extract(turn.payload_json, '$.model'),
+          json_extract(run.payload_json, '$.modelSelection.model')) AS model,
+        turn.started_at,
+        json_extract(turn.payload_json, '$.generationUsage.outputTokens') AS output_tokens,
+        json_extract(turn.payload_json, '$.generationUsage.generationMs') AS generation_ms
+      FROM orchestration_v2_projection_provider_turns AS turn
+      JOIN orchestration_v2_projection_run_attempts AS attempt ON attempt.attempt_id = turn.run_attempt_id
+        AND attempt.thread_id = turn.thread_id AND attempt.provider_thread_id = turn.provider_thread_id
+      JOIN orchestration_v2_projection_runs AS run ON run.run_id = attempt.run_id
+        AND run.thread_id = turn.thread_id
+      WHERE run.provider = 'cursor'
+        AND turn.status IN ('completed', 'interrupted', 'failed', 'cancelled')
+        AND turn.started_at >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
+        AND turn.started_at < ${DateTime.formatIso(DateTime.makeUnsafe(untilMs))}
+        AND json_type(turn.payload_json, '$.generationUsage') = 'object'
+    `.pipe(Effect.orElseSucceed(() => []));
+
   const fileCache: ScanCache = new Map();
   // Reads from concurrent windows can still hold the original record after it is corrected.
   const resolvedRecords = new WeakMap<UsageRecord, UsageRecord>();
@@ -1251,6 +1277,18 @@ export const make = Effect.gen(function* () {
         completedMs - requestedMs,
       );
     }
+    for (const row of yield* readGenerationUsage(windowStartMs, windowEndMs)) {
+      const provider = usageProviderForDriver(row.provider);
+      if (provider === null || row.model === null) continue;
+      aggregator.addGenerationUsage(
+        Date.parse(row.started_at),
+        provider,
+        row.model,
+        "standard",
+        row.output_tokens,
+        row.generation_ms,
+      );
+    }
     const aggregated = aggregator.finish();
     const readAt = yield* DateTime.now;
     const finishedAtMs = yield* Clock.currentTimeMillis;
@@ -1268,6 +1306,7 @@ export const make = Effect.gen(function* () {
       ...(input.modelFilter === undefined ? {} : { modelFilter: input.modelFilter }),
       ...aggregated.serverPrompts,
       turnTimings: aggregated.turnTimings,
+      generationTimings: aggregated.generationTimings,
     } satisfies UsageSummary;
     return { summary, fromMemory };
   });

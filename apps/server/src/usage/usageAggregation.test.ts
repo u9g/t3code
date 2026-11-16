@@ -151,9 +151,9 @@ describe("UsageAggregator", () => {
         reportedCostUsd: outputTokens / 10,
         totals: { ...record().totals, uncachedInputTokens: 0, outputTokens },
       });
-    const first = turn(Date.parse("2026-08-08T10:00:00Z"), 10);
+    const first = { ...turn(Date.parse("2026-08-08T10:00:00Z"), 10), generationMs: 1000 };
     const resumed = turn(Date.parse("2026-08-08T11:00:00Z"), 20);
-    const savedMaximum = { ...first, totals: resumed.totals, reportedCostUsd: 2 };
+    const savedMaximum = { ...turn(first.timestampMs, 20), reportedCostUsd: 2 };
 
     const expected = aggregate([first, resumed]).buckets;
 
@@ -350,7 +350,7 @@ describe("resolveModelAliases", () => {
 });
 
 describe("server prompts", () => {
-  it("keeps completed-turn durations inside the exact window, filtered before aliases and separated by tier", () => {
+  it("keeps server timings inside the exact window, filtered before aliases and separated by tier", () => {
     for (const resolution of ["day", "hour"] as const) {
       const aggregator = new UsageAggregator({
         timeZone: "America/Los_Angeles",
@@ -371,11 +371,35 @@ describe("server prompts", () => {
         ["2026-08-01T08:00:00Z", "excluded", "standard", 900],
         ["2026-08-01T08:00:00Z", "preview", "standard", -1],
         ["2026-08-01T08:00:00Z", "preview", "standard", NaN],
-      ] as const)
+      ] as const) {
         aggregator.addCompletedTurn(Date.parse(at), "codex", model, tier, ms);
-      expect(aggregator.finish().turnTimings).toEqual([
+        aggregator.addGenerationUsage(Date.parse(at), "cursor", model, tier, 100, ms);
+      }
+      const result = aggregator.finish();
+      expect(result.turnTimings).toEqual([
         { provider: "codex", model: "aliased", tier: "standard", durationsMs: [1000] },
         { provider: "codex", model: "aliased", tier: "fast", durationsMs: [2000] },
+      ]);
+      expect(result.generationTimings).toEqual([
+        {
+          day: "2026-08-01",
+          ...(resolution === "hour" ? { hourStart: "2026-08-01T07:00:00.000Z" } : {}),
+          provider: "cursor",
+          model: "aliased",
+          hour: 0,
+          outputTokens: 100,
+          generationMs: 1000,
+        },
+        {
+          day: "2026-08-01",
+          ...(resolution === "hour" ? { hourStart: "2026-08-02T06:00:00.000Z" } : {}),
+          provider: "cursor",
+          model: "aliased",
+          hour: 23,
+          tier: "fast",
+          outputTokens: 100,
+          generationMs: 2000,
+        },
       ]);
     }
   });

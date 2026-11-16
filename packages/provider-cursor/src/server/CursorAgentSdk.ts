@@ -16,6 +16,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
@@ -96,7 +97,10 @@ export interface CursorAgentSdkOpenInput {
 export interface CursorAgentSdkSendInput<Error> {
   readonly message: string | SDKUserMessage;
   readonly options?: Omit<SendOptions, "onDelta">;
-  readonly onDelta?: (update: InteractionUpdate) => Effect.Effect<void, Error>;
+  readonly onDelta?: (
+    update: InteractionUpdate,
+    observedAtMs?: number,
+  ) => Effect.Effect<void, Error>;
   /** Runs `agent.summarize()` instead, which takes no message or options. */
   readonly summarize?: boolean;
   /** Runs `agent.resume()`: Cursor's ResumeAction from the latest checkpoint, with no message. */
@@ -780,6 +784,7 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
         agentId: agent.agentId,
         send: Effect.fn("CursorAgentSdkSession.send")(function* (sendInput) {
           const context = yield* Effect.context();
+          const clock = yield* Clock.Clock;
           const options = loggedCursorSendOptions(sendInput.options);
           yield* sendInput.resume === true
             ? log({
@@ -805,11 +810,17 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
           }
 
           let callbacksReady = false;
-          const pendingUpdates: Array<InteractionUpdate> = [];
+          const pendingUpdates: Array<{
+            readonly update: InteractionUpdate;
+            readonly observedAtMs: number;
+          }> = [];
           let callbackFailure: { readonly cause: unknown } | undefined;
           let callbackChain = Promise.resolve();
           let runId = "";
-          const dispatchUpdate = (update: InteractionUpdate): Promise<void> => {
+          const dispatchUpdate = (
+            update: InteractionUpdate,
+            observedAtMs = clock.currentTimeMillisUnsafe(),
+          ): Promise<void> => {
             callbackChain = callbackChain
               .then(() => {
                 if (callbackFailure !== undefined) {
@@ -824,7 +835,7 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
                       runId,
                       update,
                     },
-                  }).pipe(Effect.andThen(sendInput.onDelta?.(update) ?? Effect.void)),
+                  }).pipe(Effect.andThen(sendInput.onDelta?.(update, observedAtMs) ?? Effect.void)),
                 );
               })
               .catch((cause) => {
@@ -840,11 +851,12 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
                 const options: SendOptions = {
                   ...sendInput.options,
                   onDelta: async ({ update }) => {
+                    const observedAtMs = clock.currentTimeMillisUnsafe();
                     if (!callbacksReady) {
-                      pendingUpdates.push(update);
+                      pendingUpdates.push({ update, observedAtMs });
                       return;
                     }
-                    await dispatchUpdate(update);
+                    await dispatchUpdate(update, observedAtMs);
                   },
                 };
                 if (sendInput.resume !== true) return agent.send(sendInput.message, options);
@@ -925,9 +937,9 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
               event: { ...output.event, toolCallId: output.toolCallId },
             });
           });
-          for (const update of pendingUpdates) {
+          for (const { update, observedAtMs } of pendingUpdates) {
             yield* Effect.tryPromise({
-              try: () => dispatchUpdate(update),
+              try: () => dispatchUpdate(update, observedAtMs),
               catch: (cause) => runnerError(cause, "run.onDelta"),
             });
           }

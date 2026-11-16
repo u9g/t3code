@@ -181,6 +181,41 @@ describe("mergeUsage", () => {
     expect(merged.contributingEnvironments).toEqual(["env-a"]);
   });
 
+  it("merges server generation timings even when account sources overlap or are unavailable", () => {
+    const account = {
+      provider: "cursor" as const,
+      hostId: "cursor.com",
+      homePath: "cursor-account:shared",
+    };
+    const timing = {
+      day: "2026-08-01" as UsageDay,
+      hour: 10,
+      provider: "cursor",
+      model: "composer-2.5",
+      outputTokens: 100,
+      generationMs: 2000,
+    } as const;
+    const merged = mergeUsage(
+      ["mac", "linux", "offline"].map((id) =>
+        environment(id, {
+          ...summary([], id === "offline" ? [] : [account]),
+          generationTimings: [timing],
+        }),
+      ),
+      USAGE_CONTRACT_VERSION,
+    );
+    expect(merged.speed[0]).toMatchObject({
+      provider: "cursor",
+      model: "composer-2.5",
+      outputTokens: 300,
+      generationMs: 6000,
+    });
+    expect(merged.speed[0]?.byHourOfDay[10]).toEqual({ outputTokens: 300, generationMs: 6000 });
+    expect(merged.costUsd).toBe(0);
+    expect(merged.outputTokens).toBe(0);
+    expect(merged.records).toBe(0);
+  });
+
   it("drops only the duplicated provider, keeping the environment's other one", () => {
     const sharedClaude = {
       provider: "claude" as const,

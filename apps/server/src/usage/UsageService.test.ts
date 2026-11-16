@@ -526,6 +526,33 @@ describe("Codex usage history", () => {
 });
 
 describe("UsageService", () => {
+  it.effect("reads persisted Cursor generation samples without adding billed usage", () =>
+    Effect.gen(function* () {
+      const { home, settings } = yield* setup;
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        for (const [index, status] of ["completed", "interrupted", "failed", "running"].entries()) {
+          yield* sql`INSERT INTO orchestration_v2_projection_runs ${sql.insert({ run_id: `gen-${index}`, thread_id: `gen-thread-${index}`, ordinal: 1, provider: "cursor", status, requested_at: "2026-08-01T10:00:00.000Z", completed_at: "2026-08-01T10:01:00.000Z", payload_json: encodeUnknownJsonString({ modelSelection: { model: "requested-model" } }) })}`;
+          yield* sql`INSERT INTO orchestration_v2_projection_run_attempts ${sql.insert({ attempt_id: `gen-attempt-${index}`, thread_id: `gen-thread-${index}`, run_id: `gen-${index}`, attempt_ordinal: 1, root_node_id: `gen-node-${index}`, provider: "cursor", provider_thread_id: `gen-provider-thread-${index}`, status, payload_json: "{}" })}`;
+          yield* sql`INSERT INTO orchestration_v2_projection_provider_turns ${sql.insert({ provider_turn_id: `gen-turn-${index}`, thread_id: `gen-thread-${index}`, provider_thread_id: `gen-provider-thread-${index}`, node_id: `gen-node-${index}`, run_attempt_id: `gen-attempt-${index}`, ordinal: 1, status, started_at: "2026-08-01T10:00:00.000Z", completed_at: status === "running" ? null : "2026-08-01T10:01:00.000Z", payload_json: encodeUnknownJsonString({ model: "composer-2.5", generationUsage: { outputTokens: 100, generationMs: 2000 } }) })}`;
+        }
+        const service = yield* UsageService.make;
+        const summary = yield* service.readSummary(WINDOW);
+        assert.deepEqual(summary.generationTimings, [
+          {
+            day: "2026-08-01",
+            provider: "cursor",
+            model: "composer-2.5",
+            hour: 10,
+            outputTokens: 300,
+            generationMs: 6000,
+          },
+        ]);
+        assert.deepEqual(summary.buckets, []);
+      }).pipe(Effect.provide(layerService({ prefix: "generation-usage", home, settings })));
+    }).pipe(Effect.scoped),
+  );
+
   it.effect(
     "reports completed run timings with recorded service tiers and excludes other run states",
     () =>
@@ -3484,7 +3511,7 @@ describe("UsageService", () => {
             60 + 20 * (version === 4 ? 1 : 2),
           );
           yield* upgraded.awaitPersisted;
-          assert.strictEqual(SCAN_CACHE_FILE_NAME, "usage-scan-cache-v18.json");
+          assert.strictEqual(SCAN_CACHE_FILE_NAME, "usage-scan-cache-v19.json");
           assert.deepStrictEqual(
             (yield* Effect.promise(() => NodeFSP.readdir(stateDir)))
               .filter((name) => name.startsWith("usage-scan-cache"))

@@ -10,7 +10,7 @@ import { CLAUDE_SYNTHETIC_MODEL } from "../provider/Drivers/claudeUsage.ts";
 import { mergeUsageCopies } from "./usageAggregation.ts";
 import { GUARD_LENGTH, type TranscriptParsePosition } from "./usageTranscriptReader.ts";
 
-const USAGE_SCAN_CACHE_VERSION = 18 as const;
+const USAGE_SCAN_CACHE_VERSION = 19 as const;
 const SPEED_COMPATIBLE_SINCE_VERSION = 4;
 
 /**
@@ -18,8 +18,9 @@ const SPEED_COMPATIBLE_SINCE_VERSION = 4;
  * replace it, dropping saved usage for deleted transcripts. Separate files keep
  * the newer one; older files are removed once it is saved.
  */
-export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v18.json";
+export const SCAN_CACHE_FILE_NAME = "usage-scan-cache-v19.json";
 export const LEGACY_SCAN_CACHE_FILE_NAMES = [
+  "usage-scan-cache-v18.json",
   "usage-scan-cache-v17.json",
   "usage-scan-cache-v16.json",
   "usage-scan-cache-v15.json",
@@ -331,14 +332,10 @@ export function decodeScanCache(
     ) {
       continue;
     }
-    // Keep history for deleted rollouts, but re-parse incompatible reducer state.
-    // v13 adds Claude 1-hour cache writes; v14 uses Codex request ledgers.
-    // v15 repairs skipped Codex requests whose counters rewound.
-    // v16 counts prompts and v17 response timing, for Claude and Codex.
-    // v18 keys Grok turns by time, restoring turns previously dropped as repeats.
+    // Retain deleted transcripts, but re-read live files whose cached counters or timing changed.
     const legacy =
+      ((entry.p === "pi" || entry.p === "grok") && version < 19) ||
       (entry.p === "claude" && version < 17) ||
-      (entry.p === "grok" && version < 18) ||
       (format.state !== undefined && (version < 6 || (entry.p === "codex" && version < 17)));
     // A corrupt state disqualifies the entry: resuming with it would attach
     // appended usage to the wrong model or replay fork-copied history.

@@ -465,7 +465,7 @@ export function McpAppFrame(props: {
   const fullscreen = displayMode === "fullscreen";
   return (
     // Preserve inline row height during fullscreen to prevent timeline jumps.
-    <div style={{ height }}>
+    <div style={{ height }} data-mcp-app-hidden={height === 0 && !fullscreen ? "" : undefined}>
       <div
         ref={attachBox}
         // Preserve the frame's parent to avoid reloads; the top layer escapes timeline containment.

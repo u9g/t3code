@@ -2,6 +2,7 @@ import * as NodeVM from "node:vm";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  clampMcpAppHeight,
   injectMcpAppCsp,
   injectMcpAppThemeBootstrap,
   injectMcpAppCookieBootstrap,
@@ -299,5 +300,20 @@ describe("MCP App cookie bootstrap", () => {
     });
     expect(() => execute(injectMcpAppCookieBootstrap(vendor), document)).toThrow(failure);
     expect(() => Reflect.get(document, "cookie")).toThrow(failure);
+  });
+});
+
+describe("clampMcpAppHeight", () => {
+  it("hides an app that reports no content instead of raising it to the minimum", () => {
+    // Datadog's dataviz app reports height 0 when its tool result has no charts.
+    expect(clampMcpAppHeight(0)).toBe(0);
+    expect(clampMcpAppHeight(-5)).toBe(0);
+  });
+
+  it("keeps visible apps between the minimum and maximum", () => {
+    expect(clampMcpAppHeight(10)).toBe(80);
+    expect(clampMcpAppHeight(321.4)).toBe(321);
+    expect(clampMcpAppHeight(10_000)).toBe(2000);
+    expect(clampMcpAppHeight(Number.NaN)).toBe(320);
   });
 });

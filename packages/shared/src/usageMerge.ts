@@ -97,6 +97,7 @@ export function tokensPerSecond(totals: SpeedTotals | undefined): number | null 
 }
 
 export interface ModelSpeed extends SpeedTotals {
+  readonly estimated?: true;
   readonly provider: UsageProviderKind;
   readonly model: string;
   /** Service tier, so a model's fast turns get their own series. */
@@ -506,6 +507,7 @@ export function mergeUsage(
       provider: UsageProviderKind;
       model: string;
       tier: ModelSpeed["tier"];
+      estimated?: true;
       outputTokens: number;
       generationMs: number;
       byPeriod: Map<string, { outputTokens: number; generationMs: number }>;
@@ -666,6 +668,7 @@ export function mergeUsage(
         speed.byPeriod.set(periodKey, period);
         speed.outputTokens += sample.outputTokens;
         speed.generationMs += sample.generationMs;
+        if (sample.estimated) speed.estimated = true;
         period.outputTokens += sample.outputTokens;
         period.generationMs += sample.generationMs;
         const hour = speed.byHourOfDay[sample.hour];

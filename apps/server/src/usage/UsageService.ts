@@ -31,6 +31,7 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { formatMalformedUsageWarning } from "@t3tools/shared/usageFormat";
+import * as CursorGenerationHistory from "@t3tools/provider-cursor/server/CursorGenerationHistory";
 import * as ServerConfig from "../config.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { BUILT_IN_USAGE_DRIVERS, type BuiltInUsageReadersEnv } from "../provider/builtInDrivers.ts";
@@ -187,6 +188,12 @@ export const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const hostEnvironment = yield* HostProcess.Environment;
   const hostPlatform = yield* HostProcess.Platform;
+  const defaultHome =
+    hostEnvironment[hostPlatform === "win32" ? "USERPROFILE" : "HOME"] ||
+    (yield* HostProcess.HomeDirectory);
+  const cursorHistory = yield* CursorGenerationHistory.make({
+    cachePath: path.join(config.stateDir, "cursor-generation-history-v1.json"),
+  });
   const hostScope = hostEnvironment[DESKTOP_HOST_SCOPE_ENV]?.trim();
   // A mount or a directory's on-disk name does not change under a running server.
   // A miss is not cached: the directory may not exist yet.
@@ -267,13 +274,26 @@ export const make = Effect.gen(function* () {
       readonly provider: string;
       readonly model: string | null;
       readonly started_at: string;
-      readonly output_tokens: number;
-      readonly generation_ms: number;
+      readonly completed_at: string | null;
+      readonly status: string;
+      readonly native_run_id: string | null;
+      readonly native_agent_id: string | null;
+      readonly workspace_ref: string | null;
+      readonly has_subagents: number | null;
+      readonly output_tokens: number | null;
+      readonly generation_ms: number | null;
     }>`
       SELECT run.provider,
         COALESCE(json_extract(turn.payload_json, '$.model'),
           json_extract(run.payload_json, '$.modelSelection.model')) AS model,
         turn.started_at,
+        turn.completed_at, turn.status,
+        json_extract(turn.payload_json, '$.nativeTurnRef.nativeId') AS native_run_id,
+        json_extract(provider_thread.payload_json, '$.nativeThreadRef.nativeId') AS native_agent_id,
+        COALESCE(json_extract(provider_thread.payload_json, '$.nativeMetadata.cursorStoreCwd'),
+          json_extract(run.payload_json, '$.runtimePolicy.cwd'),
+          json_extract(provider_session.payload_json, '$.cwd')) AS workspace_ref,
+        json_extract(turn.payload_json, '$.turnTokenUsage.hasSubagents') AS has_subagents,
         json_extract(turn.payload_json, '$.generationUsage.outputTokens') AS output_tokens,
         json_extract(turn.payload_json, '$.generationUsage.generationMs') AS generation_ms
       FROM orchestration_v2_projection_provider_turns AS turn
@@ -281,11 +301,14 @@ export const make = Effect.gen(function* () {
         AND attempt.thread_id = turn.thread_id AND attempt.provider_thread_id = turn.provider_thread_id
       JOIN orchestration_v2_projection_runs AS run ON run.run_id = attempt.run_id
         AND run.thread_id = turn.thread_id
+      LEFT JOIN orchestration_v2_projection_provider_threads AS provider_thread
+        ON provider_thread.provider_thread_id = turn.provider_thread_id AND provider_thread.thread_id = turn.thread_id
+      LEFT JOIN orchestration_v2_projection_provider_sessions AS provider_session
+        ON provider_session.provider_session_id = provider_thread.provider_session_id AND provider_session.thread_id = turn.thread_id
       WHERE run.provider = 'cursor'
         AND turn.status IN ('completed', 'interrupted', 'failed', 'cancelled')
         AND turn.started_at >= ${DateTime.formatIso(DateTime.makeUnsafe(sinceMs))}
         AND turn.started_at < ${DateTime.formatIso(DateTime.makeUnsafe(untilMs))}
-        AND json_type(turn.payload_json, '$.generationUsage') = 'object'
     `.pipe(Effect.orElseSucceed(() => []));
 
   const fileCache: ScanCache = new Map();
@@ -1294,9 +1317,59 @@ export const make = Effect.gen(function* () {
         completedMs - requestedMs,
       );
     }
-    for (const row of yield* readGenerationUsage(windowStartMs, windowEndMs)) {
+    const generationRows = yield* readGenerationUsage(windowStartMs, windowEndMs);
+    const historyRequests = generationRows.flatMap((row) =>
+      row.status !== "completed" ||
+      row.has_subagents === 1 ||
+      !row.native_run_id ||
+      !row.native_agent_id ||
+      !row.workspace_ref ||
+      !row.completed_at
+        ? []
+        : [
+            {
+              runId: row.native_run_id,
+              agentId: row.native_agent_id,
+              workspaceRef: row.workspace_ref,
+              startedAtMs: Date.parse(row.started_at),
+              completedAtMs: Date.parse(row.completed_at),
+            },
+          ],
+    );
+    const homes = new Set([defaultHome]);
+    const cursorDriver = scanReaders.find(({ reader }) => reader.provider === "cursor")?.driver;
+    if (historyRequests.length > 0 && cursorDriver !== undefined) {
+      for (const instance of yield* usageInstances(cursorDriver, settings)) {
+        const home = instance.environment[hostPlatform === "win32" ? "USERPROFILE" : "HOME"];
+        if (home) homes.add(home);
+      }
+    }
+    const recovered = new Map(
+      (yield* cursorHistory.read({
+        requests: historyRequests,
+        billingRecords: filesByDir.flatMap((files) =>
+          files.flatMap((file) => file.records.filter((record) => record.provider === "cursor")),
+        ),
+        homeDirectories: [...homes],
+      })).map((sample) => [sample.runId, sample]),
+    );
+    for (const row of generationRows) {
       const provider = usageProviderForDriver(row.provider);
       if (provider === null || row.model === null) continue;
+      const estimate = row.native_run_id === null ? undefined : recovered.get(row.native_run_id);
+      if (estimate !== undefined) {
+        aggregator.addGenerationUsage(
+          estimate.timestampMs,
+          provider,
+          row.model,
+          "standard",
+          estimate.outputTokens,
+          estimate.generationMs,
+          true,
+        );
+        continue;
+      }
+      if (row.output_tokens === null || row.generation_ms === null) continue;
       aggregator.addGenerationUsage(
         Date.parse(row.started_at),
         provider,

@@ -540,7 +540,7 @@ describe("UsageService", () => {
         const summary = yield* service.readSummary(WINDOW);
         assert.deepEqual(summary.generationTimings, [
           {
-            day: "2026-08-01",
+            day: UsageDay.make("2026-08-01"),
             provider: "cursor",
             model: "composer-2.5",
             hour: 10,

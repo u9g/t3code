@@ -24,11 +24,13 @@ function SpeedBar({
   maximum,
   color,
   display,
+  estimated = false,
 }: {
   readonly value: number | null;
   readonly maximum: number;
   readonly color: string;
   readonly display: SpeedDisplay;
+  readonly estimated?: boolean;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -47,6 +49,7 @@ function SpeedBar({
         ) : null}
       </div>
       <span className="w-18 shrink-0 text-right tabular-nums">
+        {estimated && value !== null ? "≈" : ""}
         {formatSpeedValue(value, display)}
       </span>
     </div>
@@ -227,6 +230,9 @@ export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpe
                       maximum={outputMaximum}
                       color={row.color}
                       display={display}
+                      estimated={Boolean(
+                        row.estimated || (display === "relative" && baseline?.estimated),
+                      )}
                     />
                   </td>
                   <td className="py-3">
@@ -253,6 +259,11 @@ export function UsageSpeedSection({ speed }: { readonly speed: readonly ModelSpe
               </tr>
             </tfoot>
           </table>
+          {rows.some((row) => row.estimated) ? (
+            <p className="pt-3 text-3xs text-muted-foreground">
+              ≈ Estimated generation time; tool execution and compaction are excluded.
+            </p>
+          ) : null}
         </div>
       )}
     </section>

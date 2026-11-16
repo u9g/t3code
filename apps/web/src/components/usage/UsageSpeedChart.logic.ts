@@ -25,6 +25,7 @@ export interface SpeedRow {
   readonly turns: number;
   readonly rate: number | null;
   readonly durationsMs: readonly number[];
+  readonly estimated?: true;
 }
 
 export function buildSpeedRows(speed: readonly ModelSpeed[]): readonly SpeedRow[] {
@@ -40,6 +41,7 @@ export function buildSpeedRows(speed: readonly ModelSpeed[]): readonly SpeedRow[
           turns: durationsMs.length,
           rate: tokensPerSecond(model),
           durationsMs: durationsMs.toSorted((a, b) => a - b),
+          ...(model.estimated ? { estimated: true as const } : {}),
         },
       ];
     })

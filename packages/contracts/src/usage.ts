@@ -55,6 +55,7 @@ export const UsageSpeedSample = Schema.Struct({
   hour: NonNegativeInt.check(Schema.isLessThan(24)),
   outputTokens: NonNegativeInt,
   generationMs: NonNegativeInt,
+  estimated: Schema.optionalKey(Schema.Literal(true)),
   /** Service tier the responses ran at; absent for standard. */
   tier: Schema.optionalKey(Schema.Literals(["fast", "ultrafast"])),
 });
@@ -211,7 +212,7 @@ export const UsageSummary = Schema.Struct({
   delegatedPrompts: Schema.optionalKey(ForwardCompatibleArray(UsageServerPrompts)),
   /** Absent on older servers. Independent of transcript-source ownership. */
   turnTimings: Schema.optionalKey(ForwardCompatibleArray(UsageTurnTimings)),
-  /** Model requests measured by this server, independent of shared billing-source ownership. */
+  /** Model request timings from this server, independent of shared billing-source ownership. */
   generationTimings: Schema.optionalKey(ForwardCompatibleArray(UsageGenerationTiming)),
 });
 export type UsageSummary = typeof UsageSummary.Type;

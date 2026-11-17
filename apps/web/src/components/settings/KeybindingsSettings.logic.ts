@@ -439,6 +439,7 @@ const COMMAND_LABELS: Partial<Record<KeybindingCommand, string>> = {
   "composer.sendAlternate": msg("Composer: Opposite Queue or Steer Action"),
   "composer.sendBackground": msg("Composer: Start in Background"),
   "composer.sendAndNewThread": msg("Composer: Send and Start New Thread"),
+  "composer.sendSideChat": msg("Composer: Send in New Side Chat"),
   "composer.dictation": msg("Composer: Start or Finish Dictation"),
   "thread.steerQueuedMessage": msg("Queue: Send First Queued Message"),
   "thread.editQueuedMessage": msg("Queue: Edit Last Queued Message"),
@@ -504,6 +505,8 @@ const USAGE_COMMAND_LABELS: Record<
 > = {
   "usage.cost": msg("Usage: Cost"),
   "usage.tokens": msg("Usage: Tokens"),
+  "usage.turns": msg("Usage: Turns"),
+  "usage.speed": msg("Usage: Speed"),
   "usage.limits": msg("Usage: Limits"),
   "usage.period.day": msg("Usage: Period: Past 24h"),
   "usage.period.week": msg("Usage: Period: 7 days"),

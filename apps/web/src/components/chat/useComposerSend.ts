@@ -442,9 +442,13 @@ export function useComposerSend(input: ComposerSendInput) {
 
     const sendCtx = composerRef.current?.getSendContext();
     // `/side` beats an open question and a plan follow-up, which would send the text to main.
+    // The side chat shortcut sends the whole draft as if it started with `/side`, and
+    // never falls back to sending it in this thread.
+    const sideChatShortcut = submissionIntent === "sideChat";
     const sideChatCommand =
       sendCtx && !directAnnotation && !queuedRunEdit.isEditing
-        ? parseSideChatCommand(promptAtSend)
+        ? (parseSideChatCommand(promptAtSend) ??
+          (sideChatShortcut ? { prompt: promptAtSend.trim() } : null))
         : null;
     const answeringQuestion =
       Boolean(activePendingUserInput) && sendCtx?.answeringPendingUserInput !== false;
@@ -452,7 +456,7 @@ export function useComposerSend(input: ComposerSendInput) {
       onSideChat !== undefined && sideChatCommand !== null && sideChatDisabledReason === null;
     // An answer responds to the open request rather than starting a turn, so the new-message
     // guards below (loading, busy, provider) must not swallow it.
-    if (answeringQuestion && !startsSideChat && !directAnnotation) {
+    if (answeringQuestion && !startsSideChat && !directAnnotation && !sideChatShortcut) {
       if (readEnvironmentScope(environmentId, AuthOrchestrationOperateScope) && activeThread) {
         onAdvanceActivePendingUserInput();
       }
@@ -526,7 +530,11 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     // Where side chats are unavailable, `/side` text can still be a literal answer.
-    if (sideChatDisabledReason !== null && sideChatCommand && !answeringQuestion) {
+    if (
+      sideChatDisabledReason !== null &&
+      sideChatCommand &&
+      (!answeringQuestion || sideChatShortcut)
+    ) {
       toastManager.add(
         stackedThreadToast({
           type: "warning",
@@ -711,6 +719,7 @@ export function useComposerSend(input: ComposerSendInput) {
       }
       return;
     }
+    if (sideChatShortcut) return;
     if (answeringQuestion) {
       if (directAnnotation) {
         notifyDirectAnnotationAttached();

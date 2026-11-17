@@ -896,6 +896,7 @@ describe("composer and pull request shortcuts", () => {
       for (const composerRequiresModifier of [false, true]) {
         const context = {
           composerFocus: true,
+          composerEmpty: true,
           turnRunning: true,
           composerRequiresModifier,
         };
@@ -905,6 +906,13 @@ describe("composer and pull request shortcuts", () => {
             context,
           }),
           composerRequiresModifier ? "composer.sendAlternate" : "thread.steerQueuedMessage",
+        );
+        assert.strictEqual(
+          resolveShortcutCommand(shiftedEnter, DEFAULT_RESOLVED_KEYBINDINGS, {
+            platform,
+            context: { ...context, composerEmpty: false },
+          }),
+          composerRequiresModifier ? "composer.sendAlternate" : "composer.sendSideChat",
         );
         assert.strictEqual(
           shortcutLabelForCommand(DEFAULT_RESOLVED_KEYBINDINGS, "composer.sendAlternate", {

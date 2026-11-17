@@ -143,6 +143,24 @@ describe("composerSubmissionIntentForKey", () => {
     },
   );
 
+  it("sends a non-empty draft to a side chat on Mod+Shift+Enter", () => {
+    const sideChatKey = { ...enter, ctrlKey: true, shiftKey: true };
+    expect(
+      composerSubmissionIntentForKey({ ...input, event: sideChatKey, prompt: "a side question" }),
+    ).toBe("sideChat");
+    expect(composerSubmissionIntentForKey({ ...input, event: sideChatKey, prompt: "  " })).toBe(
+      null,
+    );
+    expect(
+      composerSubmissionIntentForKey({
+        ...input,
+        isDraftThread: true,
+        event: sideChatKey,
+        prompt: "a side question",
+      }),
+    ).toBe(null);
+  });
+
   it("honors the send preference with an existing install's saved alternate binding", () => {
     const keybindings = mergeWithDefaultKeybindings(
       compileResolvedKeybindingsConfig([
@@ -211,13 +229,14 @@ describe("composerSubmissionIntentForKey", () => {
           event: { ...enter, ctrlKey: true, shiftKey: true },
         }),
       ).toBeNull();
+      // The freed chord falls to the side chat binding instead of the alternate action.
       expect(
         composerSubmissionIntentForKey({
           ...custom,
           isRunning: true,
           event: { ...enter, ctrlKey: true, shiftKey: true },
         }),
-      ).toBeNull();
+      ).toBe("sideChat");
       expect(
         composerSubmissionIntentForKey({ ...custom, event: { ...enter, key: "b", altKey: true } }),
       ).toBeNull();

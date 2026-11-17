@@ -2841,6 +2841,7 @@ export default function ChatView(props: ChatViewProps) {
       !composerHasNonPromptContent &&
       promptRef.current.trim().length === 0,
     composerRequiresModifier: composerRequiresModifier(settings.sendShortcut, promptRef.current),
+    composerEmpty: promptRef.current.trim() === "",
     isWeb: !isElectron,
     isDesktop: isElectron,
   });

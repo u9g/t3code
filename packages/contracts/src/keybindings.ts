@@ -92,6 +92,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.sendAlternate",
   "composer.sendBackground",
   "composer.sendAndNewThread",
+  "composer.sendSideChat",
   "composer.dictation",
   "composer.host",
   "composer.cycleHost",

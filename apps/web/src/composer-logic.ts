@@ -27,7 +27,7 @@ import {
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
 export type ComposerSlashCommand = "model" | "side" | "btw" | "clear";
-export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
+export type ComposerSubmissionIntent = "foreground" | "background" | "alternate" | "sideChat";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -88,11 +88,13 @@ export function composerSubmissionIntentForKey(input: {
       draftThreadRoute: input.isDraftThread,
       turnRunning: input.isRunning === true,
       composerRequiresModifier: composerRequiresModifier(input.sendShortcut, input.prompt ?? ""),
+      composerEmpty: (input.prompt ?? "").trim() === "",
     },
   });
   if (command === "composer.sendAlternate" && input.isRunning) return "alternate";
   if (command === "composer.sendBackground" && input.isDraftThread) return "background";
   if (command === "composer.sendAndNewThread" && !input.isDraftThread) return "background";
+  if (command === "composer.sendSideChat") return "sideChat";
   if (command !== null || event.key !== "Enter" || event.shiftKey || event.altKey) return null;
   if (
     composerRequiresModifier(input.sendShortcut, input.prompt ?? "") &&

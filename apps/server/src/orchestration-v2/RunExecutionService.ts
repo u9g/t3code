@@ -2353,7 +2353,10 @@ export const layer: Layer.Layer<
             const startInput = mcpServers === undefined ? turnInput : { ...turnInput, mcpServers };
             const { message: _message, ...resumeInput } = startInput;
             return input.resume === true
-              ? (input.session.resumeTurn?.({ ...resumeInput, messageId: input.message.messageId }) ??
+              ? (input.session.resumeTurn?.({
+                  ...resumeInput,
+                  messageId: input.message.messageId,
+                }) ??
                   Effect.fail(
                     turnStartError(
                       new ProviderAdapter.ProviderResumeUnsupportedError({

@@ -1970,7 +1970,7 @@ function RunFoldButton({
 
 /**
  * Focus mode for one finished assistant reply. Earlier replies collapse to their GitHub links and a
- * "Show full reply" control; the latest collapses to its first paragraph and its links. A reply with neither collapses to its headings, which a tap opens one at a time.
+ * "Show full reply" control; the rest of the latest turn collapses to its first paragraph and its links, and the thread's final reply is never collapsed. A reply with neither collapses to its headings, which a tap opens one at a time.
  */
 function FocusAssistantMarkdown(props: {
   readonly text: string;
@@ -2064,6 +2064,7 @@ function renderFeedEntry(
     readonly terminalAssistantMessageIds: ReadonlySet<string>;
     readonly focusModeEnabled: boolean;
     readonly focusPreviousReplyIds: ReadonlySet<string>;
+    readonly focusLastReplyId: string | null;
     readonly unsettledTurnId: RunId | null;
     readonly compactionLabelsByEntryId: ReadonlyMap<string, { title: string; compacting: string }>;
     readonly failedRunIds: ReadonlySet<RunId>;
@@ -2761,6 +2762,7 @@ function renderFeedEntry(
           <MarkdownImageAvailableWidthContext value={props.markdownContentWidth}>
             {props.focusModeEnabled &&
             message.role === "assistant" &&
+            message.id !== props.focusLastReplyId &&
             !message.streaming &&
             !assistantTurnStillInProgress ? (
               <FocusAssistantMarkdown
@@ -4057,6 +4059,15 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     }
     return ids;
   })();
+  // The thread's final message, when it is an assistant reply, is never collapsed.
+  const focusLastReplyId = (() => {
+    for (let index = props.feed.length - 1; index >= 0; index--) {
+      const entry = props.feed[index];
+      if (entry?.type !== "message") continue;
+      return entry.message.role === "assistant" ? entry.message.id : null;
+    }
+    return null;
+  })();
   // An interrupted run unfolds; a run that is no longer latest folds back.
   const [previousLatestRun, setPreviousLatestRun] = useState(props.latestRun);
   if (previousLatestRun !== props.latestRun) {
@@ -4366,6 +4377,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             terminalAssistantMessageIds,
             focusModeEnabled,
             focusPreviousReplyIds,
+            focusLastReplyId,
             unsettledTurnId,
             compactionLabelsByEntryId,
             failedRunIds,

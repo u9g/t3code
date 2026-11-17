@@ -33,6 +33,7 @@ import {
   liveAnswerPreview,
   deriveMessagesTimelineRowsWithState,
   isTimelineMinimapTurnVisible,
+  deriveFocusLastReplyId,
   deriveFocusPreviousReplyIds,
   resolveAssistantMessageCopyState,
   resolveTimelineMinimapHitStrip,
@@ -5315,5 +5316,21 @@ describe("deriveFocusPreviousReplyIds", () => {
         message("a3", "assistant"),
       ]),
     ).toEqual(new Set(["a1", "a2"]));
+  });
+});
+
+describe("deriveFocusLastReplyId", () => {
+  const message = (id: string, role: "user" | "assistant") =>
+    ({ kind: "message", id, message: { id, role } }) as unknown as MessagesTimelineRow;
+  const work = { kind: "work", id: "w1" } as unknown as MessagesTimelineRow;
+
+  it("returns the thread's final message when it is an assistant reply", () => {
+    expect(deriveFocusLastReplyId([message("u1", "user"), message("a1", "assistant"), work])).toBe(
+      "a1",
+    );
+  });
+
+  it("returns null when a user message is last", () => {
+    expect(deriveFocusLastReplyId([message("a1", "assistant"), message("u1", "user")])).toBeNull();
   });
 });

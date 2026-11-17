@@ -82,7 +82,9 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     row.projectedItem?.item.id,
   );
   const text = liveText ?? row.message.text;
-  const focusModeEnabled = useClientSettings((settings) => settings.focusModeEnabled);
+  const focusModeEnabled =
+    useClientSettings((settings) => settings.focusModeEnabled) &&
+    ctx.focusLastReplyId !== row.message.id;
   const focusExpanded = useFocusExpandedStore((store) => store.ids.has(row.message.id));
   const setFocusExpandedFor = useFocusExpandedStore((store) => store.setExpanded);
   const setFocusExpanded = (expanded: boolean) => setFocusExpandedFor(row.message.id, expanded);

@@ -83,6 +83,7 @@ import { useAssistantCitationTarget } from "./useAssistantCitationTarget";
 import { worktreeSetupAgentStarted } from "@t3tools/client-runtime/worktree-setup";
 import { resolveCitationPhase, type CitedHistory } from "./citationProcedure";
 import {
+  deriveFocusLastReplyId,
   deriveFocusPreviousReplyIds,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
@@ -1143,6 +1144,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     citationRequest: readyCitationRequest,
     onReplyToResponse,
     focusPreviousReplyIds: deriveFocusPreviousReplyIds(rows),
+    focusLastReplyId: deriveFocusLastReplyId(rows),
     listRef,
     timestampFormat,
     routeThreadKey,

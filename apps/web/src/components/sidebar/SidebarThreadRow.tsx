@@ -1644,8 +1644,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                               }
                             />
                             <TooltipPopup side="top">
-  <T>Dismiss Woke notification</T>
-</TooltipPopup>
+                              <T>Dismiss Woke notification</T>
+                            </TooltipPopup>
                           </Tooltip>
                         ) : (
                           <span
@@ -1704,8 +1704,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                               <XIcon className="size-3.5" />
                             </TooltipTrigger>
                             <TooltipPopup side="top">
-  <T>Discard draft</T>
-</TooltipPopup>
+                              <T>Discard draft</T>
+                            </TooltipPopup>
                           </Tooltip>
                         ) : null}
                         {showSnoozeButton ? (
@@ -1734,8 +1734,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                               <T>Settle</T>
                             </TooltipTrigger>
                             <TooltipPopup>
-  <T>Settle thread</T>
-</TooltipPopup>
+                              <T>Settle thread</T>
+                            </TooltipPopup>
                           </Tooltip>
                         ) : null}
                       </span>

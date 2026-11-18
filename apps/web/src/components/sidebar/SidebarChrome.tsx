@@ -326,7 +326,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
           />
           <SidebarUtilityItem
             icon={<FocusIcon />}
-            label="Show full replies"
+            label={gt("Show full replies")}
             pressed={!focusModeEnabled}
             onClick={() => void updateClientSettings({ focusModeEnabled: !focusModeEnabled })}
           />

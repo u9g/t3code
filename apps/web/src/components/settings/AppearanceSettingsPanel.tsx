@@ -363,11 +363,13 @@ export function AppearanceSettingsPanel() {
         />
         <SettingsRow
           {...searchableSetting("focus-mode")}
-          description="Collapse replies from finished turns to the GitHub and .mp4 links they mention. Replies without those links stay expanded."
+          description={gt(
+            "Collapse earlier replies while keeping the thread's final reply expanded.",
+          )}
           resetAction={
             settings.focusModeEnabled !== DEFAULT_UNIFIED_SETTINGS.focusModeEnabled ? (
               <SettingResetButton
-                label="focus mode"
+                ariaLabel={gt("Reset focus mode to default")}
                 onClick={() =>
                   updateSettings({ focusModeEnabled: DEFAULT_UNIFIED_SETTINGS.focusModeEnabled })
                 }
@@ -378,7 +380,7 @@ export function AppearanceSettingsPanel() {
             <Switch
               checked={settings.focusModeEnabled}
               onCheckedChange={(checked) => updateSettings({ focusModeEnabled: Boolean(checked) })}
-              aria-label="Focus mode"
+              aria-label={gt("Focus mode")}
             />
           }
         />

@@ -226,7 +226,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                 onClick={() => setFocusExpanded(false)}
               >
                 <ChevronDownIcon className="size-3" />
-                Collapse reply
+                <T>Collapse reply</T>
               </InlineButton>
             ) : (
               <FocusPreviewCard
@@ -238,7 +238,7 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
                     onClick={() => setFocusExpanded(true)}
                   >
                     <ChevronRightIcon className="size-3" />
-                    Show full reply
+                    <T>Show full reply</T>
                   </InlineButton>
                 }
               >

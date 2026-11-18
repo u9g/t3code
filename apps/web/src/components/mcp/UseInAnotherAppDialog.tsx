@@ -130,14 +130,16 @@ function LocalSetup({
       <WizardHeader title={title} />
       <WizardPanel>
         {mcpUrl === null ? (
-          <GateMessage title={gt("Connect to {environment} first.", { environment: environment.label })} />
+          <GateMessage
+            title={gt("Connect to {environment} first.", { environment: environment.label })}
+          />
         ) : (
           <section className="space-y-4">
             <p className="text-sm text-muted-foreground">
               <T>
                 Apps that can reach <Var>{environment.label}</Var> directly, like Claude Code or
-                Codex, sign in at its own address. Cloud apps need T3 Connect, which this build
-                does not include.
+                Codex, sign in at its own address. Cloud apps need T3 Connect, which this build does
+                not include.
               </T>
             </p>
             <CopyRow label={gt("URL")} value={mcpUrl} />
@@ -146,8 +148,12 @@ function LocalSetup({
               <CommandBlock command={`codex mcp add t3code --url ${mcpUrl}`} />
             </div>
             <ol className="list-decimal space-y-1 ps-5 text-sm">
-              <li><T>Run the command for your app, then sign in from it (/mcp in Claude Code).</T></li>
-              <li><T>Paste the code below on the sign-in page that opens.</T></li>
+              <li>
+                <T>Run the command for your app, then sign in from it (/mcp in Claude Code).</T>
+              </li>
+              <li>
+                <T>Paste the code below on the sign-in page that opens.</T>
+              </li>
             </ol>
             <RadioGroup
               aria-label={gt("What can the app do?")}
@@ -161,7 +167,9 @@ function LocalSetup({
                   selected={level === access}
                   disabledReason={levels.get(level)}
                   description={
-                    level === "full-access" ? gt("Runs commands and edits files without asking") : null
+                    level === "full-access"
+                      ? gt("Runs commands and edits files without asking")
+                      : null
                   }
                 />
               ))}
@@ -178,7 +186,9 @@ function LocalSetup({
         )}
       </WizardPanel>
       <WizardFooter leading={<ManageAccessButton environment={environment} />}>
-        <Button onClick={close}><T>Done</T></Button>
+        <Button onClick={close}>
+          <T>Done</T>
+        </Button>
       </WizardFooter>
     </>
   );

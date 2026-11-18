@@ -411,10 +411,10 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "focus-mode",
-    title: "Focus mode",
+    title: msg("Focus mode"),
     to: "/settings/appearance",
     searchTerms: [
-      "collapse minimize finished replies github links pull requests mp4 video compact",
+      msg("collapse minimize finished replies github links pull requests mp4 video compact"),
     ],
   },
   {

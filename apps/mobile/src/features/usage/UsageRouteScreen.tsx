@@ -563,7 +563,11 @@ function UsageSummary(props: { readonly merged: MergedUsage; readonly metric: Us
   return (
     <View className="gap-0.5">
       <Text className="text-sm text-foreground-muted">
-        {metric === "cost" ? gt("Raw token cost") : metric === "tokens" ? gt("Processed tokens") : gt("Turns")}
+        {metric === "cost"
+          ? gt("Raw token cost")
+          : metric === "tokens"
+            ? gt("Processed tokens")
+            : gt("Turns")}
       </Text>
       <Text className="text-4xl font-t3-bold tabular-nums text-foreground">
         {metric === "cost"
@@ -684,12 +688,15 @@ function ProviderSection(props: {
                       share: formatPercent(share),
                       cost: formatUsd(provider.costUsd),
                     })
-                  : gt("{share} of turns · {scheduled} scheduled · {delegated} delegated · {tokens} tokens", {
-                      share: formatPercent(share),
-                      scheduled: formatCount(provider.scheduledPrompts),
-                      delegated: formatCount(provider.delegatedPrompts),
-                      tokens: formatTokens(provider.totalTokens),
-                    })}
+                  : gt(
+                      "{share} of turns · {scheduled} scheduled · {delegated} delegated · {tokens} tokens",
+                      {
+                        share: formatPercent(share),
+                        scheduled: formatCount(provider.scheduledPrompts),
+                        delegated: formatCount(provider.delegatedPrompts),
+                        tokens: formatTokens(provider.totalTokens),
+                      },
+                    )}
             </Text>
           </View>
         );
@@ -950,14 +957,14 @@ function ModelsSection(props: {
                           share: formatPercent(model.tokenShare),
                           cost: formatUsd(model.costUsd),
                         })
-                  : isModelCostUnknown(model)
-                    ? gt("no known rates · {tokens} tokens", {
-                        tokens: formatTokens(model.totalTokens),
-                      })
-                    : gt("{share} of cost · {tokens} tokens", {
-                        share: formatPercent(model.costShare),
-                        tokens: formatTokens(model.totalTokens),
-                      })}
+                    : isModelCostUnknown(model)
+                      ? gt("no known rates · {tokens} tokens", {
+                          tokens: formatTokens(model.totalTokens),
+                        })
+                      : gt("{share} of cost · {tokens} tokens", {
+                          share: formatPercent(model.costShare),
+                          tokens: formatTokens(model.totalTokens),
+                        })}
               </Text>
             </View>
             <Text className="text-base tabular-nums text-foreground">
@@ -965,9 +972,9 @@ function ModelsSection(props: {
                 ? formatCount(model.prompts)
                 : metric === "tokens"
                   ? formatTokens(model.totalTokens)
-                : isModelCostUnknown(model)
-                  ? gt("Unpriced", { $context: "model with no known price" })
-                  : formatUsd(model.costUsd)}
+                  : isModelCostUnknown(model)
+                    ? gt("Unpriced", { $context: "model with no known price" })
+                    : formatUsd(model.costUsd)}
             </Text>
           </View>
         ))}

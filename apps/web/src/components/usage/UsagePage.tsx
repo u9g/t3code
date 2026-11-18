@@ -800,9 +800,10 @@ function UsageOverview({
                   >
                     {awaitingData
                       ? "-"
-                      : formatUsageMetric(metric, locale)(
-                          totals === undefined ? 0 : usageMetricValue(totals, metric),
-                        )}
+                      : formatUsageMetric(
+                          metric,
+                          locale,
+                        )(totals === undefined ? 0 : usageMetricValue(totals, metric))}
                   </dd>
                 </dl>
                 <p
@@ -822,12 +823,15 @@ function UsageOverview({
                           share: formatPercent(share),
                           cost: formatUsd(totals?.costUsd ?? 0, locale),
                         })
-                      : gt("{share} of turns · {scheduled} scheduled · {delegated} delegated · {tokens} tokens", {
-                          share: formatPercent(share),
-                          scheduled: formatCount(totals?.scheduledPrompts ?? 0, locale),
-                          delegated: formatCount(totals?.delegatedPrompts ?? 0, locale),
-                          tokens: formatTokens(totals?.totalTokens ?? 0),
-                        })}
+                      : gt(
+                          "{share} of turns · {scheduled} scheduled · {delegated} delegated · {tokens} tokens",
+                          {
+                            share: formatPercent(share),
+                            scheduled: formatCount(totals?.scheduledPrompts ?? 0, locale),
+                            delegated: formatCount(totals?.delegatedPrompts ?? 0, locale),
+                            tokens: formatTokens(totals?.totalTokens ?? 0),
+                          },
+                        )}
                 </p>
               </div>
             );

@@ -1,9 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, GitHubLinkPreview } from "@t3tools/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
+import { msg, useMessages } from "gt-react";
 import { Fragment, type ReactNode } from "react";
 
 import { useSeenInViewport } from "~/hooks/useSeenInViewport";
+import type { MessageResolver } from "~/i18n/messages";
 import { cn } from "~/lib/utils";
 import { pullRequestEnvironment } from "~/state/pullRequests";
 
@@ -36,22 +38,31 @@ const stackMapPreviewsAtom = Atom.family((key: string) =>
   }),
 );
 
-function status(preview: GitHubLinkPreview): { label: string; toneClassName: string } | null {
+function status(
+  preview: GitHubLinkPreview,
+  resolve: MessageResolver,
+): { label: string; toneClassName: string } | null {
   if (preview.state === null) return null;
-  const state = resolvePullRequestState({
-    state: preview.state === "draft" ? "open" : preview.state,
-    isDraft: preview.state === "draft",
-  });
+  const state = resolvePullRequestState(
+    {
+      state: preview.state === "draft" ? "open" : preview.state,
+      isDraft: preview.state === "draft",
+    },
+    resolve,
+  );
   if (preview.state === "merged" || preview.state === "closed") return state;
+  const decision = preview.pullRequest?.reviewDecision;
+  const presentation = decision == null ? null : reviewDecisionPresentation(decision);
   const review =
     preview.state === "draft"
       ? state
-      : preview.pullRequest?.reviewDecision == null
-        ? null
-        : reviewDecisionPresentation(preview.pullRequest.reviewDecision);
+      : presentation && { ...presentation, label: resolve(presentation.label) };
   if (preview.pullRequest?.checksState !== "failing") return review;
   return {
-    label: review === null ? "Checks failing" : `${review.label} · checks failing`,
+    label:
+      review === null
+        ? resolve(msg("Checks failing"))
+        : resolve(msg("{status} · checks failing"), { status: review.label }),
     toneClassName: pullRequestChecksStatePresentation("failing").toneClassName,
   };
 }
@@ -67,6 +78,7 @@ export function PullRequestStackMap({
   /** The chat's own link for a URL, so a row opens and previews like any link in the reply. */
   renderLink: (url: string, label: string) => ReactNode;
 }) {
+  const resolve = useMessages();
   const [viewportRef, seen] = useSeenInViewport();
   const previews = useAtomValue(
     seen ? stackMapPreviewsAtom([environmentId, ...urls].join("\n")) : NO_PREVIEWS,
@@ -96,11 +108,14 @@ export function PullRequestStackMap({
               const state =
                 row.preview?.state == null
                   ? null
-                  : resolvePullRequestState({
-                      state: row.preview.state === "draft" ? "open" : row.preview.state,
-                      isDraft: row.preview.state === "draft",
-                    });
-              const rowStatus = row.preview === null ? null : status(row.preview);
+                  : resolvePullRequestState(
+                      {
+                        state: row.preview.state === "draft" ? "open" : row.preview.state,
+                        isDraft: row.preview.state === "draft",
+                      },
+                      resolve,
+                    );
+              const rowStatus = row.preview === null ? null : status(row.preview, resolve);
               return (
                 <div
                   key={row.url}

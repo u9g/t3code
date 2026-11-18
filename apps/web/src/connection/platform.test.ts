@@ -515,7 +515,10 @@ describe("desktop-local secondary bootstrap", () => {
       const connected = yield* loadSecondaryConnectionRegistration(bootstrap).pipe(
         Effect.provide(layerHttpClient),
       );
-      expect(connected.registration.credential.token).toBe("secondary-bearer");
+      expect(connected.registration.credential).toMatchObject({
+        _tag: "BearerConnectionCredential",
+        token: "secondary-bearer",
+      });
       expect(requests).toEqual([
         "GET /.well-known/t3/environment",
         "GET /.well-known/t3/environment",

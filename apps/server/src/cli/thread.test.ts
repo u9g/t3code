@@ -29,6 +29,7 @@ import {
 import {
   latestRunError,
   launchModelSelection,
+  listRunningCommands,
   readLatestMessages,
   readOutputSchema,
   resolveProject,
@@ -925,5 +926,76 @@ it.effect("--mcp-config rejects what a thread cannot use, without quoting header
       "--mcp-config: server 'gem' has \"headers\" that are not all strings.",
     ]);
     assert.notInclude(messages.join("\n"), "must-not-leak");
+  }),
+);
+
+it.effect("running lists each running thread's running commands, with its folder", () =>
+  Effect.gen(function* () {
+    const project = ProjectId.make("project-1");
+    const item = (type: string, status: string, text: string) => ({
+      type,
+      status,
+      text,
+      updatedAt: "2026-11-20T18:19:00.000Z",
+    });
+    const { tools, calls } = scriptedTools({
+      t3_thread_list: [{ threads: [{ threadId }, { threadId: "thread-2" }], nextCursor: null }],
+      t3_project_list: [
+        { projects: [{ id: project, title: "p", workspaceRoot: "/repo" }], nextCursor: null },
+      ],
+      t3_thread_read: [
+        {
+          thread: { threadId, title: "Cursor", projectId: project, worktreePath: null },
+          items: [
+            item("command_execution", "completed", "$ ls\nfile"),
+            item("command_execution", "running", "$ export K=$(op read op://V/i/f)\nstarted"),
+            item("dynamic_tool", "running", "$ not a command"),
+          ],
+        },
+        {
+          thread: {
+            threadId: "thread-2",
+            title: "Claude",
+            projectId: project,
+            worktreePath: "/wt",
+          },
+          items: [item("command_execution", "running", "$ sleep 5")],
+        },
+      ],
+    });
+
+    const commands = yield* listRunningCommands(tools, Option.none());
+    const thread2 = ThreadId.make("thread-2");
+
+    assert.deepStrictEqual(
+      commands.map(({ threadId, title, cwd, text }) => ({ threadId, title, cwd, text })),
+      [
+        {
+          threadId,
+          title: "Cursor",
+          cwd: "/repo",
+          text: "export K=$(op read op://V/i/f)\nstarted",
+        },
+        { threadId: thread2, title: "Claude", cwd: "/wt", text: "sleep 5" },
+      ],
+    );
+    assert.deepInclude(calls[0]!.args as object, { allProjects: true, statuses: ["running"] });
+  }),
+);
+
+it.effect("running reads only the thread it is given", () =>
+  Effect.gen(function* () {
+    const { tools, calls } = scriptedTools({
+      t3_project_list: [{ projects: [], nextCursor: null }],
+      t3_thread_read: [
+        { thread: { threadId, title: "t", projectId: "gone", worktreePath: null }, items: [] },
+      ],
+    });
+
+    assert.deepStrictEqual(yield* listRunningCommands(tools, Option.some(threadId)), []);
+    assert.deepStrictEqual(
+      calls.map((call) => call.tool),
+      ["t3_project_list", "t3_thread_read"],
+    );
   }),
 );

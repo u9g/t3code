@@ -1187,6 +1187,93 @@ const threadShowCommand = Command.make("show", {
   ),
 );
 
+/**
+ * The command_execution items running now, in every running thread or in `only`.
+ * Every provider's shell tool call is one, whatever harness wrapped it. Only each
+ * thread's newest page is read: a running command sits near its timeline's end.
+ */
+export const listRunningCommands = Effect.fn("cli.thread.listRunningCommands")(function* (
+  tools: ThreadTools,
+  only: Option.Option<ThreadId>,
+) {
+  const threadIds: Array<ThreadId> = [];
+  if (Option.isSome(only)) {
+    threadIds.push(only.value);
+  } else {
+    let cursor: number | null = 0;
+    while (cursor !== null) {
+      const page: OrchestratorMcpThreadListResult = yield* tools.call(
+        "t3_thread_list",
+        { allProjects: true, statuses: ["running"], includeSubagents: true, limit: 100, cursor },
+        OrchestratorMcpThreadListResult,
+      );
+      threadIds.push(...page.threads.map((thread) => thread.threadId));
+      cursor = page.nextCursor;
+    }
+  }
+  const roots = new Map(
+    (yield* listAllProjects(tools)).map((project) => [project.id, project.workspaceRoot]),
+  );
+  const reads = yield* Effect.forEach(
+    threadIds,
+    (threadId) =>
+      tools.call(
+        "t3_thread_read",
+        {
+          threadId,
+          view: "activity",
+          limit: READ_PAGE_LIMIT,
+          maxCharsPerItem: READ_ITEM_MAX_CHARS,
+          runLimit: 1,
+        },
+        OrchestratorMcpThreadReadResult,
+      ),
+    { concurrency: 8 },
+  );
+  return reads.flatMap(({ thread, items }) =>
+    items
+      .filter((item) => item.type === "command_execution" && item.status === "running")
+      .map((item) => ({
+        threadId: thread.threadId,
+        title: thread.title,
+        cwd: thread.worktreePath ?? roots.get(thread.projectId) ?? null,
+        /** The command, then any output so far. */
+        text: (item.text ?? "").replace(/^\$ /, ""),
+        updatedAt: item.updatedAt,
+      })),
+  );
+});
+
+const threadRunningCommand = Command.make("running", {
+  ...projectLocationFlags,
+  thread: Flag.String("thread").pipe(
+    Flag.withDescription("Only this thread. Defaults to every running thread."),
+    Flag.optional,
+  ),
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("List the shell commands agents are running now."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const only = Option.isSome(flags.thread)
+        ? Option.some(yield* decodeThreadId(flags.thread.value))
+        : Option.none<ThreadId>();
+      yield* withThreadTools(
+        flags,
+        Effect.fn("cli.thread.running")(function* (tools) {
+          const commands = yield* listRunningCommands(tools, only);
+          if (flags.json) {
+            return yield* printJson({ commands });
+          }
+          for (const command of commands) {
+            yield* Console.log(`${command.threadId}  ${command.title}\n$ ${command.text}\n`);
+          }
+        }),
+      );
+    }).pipe(reportThreadErrors),
+  ),
+);
+
 export const threadCommand = Command.make("thread").pipe(
   Command.withDescription("Start, message, and read threads on the running server."),
   Command.withSubcommands([
@@ -1194,5 +1281,6 @@ export const threadCommand = Command.make("thread").pipe(
     threadStartCommand,
     threadSendCommand,
     threadShowCommand,
+    threadRunningCommand,
   ]),
 );

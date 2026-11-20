@@ -2,6 +2,8 @@ import type {
   AgentMessage,
   AgentOptions,
   InteractionUpdate,
+  LocalSubagentResourceProviderFields,
+  LocalSubagentResourceProviderOptions,
   Run,
   RunRecord,
   RunResult,
@@ -540,6 +542,29 @@ function listenForBackgroundShells(
   backgroundShellListeners.set(agentId, listener);
 }
 
+// The local SDK reads this callback even though its public options omit it.
+interface CursorResourceProviderFields extends LocalSubagentResourceProviderFields {
+  readonly shellExtraEnvProvider?: () => Record<string, string>;
+}
+
+function cursorThreadShellResources(
+  options: LocalSubagentResourceProviderOptions | undefined,
+  threadId: ThreadId,
+): LocalSubagentResourceProviderOptions {
+  const withThreadId = (
+    fields: CursorResourceProviderFields = {},
+  ): CursorResourceProviderFields => ({
+    ...fields,
+    shellExtraEnvProvider: () => ({
+      ...fields.shellExtraEnvProvider?.(),
+      T3CODE_THREAD_ID: threadId,
+    }),
+  });
+  return typeof options === "function"
+    ? async (context) => withThreadId(await options(context))
+    : withThreadId(options);
+}
+
 export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(function* (
   protocolLoggerFor: (input: CursorAgentSdkOpenInput) => CursorAgentSdkProtocolLogger | undefined,
 ) {
@@ -672,14 +697,27 @@ export const makeCursorAgentSdkRunner = Effect.fn("makeCursorAgentSdkRunner")(fu
             });
       const effectiveStore =
         ownedStoreLease === undefined ? input.options.local?.store : ownedStoreLease.store;
+      const local = input.options.local;
+      // The SDK worker builds these callbacks after receiving the thread ID over IPC.
       const effectiveOptions: AgentOptions =
-        effectiveStore === undefined || effectiveStore === input.options.local?.store
+        local === undefined
           ? input.options
           : {
               ...input.options,
               local: {
-                ...input.options.local,
-                store: effectiveStore,
+                ...local,
+                ...(effectiveStore === undefined ? {} : { store: effectiveStore }),
+                resourceProviderOptions: cursorThreadShellResources(
+                  local.resourceProviderOptions,
+                  input.threadId,
+                ),
+                subagentInherit: {
+                  ...local.subagentInherit,
+                  resourceProviderOptions: cursorThreadShellResources(
+                    local.subagentInherit?.resourceProviderOptions,
+                    input.threadId,
+                  ),
+                },
               },
             };
 

@@ -1,4 +1,4 @@
-import type { ListRunsOptions } from "@cursor/sdk";
+import type { AgentOptions, ListRunsOptions } from "@cursor/sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import { ProviderSessionId, ThreadId } from "@t3tools/contracts";
@@ -152,6 +152,31 @@ const layerTest = CursorAgentSdk.layer.pipe(
 );
 
 describe("CursorAgentSdkRunner", () => {
+  it.effect("names the thread to the local agent and its Task children's shells", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("cursor-shell-env");
+      const runner = yield* CursorAgentSdk.CursorAgentSdkRunner;
+      const session = yield* runner.open({
+        operation: "create",
+        options: { local: { settingSources: ["user"] } },
+        threadId,
+        providerSessionId: ProviderSessionId.make("cursor-shell-env"),
+      });
+
+      const options = cursorSdkMock.create.mock.lastCall?.[0] as AgentOptions | undefined;
+      assert.deepEqual(options?.local?.settingSources, ["user"]);
+      for (const fields of [
+        options?.local?.resourceProviderOptions,
+        options?.local?.subagentInherit?.resourceProviderOptions,
+      ]) {
+        const provider = Reflect.get(fields ?? {}, "shellExtraEnvProvider");
+        assert.isFunction(provider);
+        assert.deepEqual(provider(), { T3CODE_THREAD_ID: threadId });
+      }
+      yield* session.close;
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("resumes from the original store after the working directory changes", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

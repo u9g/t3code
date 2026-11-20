@@ -2,6 +2,7 @@ import type {
   AgentMessage,
   AgentOptions,
   InteractionUpdate,
+  LocalSubagentResourceProviderFields,
   McpServerConfig,
   RunResult,
   SDKModel,
@@ -309,6 +310,21 @@ const CURSOR_AGENT_SETTING_SOURCES = [
   "plugins",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
+/** Cursor's local resource provider also reads this field, though the SDK does not publish it. */
+interface CursorResourceProviderFields extends LocalSubagentResourceProviderFields {
+  readonly shellExtraEnvProvider?: () => Record<string, string>;
+}
+
+/**
+ * Names the thread to every shell the agent and its Task children start, as Claude and Codex
+ * sessions do: Cursor runs inside this server, so its shells would otherwise inherit only the
+ * server's environment. PortScanner.AGENT_THREAD_ENV, as a literal because this package cannot
+ * reach apps/server.
+ */
+function cursorThreadShellEnv(threadId: ThreadId): CursorResourceProviderFields {
+  return { shellExtraEnvProvider: () => ({ T3CODE_THREAD_ID: threadId }) };
+}
+
 export function makeCursorAgentOptions(input: {
   readonly apiKey?: string;
   readonly modelSelection: ModelSelection;
@@ -342,6 +358,8 @@ export function makeCursorAgentOptions(input: {
         enabled: policy.sandboxEnabled,
       },
       enableAgentRetries: true,
+      resourceProviderOptions: cursorThreadShellEnv(input.threadId),
+      subagentInherit: { resourceProviderOptions: cursorThreadShellEnv(input.threadId) },
     },
     ...(mcpServers === undefined ? {} : { mcpServers }),
   };

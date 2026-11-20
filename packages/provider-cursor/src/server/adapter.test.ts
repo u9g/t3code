@@ -3016,6 +3016,25 @@ describe("CursorAdapterV2", () => {
     assert.notInclude(logged, "secret-cursor-mcp-token");
   });
 
+  it("names the thread to the shells the agent and its Task children start", () => {
+    const threadId = ThreadId.make("cursor-shell-env");
+    const options = makeCursorAgentOptions({
+      modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2.5" },
+      runtimePolicy: { runtimeMode: "full-access", interactionMode: "default", cwd: "/workspace" },
+      threadId,
+      mcpSession: undefined,
+      platform: "linux",
+    });
+    for (const fields of [
+      options.local?.resourceProviderOptions,
+      options.local?.subagentInherit?.resourceProviderOptions,
+    ]) {
+      const provider = Reflect.get(fields ?? {}, "shellExtraEnvProvider");
+      assert.isFunction(provider);
+      assert.deepEqual(provider(), { T3CODE_THREAD_ID: threadId });
+    }
+  });
+
   it("loads project settings only when runtime policy permits unrestricted execution", () => {
     const input = {
       modelSelection: { instanceId: ProviderInstanceId.make("cursor"), model: "composer-2.5" },

@@ -1084,7 +1084,7 @@ it.effect.each([
             reconnectMcpServer: () => Effect.die("unexpected MCP reconnect"),
             listPermissionRules: Effect.die("unexpected permission rules read"),
             stopTask: () => Effect.void,
-            interrupt: Queue.shutdown(sdkMessages),
+            interrupt: Effect.asVoid(Queue.shutdown(sdkMessages)),
             close: Effect.void,
           }),
         forkSession: () => Effect.die("unused"),

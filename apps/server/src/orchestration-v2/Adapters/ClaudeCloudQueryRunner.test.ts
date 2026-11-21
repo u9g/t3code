@@ -119,6 +119,9 @@ type FakeControl =
   | "applyFlagSettings"
   | "stopTask"
   | "backgroundTasks"
+  | "mcp_authenticate"
+  | "mcp_oauth_callback_url"
+  | "reconnectMcpServer"
   | "interrupt";
 
 interface Envelope {
@@ -246,6 +249,12 @@ class FakeQuery {
   }
   backgroundTasks(toolUseId?: string) {
     return this.control("backgroundTasks", toolUseId);
+  }
+  request(request: { readonly subtype: "mcp_authenticate" | "mcp_oauth_callback_url" }) {
+    return this.control(request.subtype, request);
+  }
+  reconnectMcpServer(server: string) {
+    return this.control("reconnectMcpServer", server);
   }
   interrupt(options?: unknown) {
     return this.control("interrupt", options);
@@ -1785,6 +1794,36 @@ it.layer(layer)("ClaudeCloudQueryRunner", (it) => {
 
         assert.include(controlNames(second), "interrupt");
         assert.deepEqual(second.posted, [SECOND_PROMPT]);
+      }),
+    );
+
+    it.effect("signs in to an MCP server through the cloud session", () =>
+      Effect.gen(function* () {
+        const authUrl = "https://example.com/authorize";
+        const callbackUrl = "https://example.com/callback?code=test";
+        const sdk = makeFakeSdk((method) =>
+          method === "mcp_authenticate"
+            ? Promise.resolve({ response: { requiresUserAction: true, authUrl } })
+            : answerControl(method),
+        );
+        const runner = yield* makeRunner({ api: makeFakeApi().api, sdk: sdk.sdk });
+        const session = yield* runner.open(openInput());
+
+        assert.equal(yield* session.mcpAuthenticate("example"), authUrl);
+        yield* session.mcpSubmitOAuthCallbackUrl({ server: "example", callbackUrl });
+        yield* session.reconnectMcpServer("example");
+
+        assert.deepEqual(sdk.queries[0]!.controls.slice(-3), [
+          {
+            method: "mcp_authenticate",
+            argument: { subtype: "mcp_authenticate", serverName: "example" },
+          },
+          {
+            method: "mcp_oauth_callback_url",
+            argument: { subtype: "mcp_oauth_callback_url", serverName: "example", callbackUrl },
+          },
+          { method: "reconnectMcpServer", argument: "example" },
+        ]);
       }),
     );
 

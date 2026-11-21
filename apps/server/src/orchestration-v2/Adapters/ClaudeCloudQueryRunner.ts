@@ -73,6 +73,7 @@ import {
   isClaudePromptUuid,
   claudePermissionRulesFromReply,
   loggedClaudeQueryOptions,
+  claudeMcpAuthorizationUrlFromReply,
   sendClaudeControlRequest,
   makeClaudeAgentSdkProtocolLogger,
 } from "./ClaudeAdapterV2.ts";
@@ -121,6 +122,9 @@ const CONTROL_FAILURES = {
   backgroundTasks: "backgrounding_failed",
   interrupt: "interrupt_failed",
   mcpServerStatus: "request_failed",
+  mcpAuthenticate: "request_failed",
+  mcpSubmitOAuthCallbackUrl: "request_failed",
+  reconnectMcpServer: "request_failed",
   readMcpResource: "request_failed",
   callMcpTool: "request_failed",
   listPermissionRules: "request_failed",
@@ -1353,6 +1357,33 @@ export const makeClaudeCloudQueryRunner = Effect.fn("makeClaudeCloudQueryRunner"
           ),
         ),
       mcpServerStatus: control("mcpServerStatus", (query) => query.mcpServerStatus()),
+      mcpAuthenticate: (server) =>
+        control("mcpAuthenticate", (query) =>
+          sendClaudeControlRequest(query, { subtype: "mcp_authenticate", serverName: server }),
+        ).pipe(
+          Effect.flatMap((reply) =>
+            claudeMcpAuthorizationUrlFromReply(reply).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ClaudeAgentSdkQueryRunnerError({
+                    method: "mcpAuthenticate",
+                    cause,
+                    reason: "unexpected_response",
+                  }),
+              ),
+            ),
+          ),
+        ),
+      mcpSubmitOAuthCallbackUrl: ({ server, callbackUrl }) =>
+        control("mcpSubmitOAuthCallbackUrl", (query) =>
+          sendClaudeControlRequest(query, {
+            subtype: "mcp_oauth_callback_url",
+            serverName: server,
+            callbackUrl,
+          }),
+        ).pipe(Effect.asVoid),
+      reconnectMcpServer: (server) =>
+        control("reconnectMcpServer", (query) => query.reconnectMcpServer(server)),
       readMcpResource: ({ server, uri }) =>
         control("readMcpResource", (query) => query.readMcpResource(server, uri)),
       callMcpTool: (call) =>

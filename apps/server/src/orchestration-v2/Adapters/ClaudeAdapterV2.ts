@@ -1117,6 +1117,13 @@ const decodeClaudeMcpAuthenticateReply = Schema.decodeUnknownEffect(
   }),
 );
 
+export const claudeMcpAuthorizationUrlFromReply = (reply: unknown) =>
+  decodeClaudeMcpAuthenticateReply(reply).pipe(
+    Effect.map((reply) =>
+      reply.requiresUserAction === true && reply.authUrl !== undefined ? reply.authUrl : null,
+    ),
+  );
+
 const ClaudePermissionRules = Schema.Struct({
   state: Schema.Struct({
     rules: Schema.Array(
@@ -2108,12 +2115,7 @@ export const layerQueryRunner: Layer.Layer<
               }),
             catch: (cause) => queryRunnerError(cause, "mcpAuthenticate"),
           }).pipe(
-            Effect.flatMap(decodeClaudeMcpAuthenticateReply),
-            Effect.map((reply) =>
-              reply.requiresUserAction === true && reply.authUrl !== undefined
-                ? reply.authUrl
-                : null,
-            ),
+            Effect.flatMap(claudeMcpAuthorizationUrlFromReply),
             Effect.mapError((cause) => queryRunnerError(cause, "mcpAuthenticate")),
           ),
         mcpSubmitOAuthCallbackUrl: ({ server, callbackUrl }) =>

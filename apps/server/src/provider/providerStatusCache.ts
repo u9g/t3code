@@ -30,11 +30,13 @@ const mergeProviderModels = (
 const BUILT_IN_DRIVER_ORDER: ReadonlyArray<string> = [
   "codex",
   "claudeAgent",
+  "claudeCloud",
   "cursor",
   "grok",
   "opencode",
   "antigravity",
   "fx",
+  "kiro",
 ];
 
 const driverRank = (driver: string): number => {

@@ -10,15 +10,22 @@ import {
 
 const codex = ProviderDriverKind.make("codex");
 const acpRegistry = ProviderDriverKind.make("acpRegistry");
+const claudeAgent = ProviderDriverKind.make("claudeAgent");
+const claudeCloud = ProviderDriverKind.make("claudeCloud");
 
 describe("providerInstanceInitials", () => {
-  it("treats punctuation as a word break but keeps apostrophes between letters", () => {
+  it("treats punctuation and camel-case humps as word breaks but keeps apostrophes between letters", () => {
     expect(providerInstanceInitials("Codex (hub)")).toBe("CH");
     expect(providerInstanceInitials("work_codex")).toBe("WC");
     expect(providerInstanceInitials("Theo's Codex")).toBe("TC");
     expect(providerInstanceInitials("Codex 'hub'")).toBe("CH");
     expect(providerInstanceInitials("‘hub’")).toBe("HU");
     expect(providerInstanceInitials("(hub)")).toBe("HU");
+    expect(providerInstanceInitials("ClaudeProx")).toBe("CP");
+    expect(providerInstanceInitials("ClaudeAPI")).toBe("CA");
+    expect(providerInstanceInitials("API")).toBe("AP");
+    expect(providerInstanceInitials("ClaudeProx Work")).toBe("CW");
+    expect(providerInstanceInitials("(ClaudeProx)")).toBe("CP");
   });
 
   it("keeps an emoji whole instead of splitting its surrogate pair", () => {
@@ -71,6 +78,14 @@ describe("shouldShowInstanceBadge", () => {
     const first = { driverKind: codex, accentColor: undefined, enabled: true };
     const second = { driverKind: codex, accentColor: undefined, enabled: true };
     expect(shouldShowInstanceBadge(first, [first, second])).toBe(true);
+  });
+
+  it("marks Claude Cloud apart from local Claude, whose logo it shares", () => {
+    const local = { driverKind: claudeAgent, enabled: true };
+    const cloud = { driverKind: claudeCloud, enabled: true };
+    expect(shouldShowInstanceBadge(cloud, [local, cloud])).toBe(true);
+    expect(shouldShowInstanceBadge(local, [local, cloud])).toBe(false);
+    expect(shouldShowInstanceBadge(cloud, [cloud])).toBe(false);
   });
 
   it("ignores disabled siblings for enabled instances while distinguishing historical owners", () => {

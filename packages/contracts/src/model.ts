@@ -116,13 +116,23 @@ export type CustomModelSetting = typeof CustomModelSetting.Type;
 
 const CODEX_DRIVER_KIND = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
+const CLAUDE_CLOUD_DRIVER_KIND = ProviderDriverKind.make("claudeCloud");
 const CURSOR_DRIVER_KIND = ProviderDriverKind.make("cursor");
 const GROK_DRIVER_KIND = ProviderDriverKind.make("grok");
 const FX_DRIVER_KIND = ProviderDriverKind.make("fx");
+const KIRO_DRIVER_KIND = ProviderDriverKind.make("kiro");
 const MUSE_DRIVER_KIND = ProviderDriverKind.make("muse");
 const PI_DRIVER_KIND = ProviderDriverKind.make("pi");
 const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
 const OPENCODE_DRIVER_KIND = ProviderDriverKind.make("opencode");
+
+/**
+ * Claude Cloud runs the same Claude Code agent as `claudeAgent`, only in Anthropic's cloud, so
+ * behavior that belongs to the agent (model options, native subagent and task stops, prompt
+ * caching) applies to both.
+ */
+export const isClaudeCodeDriver = (driver: string | null | undefined): boolean =>
+  driver === CLAUDE_DRIVER_KIND || driver === CLAUDE_CLOUD_DRIVER_KIND;
 
 export const DEFAULT_MODEL = "gpt-6-astra";
 
@@ -143,10 +153,13 @@ export const MUSE_DEFAULT_MODEL = "default";
 export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, string>> = {
   [CODEX_DRIVER_KIND]: DEFAULT_MODEL,
   [CLAUDE_DRIVER_KIND]: "claude-opus-5-5",
+  [CLAUDE_CLOUD_DRIVER_KIND]: "claude-opus-5-5",
   [CURSOR_DRIVER_KIND]: "auto",
   // Product slug meaning the current session model, never an ACP model id.
   [GROK_DRIVER_KIND]: "grok-build",
   [FX_DRIVER_KIND]: "default",
+  // Keeps the Kiro session's current model; real models come from its `model` config option.
+  [KIRO_DRIVER_KIND]: "default",
   [MUSE_DRIVER_KIND]: MUSE_DEFAULT_MODEL,
   [ACP_REGISTRY_DRIVER_KIND]: "default",
   // "default" defers to the user's own Pi settings.json model selection.
@@ -195,9 +208,11 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [ProviderDriverKind.make("antigravity")]: "Antigravity",
   [CODEX_DRIVER_KIND]: "Codex",
   [CLAUDE_DRIVER_KIND]: "Claude",
+  [CLAUDE_CLOUD_DRIVER_KIND]: "Claude Cloud",
   [CURSOR_DRIVER_KIND]: "Cursor",
   [GROK_DRIVER_KIND]: "Grok",
   [FX_DRIVER_KIND]: "fx",
+  [KIRO_DRIVER_KIND]: "Kiro",
   [MUSE_DRIVER_KIND]: "Muse Code",
   [ACP_REGISTRY_DRIVER_KIND]: "ACP Registry",
   [PI_DRIVER_KIND]: "Pi",

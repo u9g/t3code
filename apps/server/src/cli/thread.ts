@@ -6,9 +6,15 @@ import {
   OrchestratorMcpThreadWaitResult,
   ProjectId,
   RunId,
+  T3_CODE_MCP_SERVER_NAME,
   ThreadId,
+  ThreadMcpHttpServer,
+  ThreadMcpServerName,
+  ThreadMcpServers,
   TrimmedNonEmptyString,
+  type OrchestratorMcpThreadDetail,
   type OrchestratorMcpThreadListItem,
+  type OrchestratorMcpThreadRun,
   type OrchestratorMcpThreadStatus,
   type OrchestratorMcpThreadTimelineItem,
 } from "@t3tools/contracts";
@@ -29,7 +35,9 @@ import { Argument, Command, Flag, GlobalFlag } from "effect/cli";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
 import { mcpToolSession, type McpToolSession } from "../mcp/AcpMcpStdioBridge.ts";
-import { readPersistedServerRuntimeState } from "../serverRuntimeState.ts";
+import { expandHomePath } from "../os-jank.ts";
+import * as ProcessRunner from "../processRunner.ts";
+import { readLiveServerRuntimeState } from "../serverRuntimeState.ts";
 import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
 /**
@@ -37,7 +45,17 @@ import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
  * soon, since `t3_thread_wait` only returns on a terminal run.
  */
 const WAIT_SLICE_MS = 15_000;
+const WAKE_GRACE_MS = 10_000;
+const WAKE_POLL_MS = 500;
+const TERMINAL_RUN_STATUSES = new Set<OrchestratorMcpThreadRun["status"]>([
+  "completed",
+  "failed",
+  "cancelled",
+  "interrupted",
+  "rolled_back",
+]);
 const READ_PAGE_LIMIT = 100;
+const READ_ITEM_MAX_CHARS = 20_000;
 const TITLE_MAX_CHARS = 80;
 
 export class ThreadServerNotRunningError extends Schema.TaggedError<ThreadServerNotRunningError>()(
@@ -163,6 +181,21 @@ const ThreadLaunchResult = Schema.Struct({
   runId: Schema.NullOr(RunId),
 });
 
+const ToolListPage = Schema.Struct({
+  tools: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      inputSchema: Schema.optional(
+        Schema.Struct({
+          properties: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+        }),
+      ),
+    }),
+  ),
+  nextCursor: Schema.optional(Schema.String),
+});
+const decodeToolListPage = Schema.decodeUnknownEffect(ToolListPage);
+
 const toolFailureDetail = (result: typeof ToolResult.Type) => {
   const text = result.content?.find((part) => part.text !== undefined)?.text ?? "";
   return Option.match(decodeFailureText(text), {
@@ -194,6 +227,25 @@ const makeThreadTools = (session: McpToolSession, origin: string) => {
         Effect.mapError(() => unexpected(tool)),
       );
     }),
+    /** An older server ignores parameters it does not know, so ask before relying on one. */
+    toolTakesParameter: Effect.fn("cli.thread.toolTakesParameter")(function* (
+      tool: string,
+      parameter: string,
+    ): Effect.fn.Return<boolean, ThreadServerUnreachableError | ThreadToolFailedError> {
+      let cursor: string | undefined;
+      do {
+        const raw = yield* session
+          .listTools(cursor)
+          .pipe(Effect.mapError((cause) => new ThreadServerUnreachableError({ origin, cause })));
+        const page = yield* decodeToolListPage(raw).pipe(
+          Effect.mapError(() => unexpected("tools/list")),
+        );
+        const found = page.tools.find((candidate) => candidate.name === tool);
+        if (found !== undefined) return found.inputSchema?.properties?.[parameter] !== undefined;
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+      return false;
+    }),
   };
 };
 export type ThreadTools = ReturnType<typeof makeThreadTools>;
@@ -203,13 +255,14 @@ export type ThreadTools = ReturnType<typeof makeThreadTools>;
  * outside agent does, and revokes that session when the command ends.
  */
 const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E, R>(
-  flags: { readonly baseDir: Option.Option<string> },
+  flags: { readonly baseDir: Option.Option<string>; readonly json: boolean },
   run: (tools: ThreadTools) => Effect.Effect<A, E, R>,
 ) {
   const logLevel = yield* GlobalFlag.LogLevel;
-  const config = yield* resolveCliAuthConfig(flags, logLevel);
+  const config = yield* resolveCliAuthConfig(flags, logLevel, { quietLogs: flags.json });
+  const minimumLogLevel = flags.json ? "Error" : config.logLevel;
   return yield* Effect.gen(function* () {
-    const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    const runtimeState = yield* readLiveServerRuntimeState(config.serverRuntimeStatePath);
     if (Option.isNone(runtimeState)) {
       return yield* new ThreadServerNotRunningError({ baseDir: config.baseDir });
     }
@@ -235,10 +288,11 @@ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E,
     return yield* run(makeThreadTools(session, origin));
   }).pipe(
     Effect.scoped,
+    Effect.provideService(References.MinimumLogLevel, minimumLogLevel),
     Effect.provide(
       EnvironmentAuth.layerRuntime.pipe(
         Layer.provide(ServerConfig.layer(config)),
-        Layer.provide(Layer.succeed(References.MinimumLogLevel, config.logLevel)),
+        Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
       ),
     ),
   );
@@ -272,8 +326,34 @@ const listAllProjects = Effect.fn("cli.thread.listAllProjects")(function* (tools
   return projects;
 });
 
-/** A project id, or a path inside a project's folder (deepest project wins). */
-const resolveProject = Effect.fn("cli.thread.resolveProject")(function* (
+/** The checkouts of the git repository at `directory`, or none outside a repository. */
+const listGitCheckouts = Effect.fn("cli.thread.listGitCheckouts")(function* (directory: string) {
+  const processRunner = yield* ProcessRunner.ProcessRunner;
+  const list = (args: ReadonlyArray<string>) =>
+    processRunner
+      .run({ command: "git", args: ["worktree", "list", "--porcelain", ...args], cwd: directory })
+      .pipe(
+        Effect.option,
+        Effect.map((result) =>
+          Option.isSome(result) && result.value.code === 0 ? result.value.stdout : undefined,
+        ),
+      );
+  // Pre-2.36 Git rejects worktree list -z; normalize its line output to NUL records.
+  const stdout = (yield* list(["-z"])) ?? (yield* list([]))?.replaceAll("\n", "\0") ?? "";
+  return stdout.split("\0\0").flatMap((record) => {
+    const [first = "", ...attributes] = record.split("\0");
+    return first.startsWith("worktree ") && !attributes.includes("bare")
+      ? [first.slice("worktree ".length)]
+      : [];
+  });
+});
+
+/**
+ * A project id, or a path inside a project's folder (deepest project wins).
+ * A path inside a git worktree resolves as the same path in the repository's
+ * other checkouts.
+ */
+export const resolveProject = Effect.fn("cli.thread.resolveProject")(function* (
   tools: ThreadTools,
   identifier: string,
 ) {
@@ -287,23 +367,57 @@ const resolveProject = Effect.fn("cli.thread.resolveProject")(function* (
   // through a symlink (macOS /tmp), so both sides compare as real paths.
   const realPath = (value: string) =>
     fileSystem.realPath(value).pipe(Effect.orElseSucceed(() => value));
-  const target = yield* realPath(path.resolve(yield* HostProcess.WorkingDirectory, identifier));
+  const target = yield* realPath(
+    path.resolve(yield* HostProcess.WorkingDirectory, yield* expandHomePath(identifier)),
+  );
   const roots = yield* Effect.forEach(projects, (project) =>
     Effect.map(realPath(project.workspaceRoot), (root) => ({ project, root })),
   );
-  const containing = roots
-    .filter(({ root }) => {
-      const relative = path.relative(root, target);
-      return (
-        relative === "" ||
-        (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
-      );
-    })
-    .toSorted((left, right) => right.root.length - left.root.length)[0];
-  if (containing === undefined) {
+  const contains = (root: string, candidate: string) => {
+    const relative = path.relative(root, candidate);
+    return (
+      relative === "" ||
+      (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+    );
+  };
+  const deepestContaining = (candidate: string) =>
+    roots
+      .filter(({ root }) => contains(root, candidate))
+      .toSorted((left, right) => right.root.length - left.root.length)[0]?.project;
+
+  const containing = deepestContaining(target);
+  if (containing !== undefined) return containing;
+  const targetInfo = yield* fileSystem.stat(target).pipe(Effect.option);
+  const gitDirectory =
+    Option.isSome(targetInfo) && targetInfo.value.type === "File" ? path.dirname(target) : target;
+  const listed = yield* listGitCheckouts(gitDirectory).pipe(
+    Effect.flatMap((paths) => Effect.forEach(paths, realPath)),
+    Effect.provide(ProcessRunner.layer),
+  );
+  const ownCheckout = listed
+    .filter((checkout) => contains(checkout, target))
+    .toSorted((left, right) => right.length - left.length)[0];
+  if (ownCheckout === undefined) {
     return yield* new ThreadProjectNotFoundError({ identifier });
   }
-  return containing.project;
+  const relative = path.relative(ownCheckout, target);
+  const matches = new Map<ProjectId, (typeof projects)[number]>();
+  for (const checkout of listed) {
+    if (checkout === ownCheckout) continue;
+    const project = deepestContaining(path.join(checkout, relative));
+    if (project !== undefined) matches.set(project.id, project);
+  }
+  const [match, ...others] = matches.values();
+  if (match === undefined) {
+    return yield* new ThreadProjectNotFoundError({ identifier });
+  }
+  if (others.length > 0) {
+    const names = [match, ...others].map((project) => `${project.title} (${project.id})`);
+    return yield* new ThreadUsageError({
+      detail: `'${identifier}' is in a git worktree shared by several projects: ${names.join(", ")}. Pass a project id instead.`,
+    });
+  }
+  return match;
 });
 
 /** Every item on a timeline view, oldest first. */
@@ -322,6 +436,7 @@ const readTimeline = Effect.fn("cli.thread.readTimeline")(function* (
         threadId,
         view,
         limit: READ_PAGE_LIMIT,
+        maxCharsPerItem: READ_ITEM_MAX_CHARS,
         runLimit: 1,
         ...(afterPosition === undefined ? {} : { afterPosition }),
       },
@@ -367,6 +482,7 @@ export const readLatestMessages = Effect.fn("cli.thread.readLatestMessages")(fun
           threadId,
           view: "messages",
           limit: READ_PAGE_LIMIT,
+          maxCharsPerItem: READ_ITEM_MAX_CHARS,
           runLimit: 1,
           ...(afterPosition < 0 ? {} : { afterPosition }),
         },
@@ -401,7 +517,13 @@ const readFullText = Effect.fn("cli.thread.readFullText")(function* (
   while (nextTextOffset !== null) {
     const page = yield* tools.call(
       "t3_thread_read",
-      { threadId, itemId: item.itemId, textOffset: nextTextOffset, runLimit: 1 },
+      {
+        threadId,
+        itemId: item.itemId,
+        textOffset: nextTextOffset,
+        runLimit: 1,
+        maxCharsPerItem: READ_ITEM_MAX_CHARS,
+      },
       OrchestratorMcpThreadReadResult,
     );
     const chunk = page.items.find((candidate) => candidate.itemId === item.itemId);
@@ -428,43 +550,162 @@ const runResultText = Effect.fn("cli.thread.runResultText")(function* (
   return item === undefined ? null : yield* readFullText(tools, threadId, item);
 });
 
+/** The latest run's last error once it ended without completing, else null. */
+export const latestRunError = Effect.fn("cli.thread.latestRunError")(function* (
+  tools: ThreadTools,
+  thread: Pick<OrchestratorMcpThreadDetail, "threadId" | "status" | "latestRunId">,
+) {
+  const { status, latestRunId } = thread;
+  if (latestRunId === null || status === "idle" || status === "completed") return null;
+  if (!TERMINAL_RUN_STATUSES.has(status)) return null;
+  return yield* runResultText(tools, thread.threadId, latestRunId, "error");
+});
+
 type WaitOutcome =
   | {
       readonly type: "ended";
       readonly runId: RunId | null;
       readonly status: OrchestratorMcpThreadStatus;
+      readonly output?: Schema.Json;
     }
   | { readonly type: "needs_input" };
 
 /**
+ * Whether the thread has nothing left to do: no active run and no delegated
+ * or background work. Only then is the work a later wait settles on this
+ * send's own.
+ */
+const threadIsIdle = Effect.fn("cli.thread.threadIsIdle")(function* (
+  tools: ThreadTools,
+  threadId: ThreadId,
+) {
+  const waited = yield* tools.call(
+    "t3_thread_wait",
+    { threadId, timeoutMs: 1, untilDelegatedWorkSettled: true },
+    OrchestratorMcpThreadWaitResult,
+  );
+  return !waited.timedOut;
+});
+
+/**
+ * The runs after `runId`, and whether one holds a message someone sent.
+ * Background work wakes a run with a notification, never a user message, so
+ * such a run is another request and its reply is not this one's.
+ */
+const runsAfter = Effect.fn("cli.thread.runsAfter")(function* (
+  tools: ThreadTools,
+  threadId: ThreadId,
+  runId: RunId,
+) {
+  const { recentRuns } = yield* tools.call(
+    "t3_thread_read",
+    { threadId, limit: 1, runLimit: 50 },
+    OrchestratorMcpThreadReadResult,
+  );
+  const own = recentRuns.find((run) => run.runId === runId);
+  if (own === undefined) return { later: [], sent: true };
+  const later = recentRuns.filter((run) => run.ordinal > own.ordinal);
+  if (later.length === 0) return { later, sent: false };
+  const { items } = yield* readTimeline(tools, threadId, "messages");
+  const sent = items.some(
+    (item) => item.type === "user_message" && later.some((run) => run.runId === item.runId),
+  );
+  return { later, sent };
+});
+
+/**
  * Waits for this exact run, following a restart to its continuation, so a
  * message another client sends meanwhile cannot stand in for its result.
+ * With `followWakes`, a completed run is followed further to the runs its
+ * background work wakes, as long as no one else sends to the thread.
  */
 export const waitForRun = Effect.fn("cli.thread.waitForRun")(function* (
   tools: ThreadTools,
   threadId: ThreadId,
   runId: RunId,
+  followWakes = false,
 ) {
-  const waitSlice = (timeoutMs: number) =>
-    tools.call("t3_thread_wait", { threadId, runId, timeoutMs }, OrchestratorMcpThreadWaitResult);
+  const waitSlice = (timeoutMs: number, untilDelegatedWorkSettled?: true) =>
+    tools.call(
+      "t3_thread_wait",
+      {
+        threadId,
+        runId,
+        timeoutMs,
+        ...(untilDelegatedWorkSettled ? { untilDelegatedWorkSettled } : {}),
+      },
+      OrchestratorMcpThreadWaitResult,
+    );
   const ended = (waited: OrchestratorMcpThreadWaitResult) =>
-    ({ type: "ended", runId: waited.runId, status: waited.status }) satisfies WaitOutcome;
+    ({
+      type: "ended",
+      runId: waited.runId,
+      status: waited.status,
+      ...(waited.output === undefined ? {} : { output: waited.output }),
+    }) satisfies WaitOutcome;
+  const ownRun = Effect.gen(function* () {
+    while (true) {
+      const waited = yield* waitSlice(WAIT_SLICE_MS);
+      if (!waited.timedOut) return ended(waited);
+      // A pending request on this run, or on an earlier run this one is queued
+      // behind, blocks it until someone answers.
+      const { thread } = yield* tools.call(
+        "t3_thread_read",
+        { threadId, limit: 1, runLimit: 1 },
+        OrchestratorMcpThreadReadResult,
+      );
+      if (thread.pendingRequestCount > 0) {
+        // The count is thread-wide: if this run ended since the slice, the
+        // request belongs to a later run.
+        const recheck = yield* waitSlice(1);
+        return recheck.timedOut ? ({ type: "needs_input" } satisfies WaitOutcome) : ended(recheck);
+      }
+    }
+  });
+  const outcome = yield* ownRun;
+  if (!followWakes || outcome.type !== "ended" || outcome.status !== "completed") return outcome;
+  const finalRunId = outcome.runId ?? runId;
+  // A provider records the run that background work wakes only after that
+  // work has ended, so the thread briefly looks settled in between.
+  const wakeRunRecorded = Effect.gen(function* () {
+    for (let waited = 0; waited < WAKE_GRACE_MS; waited += WAKE_POLL_MS) {
+      yield* Effect.sleep(WAKE_POLL_MS);
+      const after = yield* runsAfter(tools, threadId, finalRunId);
+      if (after.sent) return false;
+      if (after.later.length > 0) return true;
+    }
+    return false;
+  });
+  let workOutlivedRun = false;
   while (true) {
-    const waited = yield* waitSlice(WAIT_SLICE_MS);
-    if (!waited.timedOut) return ended(waited);
-    // A pending request on this run, or on an earlier run this one is queued
-    // behind, blocks it until someone answers.
+    const waited = yield* waitSlice(WAIT_SLICE_MS, true);
+    // `resultRun` is the thread's latest finished run, whoever sent it.
+    const result = waited.timedOut ? undefined : waited.resultRun;
+    const after = yield* runsAfter(tools, threadId, finalRunId);
+    if (after.sent) return outcome;
+    if (!waited.timedOut) {
+      if (result !== undefined && after.later.some((run) => run.runId === result.runId)) {
+        // A run that work woke was not asked for the result; the run before it holds it.
+        return {
+          type: "ended",
+          runId: result.runId,
+          status: result.status,
+          ...(outcome.output === undefined ? {} : { output: outcome.output }),
+        } satisfies WaitOutcome;
+      }
+      if (!workOutlivedRun) return outcome;
+      if (after.later.some((run) => !TERMINAL_RUN_STATUSES.has(run.status))) continue;
+      if (after.later.length === 0 && (yield* wakeRunRecorded)) continue;
+      return outcome;
+    }
+    workOutlivedRun = true;
     const { thread } = yield* tools.call(
       "t3_thread_read",
       { threadId, limit: 1, runLimit: 1 },
       OrchestratorMcpThreadReadResult,
     );
-    if (thread.pendingRequestCount > 0) {
-      // The count is thread-wide: if this run ended since the slice, the
-      // request belongs to a later run.
-      const recheck = yield* waitSlice(1);
-      return recheck.timedOut ? ({ type: "needs_input" } satisfies WaitOutcome) : ended(recheck);
-    }
+    // Earlier runs have ended, so the request is on a run this one's work woke.
+    if (thread.pendingRequestCount > 0) return { type: "needs_input" } satisfies WaitOutcome;
   }
 });
 
@@ -478,9 +719,10 @@ const finishRun = Effect.fn("cli.thread.finishRun")(function* (
     readonly threadId: ThreadId;
     readonly runId: RunId;
     readonly json: boolean;
+    readonly followWakes: boolean;
   },
 ) {
-  const outcome = yield* waitForRun(tools, input.threadId, input.runId);
+  const outcome = yield* waitForRun(tools, input.threadId, input.runId, input.followWakes);
   const runId = outcome.type === "ended" ? (outcome.runId ?? input.runId) : input.runId;
   const status = outcome.type === "ended" ? outcome.status : "waiting";
   const reply =
@@ -492,7 +734,15 @@ const finishRun = Effect.fn("cli.thread.finishRun")(function* (
       ? null
       : yield* runResultText(tools, input.threadId, runId, "error");
   if (input.json) {
-    yield* printJson({ threadId: input.threadId, runId, status, reply, error });
+    const output = outcome.type === "ended" ? outcome.output : undefined;
+    yield* printJson({
+      threadId: input.threadId,
+      runId,
+      status,
+      reply,
+      error,
+      ...(output === undefined ? {} : { output }),
+    });
   } else if (reply !== null) {
     yield* Console.log(reply);
   }
@@ -508,11 +758,16 @@ const finishRun = Effect.fn("cli.thread.finishRun")(function* (
   }
 });
 
-const titleFromMessage = (message: string) => {
+export const titleFromMessage = (message: string) => {
   const firstLine = message.trim().split("\n")[0]?.trim() ?? "";
-  return firstLine.length > TITLE_MAX_CHARS
-    ? `${firstLine.slice(0, TITLE_MAX_CHARS - 1).trimEnd()}…`
-    : firstLine;
+  if (firstLine.length <= TITLE_MAX_CHARS) return firstLine;
+  let end = TITLE_MAX_CHARS - 1;
+  const previous = firstLine.charCodeAt(end - 1);
+  const next = firstLine.charCodeAt(end);
+  if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) {
+    end -= 1;
+  }
+  return `${firstLine.slice(0, end).trimEnd()}…`;
 };
 
 const launchWorkspaceStrategy = (input: {
@@ -532,6 +787,120 @@ const launchWorkspaceStrategy = (input: {
       }),
   });
 
+/**
+ * Options are model specific, so they need an explicit model. `true` and
+ * `false` become booleans because boolean options such as fastMode only match
+ * a boolean.
+ */
+export const launchModelSelection = Effect.fn("cli.thread.launchModelSelection")(function* (input: {
+  readonly provider: Option.Option<string>;
+  readonly model: Option.Option<string>;
+  readonly option: ReadonlyArray<string>;
+}) {
+  if (Option.isNone(input.provider) && Option.isSome(input.model)) {
+    return yield* new ThreadUsageError({ detail: "--model needs --provider." });
+  }
+  if (Option.isNone(input.provider) || Option.isNone(input.model)) {
+    if (input.option.length > 0) {
+      return yield* new ThreadUsageError({ detail: "--option needs --provider and --model." });
+    }
+    return undefined;
+  }
+  const options: Array<{ readonly id: string; readonly value: string | boolean }> = [];
+  for (const entry of input.option) {
+    const separator = entry.indexOf("=");
+    const id = separator < 0 ? "" : entry.slice(0, separator).trim();
+    const value = separator < 0 ? "" : entry.slice(separator + 1).trim();
+    if (id.length === 0 || value.length === 0) {
+      return yield* new ThreadUsageError({ detail: `--option '${entry}' is not id=value.` });
+    }
+    if (options.some((option) => option.id === id)) {
+      return yield* new ThreadUsageError({ detail: `--option ${id} is given more than once.` });
+    }
+    options.push({ id, value: value === "true" ? true : value === "false" ? false : value });
+  }
+  return {
+    instanceId: input.provider.value,
+    model: input.model.value,
+    ...(options.length === 0 ? {} : { options }),
+  };
+});
+
+const decodeJsonText = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const isThreadMcpServerName = Schema.is(ThreadMcpServerName);
+const isThreadMcpServerUrl = Schema.is(ThreadMcpHttpServer.fields.url);
+const isHeaderRecord = Schema.is(Schema.Record(Schema.String, Schema.String));
+const decodeThreadMcpServers = Schema.decodeUnknownEffect(ThreadMcpServers);
+const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Reads Claude Code's `--mcp-config` shape, `{"mcpServers": {...}}`, keeping
+ * only what a thread can take. Errors never quote header values.
+ */
+export const threadMcpServersFromConfig = Effect.fn("cli.thread.mcpServersFromConfig")(function* (
+  text: string,
+) {
+  const usage = (detail: string) => new ThreadUsageError({ detail: `--mcp-config: ${detail}` });
+  const config = yield* decodeJsonText(text).pipe(
+    Effect.mapError(() => usage("not valid JSON, or a file that holds it.")),
+  );
+  if (!isObject(config) || !isObject(config.mcpServers)) {
+    return yield* usage('needs an "mcpServers" object.');
+  }
+  const entries = Object.entries(config.mcpServers);
+  if (entries.length === 0) return yield* usage('"mcpServers" is empty.');
+  const servers: Record<string, ThreadMcpHttpServer> = {};
+  for (const [name, server] of entries) {
+    if (name === T3_CODE_MCP_SERVER_NAME) {
+      return yield* usage(`${name} is T3 Code's own MCP server; give yours another name.`);
+    }
+    if (!isThreadMcpServerName(name)) {
+      return yield* usage(
+        `server name '${name}' must be 1 to 64 letters, digits, '_' or '-', since Claude puts it in tool names.`,
+      );
+    }
+    if (!isObject(server)) return yield* usage(`server '${name}' is not an object.`);
+    // Claude Code reads a server without a type as stdio.
+    const type = server.type ?? "stdio";
+    if (type !== "http") {
+      return yield* usage(
+        `server '${name}' has type "${String(type)}"; only "http" servers are supported, since the agent may run on another machine.`,
+      );
+    }
+    if (typeof server.url !== "string" || !isThreadMcpServerUrl(server.url)) {
+      return yield* usage(`server '${name}' needs a "url" starting with http:// or https://.`);
+    }
+    if (server.headers !== undefined && !isHeaderRecord(server.headers)) {
+      return yield* usage(`server '${name}' has "headers" that are not all strings.`);
+    }
+    servers[name] = {
+      type: "http",
+      url: server.url,
+      ...(server.headers === undefined ? {} : { headers: server.headers }),
+    };
+  }
+  return yield* decodeThreadMcpServers(servers).pipe(
+    Effect.mapError(() => usage("a thread takes at most 16 MCP servers.")),
+  );
+});
+
+/** The flag takes the JSON itself, as Claude Code's does, or a path to a file of it. */
+const readMcpConfigFlag = Effect.fn("cli.thread.readMcpConfigFlag")(function* (value: string) {
+  if (value.trimStart().startsWith("{")) return yield* threadMcpServersFromConfig(value);
+  const path = yield* Path.Path;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const file = path.resolve(yield* HostProcess.WorkingDirectory, value);
+  const text = yield* fileSystem
+    .readFileString(file)
+    .pipe(
+      Effect.mapError(
+        () => new ThreadUsageError({ detail: `--mcp-config: could not read ${file}.` }),
+      ),
+    );
+  return yield* threadMcpServersFromConfig(text);
+});
+
 const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Print JSON instead of text."),
   Flag.withDefault(false),
@@ -542,6 +911,25 @@ const waitFlag = Flag.Boolean("wait").pipe(
   ),
   Flag.withDefault(false),
 );
+const outputSchemaFlag = Flag.String("output-schema").pipe(
+  Flag.withDescription(
+    "File holding a JSON Schema. The agent must return data matching it; --wait --json prints it as `output`.",
+  ),
+  Flag.optional,
+);
+const decodeOutputSchema = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
+);
+const readOutputSchema = Effect.fn("cli.thread.readOutputSchema")(function* (
+  path: Option.Option<string>,
+) {
+  if (Option.isNone(path)) return {};
+  const fileSystem = yield* FileSystem.FileSystem;
+  const usage = () =>
+    new ThreadUsageError({ detail: `${path.value} does not hold a JSON Schema object.` });
+  const text = yield* fileSystem.readFileString(path.value).pipe(Effect.mapError(usage));
+  return { outputSchema: yield* decodeOutputSchema(text).pipe(Effect.mapError(usage)) };
+});
 const messageArgument = Argument.String("message").pipe(
   Argument.withDescription("Message for the agent, or - to read it from stdin."),
 );
@@ -600,13 +988,27 @@ const threadStartCommand = Command.make("start", {
     Flag.withDescription("Thread title. Defaults to the message's first line."),
     Flag.optional,
   ),
+  generateTitle: Flag.Boolean("generate-title").pipe(
+    Flag.withDescription(
+      "Generate the thread's title from the message. Until it's ready, the thread shows --title or the first line.",
+    ),
+    Flag.withDefault(false),
+  ),
   provider: Flag.String("provider").pipe(
-    Flag.withDescription("Provider instance id. Pass with --model."),
+    Flag.withDescription(
+      "Provider instance id. Defaults to the project's default provider; without --model, runs the model the composer picks for it.",
+    ),
     Flag.optional,
   ),
   model: Flag.String("model").pipe(
-    Flag.withDescription("Model slug. Defaults to the project's default model."),
+    Flag.withDescription("Model slug. Defaults to the project's default model. Needs --provider."),
     Flag.optional,
+  ),
+  option: Flag.String("option").pipe(
+    Flag.withDescription(
+      "Model option as id=value, such as effort=high. Repeat for more. Needs --provider and --model.",
+    ),
+    Flag.atLeast(0),
   ),
   worktree: Flag.String("worktree").pipe(
     Flag.withDescription(
@@ -618,6 +1020,13 @@ const threadStartCommand = Command.make("start", {
     Flag.withDescription("Branch name for the new worktree."),
     Flag.optional,
   ),
+  outputSchema: outputSchemaFlag,
+  mcpConfig: Flag.String("mcp-config").pipe(
+    Flag.withDescription(
+      'MCP servers for the thread\'s agent, as JSON or a path to a JSON file, in Claude Code\'s --mcp-config shape: {"mcpServers":{"<name>":{"type":"http","url":"...","headers":{...}}}}. Every session of the thread gets them, and their tools need no approval. HTTP servers on Claude providers only.',
+    ),
+    Flag.optional,
+  ),
   wait: waitFlag,
   json: jsonFlag,
 }).pipe(
@@ -625,32 +1034,43 @@ const threadStartCommand = Command.make("start", {
   Command.withHandler((flags) =>
     Effect.gen(function* () {
       const message = yield* readMessageArgument(flags.message);
+      const output = yield* readOutputSchema(flags.outputSchema);
       const workspaceStrategy = yield* launchWorkspaceStrategy(flags);
-      if (Option.isSome(flags.provider) !== Option.isSome(flags.model)) {
-        return yield* new ThreadUsageError({ detail: "--provider and --model go together." });
-      }
+      const modelSelection = yield* launchModelSelection(flags);
       const title = yield* decodeTitle(
         Option.getOrElse(flags.title, () => titleFromMessage(message)),
       ).pipe(Effect.mapError(() => new ThreadUsageError({ detail: "The title is empty." })));
+      const mcpServers = Option.isNone(flags.mcpConfig)
+        ? undefined
+        : yield* readMcpConfigFlag(flags.mcpConfig.value);
       yield* withThreadTools(
         flags,
         Effect.fn("cli.thread.start")(function* (tools) {
+          if (
+            mcpServers !== undefined &&
+            !(yield* tools.toolTakesParameter("t3_thread_launch", "mcpServers"))
+          ) {
+            return yield* new ThreadUsageError({
+              detail:
+                "The running T3 Code server cannot give a thread MCP servers. Update T3 Code, then retry.",
+            });
+          }
           const project = yield* resolveProject(tools, flags.project);
           const launched = yield* tools.call(
             "t3_thread_launch",
             {
               projectId: project.id,
               title,
+              ...(flags.generateTitle ? { generateTitle: true } : {}),
               message,
+              ...output,
               ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
-              ...(Option.isSome(flags.provider) && Option.isSome(flags.model)
-                ? {
-                    modelSelection: {
-                      instanceId: flags.provider.value,
-                      model: flags.model.value,
-                    },
-                  }
-                : {}),
+              ...(modelSelection === undefined
+                ? Option.isNone(flags.provider)
+                  ? {}
+                  : { providerInstanceId: flags.provider.value }
+                : { modelSelection }),
+              ...(mcpServers === undefined ? {} : { mcpServers }),
             },
             ThreadLaunchResult,
           );
@@ -660,6 +1080,7 @@ const threadStartCommand = Command.make("start", {
               threadId: launched.threadId,
               runId: launched.runId,
               json: flags.json,
+              followWakes: true,
             });
           }
           yield* flags.json ? printJson(launched) : Console.log(launched.threadId);
@@ -673,6 +1094,7 @@ const threadSendCommand = Command.make("send", {
   ...projectLocationFlags,
   thread: threadArgument,
   message: messageArgument,
+  outputSchema: outputSchemaFlag,
   wait: waitFlag,
   json: jsonFlag,
 }).pipe(
@@ -683,16 +1105,24 @@ const threadSendCommand = Command.make("send", {
     Effect.gen(function* () {
       const threadId = yield* decodeThreadId(flags.thread);
       const message = yield* readMessageArgument(flags.message);
+      const output = yield* readOutputSchema(flags.outputSchema);
       yield* withThreadTools(
         flags,
         Effect.fn("cli.thread.send")(function* (tools) {
+          // Work already running when this is sent is not this message's to wait for.
+          const followWakes = flags.wait ? yield* threadIsIdle(tools, threadId) : false;
           const sent = yield* tools.call(
             "t3_thread_send",
-            { threadId, message, mode: "queue" },
+            { threadId, message, mode: "queue", ...output },
             OrchestratorMcpThreadSendResult,
           );
           if (flags.wait) {
-            return yield* finishRun(tools, { threadId, runId: sent.runId, json: flags.json });
+            return yield* finishRun(tools, {
+              threadId,
+              runId: sent.runId,
+              json: flags.json,
+              followWakes,
+            });
           }
           yield* flags.json
             ? printJson(sent)
@@ -733,8 +1163,9 @@ const threadShowCommand = Command.make("show", {
               })),
             ),
           );
+          const error = yield* latestRunError(tools, thread);
           if (flags.json) {
-            return yield* printJson({ thread, messages });
+            return yield* printJson({ thread, messages, error });
           }
           yield* Console.log(thread.title);
           yield* Console.log(
@@ -747,6 +1178,9 @@ const threadShowCommand = Command.make("show", {
           }
           if (thread.pendingRequestCount > 0) {
             yield* Console.log(`Waiting for ${thread.pendingRequestCount} answer(s).`);
+          }
+          if (error !== null) {
+            yield* Console.log(`Error: ${error}`);
           }
           for (const entry of messages) {
             yield* Console.log(`\n[${entry.role}]\n${entry.text}`);

@@ -1017,6 +1017,36 @@ describe("composer and pull request shortcuts", () => {
     }
   });
 
+  it("preserves the text requirement for the saved side-chat default", () => {
+    const when = "composerFocus && !composerEmpty && !draftThreadRoute";
+    const keybindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        { key: "mod+shift+enter", command: "composer.sendSideChat", when },
+        { key: "mod+alt+shift+enter", command: "composer.sendSideChat", when },
+      ]),
+    );
+    const keypress = event({ key: "Enter", ctrlKey: true, shiftKey: true });
+    const context = { composerFocus: true, composerEmpty: false, composerHasPrompt: false };
+    assert.equal(
+      resolveShortcutCommand(keypress, keybindings, { platform: "Linux", context }),
+      "thread.steerQueuedMessage",
+    );
+    assert.equal(
+      resolveShortcutCommand(keypress, keybindings, {
+        platform: "Linux",
+        context: { ...context, composerHasPrompt: true },
+      }),
+      "composer.sendSideChat",
+    );
+    assert.equal(
+      resolveShortcutCommand({ ...keypress, altKey: true }, keybindings, {
+        platform: "Linux",
+        context,
+      }),
+      "composer.sendSideChat",
+    );
+  });
+
   it.each(["MacIntel", "Win32", "Linux"])(
     "reserves the alternate send chord for the focused composer on %s",
     (platform) => {
@@ -1028,7 +1058,7 @@ describe("composer and pull request shortcuts", () => {
       for (const composerRequiresModifier of [false, true]) {
         const context = {
           composerFocus: true,
-          composerEmpty: true,
+          composerHasPrompt: false,
           turnRunning: true,
           composerRequiresModifier,
         };
@@ -1042,7 +1072,7 @@ describe("composer and pull request shortcuts", () => {
         assert.strictEqual(
           resolveShortcutCommand(shiftedEnter, DEFAULT_RESOLVED_KEYBINDINGS, {
             platform,
-            context: { ...context, composerEmpty: false },
+            context: { ...context, composerHasPrompt: true },
           }),
           composerRequiresModifier ? "composer.sendAlternate" : "composer.sendSideChat",
         );

@@ -88,7 +88,7 @@ export function composerSubmissionIntentForKey(input: {
       draftThreadRoute: input.isDraftThread,
       turnRunning: input.isRunning === true,
       composerRequiresModifier: composerRequiresModifier(input.sendShortcut, input.prompt ?? ""),
-      composerEmpty: (input.prompt ?? "").trim() === "",
+      composerHasPrompt: (input.prompt ?? "").trim().length > 0,
     },
   });
   if (command === "composer.sendAlternate" && input.isRunning) return "alternate";

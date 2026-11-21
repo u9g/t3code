@@ -277,6 +277,21 @@ describe("composerSubmissionIntentForKey", () => {
     ).toBe("foreground");
   });
 
+  it("uses the live composer state for shortcuts conditioned on composerEmpty", () => {
+    const keybindings = mergeWithDefaultKeybindings(
+      compileResolvedKeybindingsConfig([
+        { key: "enter", command: "thread.steerQueuedMessage", when: "composerEmpty" },
+      ]),
+    );
+    const conditioned = { ...input, keybindings, event: enter, prompt: "" };
+    expect(
+      composerSubmissionIntentForKey({ ...conditioned, context: { composerEmpty: true } }),
+    ).toBeNull();
+    expect(
+      composerSubmissionIntentForKey({ ...conditioned, context: { composerEmpty: false } }),
+    ).toBe("foreground");
+  });
+
   it.each([
     { isSoftwareKeyboardOpen: true },
     { event: { ...enter, isComposing: true } },

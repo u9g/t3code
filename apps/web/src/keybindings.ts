@@ -2,7 +2,7 @@ import {
   type KeybindingCommand,
   type KeybindingShortcut,
   type KeybindingWhenNode,
-  type ResolvedKeybindingRule,
+  ResolvedKeybindingRule,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
   type ResolvedKeybindingsConfig,
   THREAD_JUMP_KEYBINDING_COMMANDS,
@@ -10,6 +10,7 @@ import {
   type ThreadJumpKeybindingCommand,
 } from "@t3tools/contracts";
 import {
+  compileResolvedKeybindingRule,
   isMacPlatform,
   matchesKeybindingShortcut,
   matchesKeybindingShortcutModifiers,
@@ -18,6 +19,7 @@ import {
   type ShortcutEventLike as SharedShortcutEventLike,
   type ShortcutModifierStateLike,
 } from "@t3tools/shared/keybindings";
+import * as Schema from "effect/Schema";
 import { isElectron } from "./env";
 import { isEditableFocused } from "./lib/editableFocus";
 import { projectScriptIdFromCommand } from "./projectScripts";
@@ -86,12 +88,30 @@ function evaluateWhenNode(node: KeybindingWhenNode, context: ShortcutMatchContex
   }
 }
 
+const legacySideChatBinding = compileResolvedKeybindingRule({
+  key: "mod+shift+enter",
+  command: "composer.sendSideChat",
+  when: "composerFocus && !composerEmpty && !draftThreadRoute",
+});
+const sameResolvedKeybinding = Schema.toEquivalence(ResolvedKeybindingRule);
+
 function matchesWhenClause(
-  whenAst: KeybindingWhenNode | undefined,
+  binding: ResolvedKeybindingRule,
   context: ShortcutMatchContext,
 ): boolean {
-  if (!whenAst) return true;
-  return evaluateWhenNode(whenAst, context);
+  if (!binding.whenAst) return true;
+  // The saved fork default used composerEmpty to mean blank prompt text.
+  if (
+    binding.command === "composer.sendSideChat" &&
+    legacySideChatBinding &&
+    sameResolvedKeybinding(binding, legacySideChatBinding)
+  ) {
+    return evaluateWhenNode(binding.whenAst, {
+      ...context,
+      composerEmpty: !context.composerHasPrompt,
+    });
+  }
+  return evaluateWhenNode(binding.whenAst, context);
 }
 
 export function shortcutConflictKey(
@@ -145,7 +165,7 @@ export function effectiveShortcutsForCommand(
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
-    if (!matchesWhenClause(binding.whenAst, context)) continue;
+    if (!matchesWhenClause(binding, context)) continue;
 
     const shortcut = shortcutForContext(binding, context);
     const conflictKey = shortcutConflictKey(shortcut, platform);
@@ -193,7 +213,7 @@ export function resolveShortcutCommand(
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding) continue;
-    if (!matchesWhenClause(binding.whenAst, context)) continue;
+    if (!matchesWhenClause(binding, context)) continue;
     if (!matchesKeybindingShortcut(event, shortcutForContext(binding, context), platform)) continue;
     return binding.command;
   }

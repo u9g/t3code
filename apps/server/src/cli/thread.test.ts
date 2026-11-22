@@ -102,6 +102,7 @@ it.effect("list includes delegated threads across pages and still leaves out sub
     const subagent = { ...item("child"), parentThreadId: "root", relationshipToParent: "subagent" };
     using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
       Effect.succeed({
+        listTools: () => Effect.die("unexpected tools/list call"),
         call: (tool, args) => {
           if (tool === "t3_project_list")
             return Effect.succeed({
@@ -625,7 +626,8 @@ it.effect("show retains pull request metadata when reading a later message windo
         hasMore: false,
       });
     }) as ThreadTools["call"];
-    const { thread } = yield* readLatestMessages({ call }, threadId, 1);
+    const toolTakesParameter = () => Effect.die("unscripted tools/list call");
+    const { thread } = yield* readLatestMessages({ call, toolTakesParameter }, threadId, 1);
     assert.strictEqual(thread.status, "completed");
     assert.deepStrictEqual(thread.pullRequests, [link]);
     assert.strictEqual(thread.openPullRequestCount, 1);

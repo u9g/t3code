@@ -121,9 +121,12 @@ it.effect("points to Labs only when the server hides the feedback tool", () =>
       yield* running === false
         ? fs.remove(runtimeStatePath, { force: true })
         : persistServerRuntimeState({ path: runtimeStatePath, state: runtimeState });
-      using _session = vi
-        .spyOn(McpBridge, "mcpToolSession")
-        .mockReturnValue(Effect.succeed({ call: call ?? (() => Effect.die("no call expected")) }));
+      using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
+        Effect.succeed({
+          call: call ?? (() => Effect.die("no call expected")),
+          listTools: () => Effect.die("unexpected tools/list call"),
+        }),
+      );
 
       yield* expectOneLine(args, baseDir, stderr);
     }

@@ -2040,6 +2040,7 @@ function markdownIslandOptions(state: ChatMarkdownComponentState): MarkdownIslan
   if (cached) return cached;
   const {
     cwd,
+    environmentId,
     headingLevelOffset,
     imageBaseDir,
     inlineCodeFileLinkMetaByText,
@@ -2072,6 +2073,10 @@ function markdownIslandOptions(state: ChatMarkdownComponentState): MarkdownIslan
           );
         }
         case "p":
+          return (
+            (environmentId !== null && pullRequestStackMapUrls(node) !== null) ||
+            hastTextHasChip(node, skills)
+          );
         case "li":
           return hastTextHasChip(node, skills);
         default:

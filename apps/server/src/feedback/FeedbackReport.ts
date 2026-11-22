@@ -155,6 +155,7 @@ export const T3_CLI_COMMANDS: ReadonlyArray<string> = [
   "t3 project rename",
   "t3 thread",
   "t3 thread list",
+  "t3 thread running",
   "t3 thread start",
   "t3 thread send",
   "t3 thread show",

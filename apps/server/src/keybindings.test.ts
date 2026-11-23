@@ -299,6 +299,27 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(layerKeybindings())),
   );
 
+  it.effect("backfills a default after the saved default it follows on the same chord", () =>
+    Effect.gen(function* () {
+      const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;
+      const keybindings = yield* Keybindings.Keybindings;
+      const steer = {
+        key: "mod+shift+enter",
+        command: "thread.steerQueuedMessage",
+        when: "!terminalFocus",
+      } as const;
+      yield* writeKeybindingsConfig(keybindingsConfigPath, [steer]);
+
+      yield* keybindings.syncDefaultKeybindingsOnStartup;
+      const persisted = yield* readKeybindingsConfig(keybindingsConfigPath);
+      // Later rules win, so the narrower side-chat send must stay after the saved steer rule.
+      assert.deepStrictEqual(
+        persisted.filter((entry) => entry.key === "mod+shift+enter").map((entry) => entry.command),
+        ["thread.steerQueuedMessage", "composer.sendSideChat"],
+      );
+    }).pipe(Effect.provide(layerKeybindings())),
+  );
+
   it.effect("leaves a customized command without the late default", () =>
     Effect.gen(function* () {
       const { keybindingsConfigPath } = yield* ServerConfig.ServerConfig;

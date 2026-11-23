@@ -129,6 +129,38 @@ function hasSameShortcutContext(left: KeybindingRule, right: KeybindingRule): bo
   return leftContext === rightContext;
 }
 
+function shortcutKey(rule: KeybindingRule): string | null {
+  const parsed = parseKeybindingShortcut(rule.key);
+  return parsed ? encodeShortcut(parsed) : null;
+}
+
+/**
+ * Backfilled defaults go before persisted rules so custom shortcuts win overlapping conditions.
+ * A default that follows another default on the same chord goes right after that default's saved
+ * copy instead, because later rules win and the defaults' own order sets their precedence.
+ */
+function insertBackfilledDefaults(
+  persisted: ReadonlyArray<KeybindingRule>,
+  backfilled: ReadonlyArray<KeybindingRule>,
+): KeybindingRule[] {
+  const front: KeybindingRule[] = [];
+  const result = [...persisted];
+  for (const rule of backfilled) {
+    const chord = shortcutKey(rule);
+    const position = DEFAULT_KEYBINDINGS.indexOf(rule);
+    const earlierOnChord =
+      chord === null || position < 0
+        ? []
+        : DEFAULT_KEYBINDINGS.slice(0, position).filter((entry) => shortcutKey(entry) === chord);
+    const anchor = result.findLastIndex((entry) =>
+      earlierOnChord.some((earlier) => isSameKeybindingRule(entry, earlier)),
+    );
+    if (anchor < 0) front.push(rule);
+    else result.splice(anchor + 1, 0, rule);
+  }
+  return [...front, ...result];
+}
+
 function keybindingRuleFromInput(input: ServerRemoveKeybindingInput): KeybindingRule {
   return input.when === undefined
     ? { key: input.key, command: input.command }
@@ -563,7 +595,6 @@ const make = Effect.gen(function* () {
         }
       }
 
-      // Put defaults before persisted rules so custom shortcuts win overlapping conditions.
       const availableSlots = Math.max(0, MAX_KEYBINDINGS_COUNT - customConfig.length);
       const defaultsToAppend = missingDefaults.slice(0, availableSlots);
       const skippedDefaults = missingDefaults.slice(availableSlots);
@@ -575,7 +606,7 @@ const make = Effect.gen(function* () {
         });
       }
       if (defaultsToAppend.length > 0) {
-        yield* writeConfigAtomically([...defaultsToAppend, ...customConfig]);
+        yield* writeConfigAtomically(insertBackfilledDefaults(customConfig, defaultsToAppend));
       }
       const settledLateDefaults = pendingLateDefaults.filter(
         (late) => !skippedDefaults.includes(late.rule),

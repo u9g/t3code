@@ -266,32 +266,55 @@ export interface ChromiumCookieSource {
   readonly platform: NodeJS.Platform;
 }
 
+/** Keys already read from the keychain, by source, so repeated reads (a live sync) never prompt again. */
+export type ChromiumKeyCache = Map<string, ChromiumKeyMaterial>;
+
+const keyCacheKey = (source: ChromiumCookieSource): string =>
+  JSON.stringify([
+    source.platform,
+    source.keychainService,
+    source.keychainAccount,
+    source.linuxSecretApplication,
+    source.windowsLocalStatePath,
+  ]);
+
 export const readChromiumCookies = Effect.fn("ChromiumCookies.readChromiumCookies")(function* (
   source: ChromiumCookieSource,
+  keyCache?: ChromiumKeyCache,
 ): Effect.fn.Return<
   CookieReadResult,
   ChromiumCookieReadError,
   FileSystem.FileSystem | Path.Path | Scope.Scope | ChildProcessSpawner.ChildProcessSpawner
 > {
-  const keys = yield* (
+  const cacheKey = keyCacheKey(source);
+  const cached = keyCache?.get(cacheKey);
+  const resolveKeys: Effect.Effect<
+    ChromiumKeyMaterial,
+    ChromiumKeyError,
+    FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
+  > =
     source.platform === "win32" && source.windowsLocalStatePath
-      ? readWindowsKey(source.windowsLocalStatePath).pipe(Effect.map((gcmV10) => ({ gcmV10 })))
+      ? readWindowsKey(source.windowsLocalStatePath).pipe(
+          Effect.map((gcmV10): ChromiumKeyMaterial => ({ gcmV10 })),
+        )
       : resolveChromiumKeys({
           platform: source.platform,
           keychainService: source.keychainService,
           keychainAccount: source.keychainAccount,
           linuxSecretApplication: source.linuxSecretApplication,
-        })
-  ).pipe(
-    Effect.mapError(
-      (cause: ChromiumKeyError) =>
-        new ChromiumCookieReadError({
-          reason: cause.reason,
-          cookieDatabasePath: source.cookieDatabasePath,
-          cause,
-        }),
-    ),
-  );
+        });
+  const keys =
+    cached ??
+    (yield* resolveKeys.pipe(
+      Effect.mapError(
+        (cause: ChromiumKeyError) =>
+          new ChromiumCookieReadError({
+            reason: cause.reason,
+            cookieDatabasePath: source.cookieDatabasePath,
+            cause,
+          }),
+      ),
+    ));
 
   const snapshotPath = yield* snapshotCookieDatabase(source.cookieDatabasePath).pipe(
     Effect.mapError(
@@ -304,7 +327,7 @@ export const readChromiumCookies = Effect.fn("ChromiumCookies.readChromiumCookie
     ),
   );
 
-  return yield* readChromiumCookieDatabase(snapshotPath, keys, source.platform).pipe(
+  const read = yield* readChromiumCookieDatabase(snapshotPath, keys, source.platform).pipe(
     Effect.mapError(
       (cause) =>
         new ChromiumCookieReadError({
@@ -314,4 +337,8 @@ export const readChromiumCookies = Effect.fn("ChromiumCookies.readChromiumCookie
         }),
     ),
   );
+  // Nothing decrypting means the browser's key changed; read it from the keychain again next time.
+  if (read.cookies.length === 0 && read.undecryptable > 0) keyCache?.delete(cacheKey);
+  else keyCache?.set(cacheKey, keys);
+  return read;
 });

@@ -581,23 +581,6 @@ export const chromiumProcessIsAlive = (
 
 const processIsAlive: ProcessLivenessProbe = (pid) => chromiumProcessIsAlive(pid);
 
-export const chromiumSingletonLockIsHeld = Effect.fnUntraced(function* (
-  target: string,
-  currentHost: string,
-  isProcessAlive: ProcessLivenessProbe,
-) {
-  const separator = target.lastIndexOf("-");
-  if (separator <= 0) return true;
-  const host = target.slice(0, separator);
-  const pidText = target.slice(separator + 1);
-  if (!/^\d+$/.test(pidText)) return true;
-  const pid = Number(pidText);
-  if (!Number.isSafeInteger(pid) || pid <= 0) return true;
-  // Foreign-host PIDs may come from a shared home; never declare them stale here.
-  if (host !== currentHost) return true;
-  return yield* isProcessAlive(pid);
-});
-
 /** Windows sharing and lock violations are translated by libuv to `Busy`. */
 const isWindowsLockHeldError = (error: PlatformError.PlatformError): boolean =>
   error.reason._tag === "Busy";
@@ -730,21 +713,17 @@ export const isSourceRunning = Effect.fn("BrowserImportSources.isSourceRunning")
   never,
   FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
 > {
-  const fileSystem = yield* FileSystem.FileSystem;
   const root = definition.userDataDirectory(context);
   if (root === undefined) return false;
   // Safari writes its jar atomically and needs no lock, even while running.
   if (definition.engine === "safari") return false;
   if (definition.engine !== "firefox") {
+    // Only Windows holds a running Chromium's cookie database exclusively. Elsewhere it is an
+    // ordinary SQLite file that the read-only VACUUM INTO snapshot copies consistently.
     if (context.platform === "win32") {
       return yield* windowsChromiumCookiesAreHeld(definition, context);
     }
-    const currentHost = yield* HostProcess.Hostname;
-    const lock = context.path.join(root, "SingletonLock");
-    return yield* fileSystem.readLink(lock).pipe(
-      Effect.flatMap((target) => chromiumSingletonLockIsHeld(target, currentHost, processIsAlive)),
-      Effect.catch((error) => Effect.succeed(error.reason._tag !== "NotFound")),
-    );
+    return false;
   }
 
   const profiles = yield* listSourceProfiles(definition, context);

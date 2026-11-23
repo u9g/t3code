@@ -150,6 +150,7 @@ export function BrowserImportWizard({
         ) : step.step === "done" ? (
           <DoneStep
             {...step}
+            sourceName={source.name}
             destinationEnvironmentName={destinationEnvironmentName}
             onClose={onClose}
           />
@@ -555,6 +556,7 @@ function DoneStep({
   skipped,
   skippedDomains,
   targetName,
+  sourceName,
   destinationEnvironmentName,
   onClose,
 }: {
@@ -562,6 +564,7 @@ function DoneStep({
   readonly skipped: number;
   readonly skippedDomains: ReadonlyArray<string>;
   readonly targetName: string;
+  readonly sourceName: string;
   readonly destinationEnvironmentName: string;
   readonly onClose: () => void;
 }) {
@@ -599,7 +602,13 @@ function DoneStep({
               : gt("Added to {target} for {environment}.", { target: targetName, environment })
             : skipped > 0
               ? gt("No cookies were imported for {environment}.", { environment })
-              : gt("There were no cookies to import for {environment}.", { environment })}
+              : gt("There were no cookies to import for {environment}.", { environment })}{" "}
+          {imported > 0
+            ? gt("{target} now stays in sync with {browser}. Clear its cookies to stop.", {
+                target: targetName,
+                browser: sourceName,
+              })
+            : null}
         </DialogDescription>
       </DialogHeader>
       {skippedDomains.length > 0 ? (

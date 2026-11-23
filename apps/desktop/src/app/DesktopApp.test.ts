@@ -52,6 +52,7 @@ import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
 
+import * as BrowserCookieSync from "../preview/BrowserImport/BrowserCookieSync.ts";
 import * as BrowserImport from "../preview/BrowserImport/BrowserImport.ts";
 import * as DesktopBackendConfiguration from "../backend/DesktopBackendConfiguration.ts";
 import * as DesktopCliCommand from "./DesktopCliCommand.ts";
@@ -203,6 +204,7 @@ const runStubbedDesktop = (stub: StubbedDesktop) =>
     return yield* runApp.pipe(
       Effect.provide(
         Layer.mergeAll(
+          Layer.mock(BrowserCookieSync.BrowserCookieSync, {}),
           Layer.mock(BrowserImport.BrowserImport, {}),
           Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {}),
           Layer.mock(DesktopBackendConfiguration.DesktopBackendConfiguration, {}),

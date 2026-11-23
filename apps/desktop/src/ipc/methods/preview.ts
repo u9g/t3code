@@ -42,6 +42,7 @@ import * as NodeURL from "node:url";
 
 import * as DesktopEnvironment from "../../app/DesktopEnvironment.ts";
 import * as ElectronWindow from "../../electron/ElectronWindow.ts";
+import * as BrowserCookieSync from "../../preview/BrowserImport/BrowserCookieSync.ts";
 import * as BrowserImport from "../../preview/BrowserImport/BrowserImport.ts";
 import { openEmbedLinksExternally } from "../../preview/EmbedLinks.ts";
 import { trackEmbedScroll } from "../../preview/EmbedScroll.ts";
@@ -309,6 +310,8 @@ const clearCookies = DesktopIpc.makeIpcMethod({
   result: Schema.Void,
   handler: Effect.fn("desktop.ipc.preview.clearCookies")(function* ({ environmentId, profileId }) {
     const manager = yield* PreviewManager.PreviewManager;
+    // Otherwise the next sync would bring the cleared cookies straight back.
+    yield* (yield* BrowserCookieSync.BrowserCookieSync).stop(environmentId, profileId);
     yield* manager.clearCookies(yield* resolveClearPartitions(manager, environmentId, profileId));
   }),
 });
@@ -470,12 +473,17 @@ export const importBrowserCookies = DesktopIpc.makeIpcMethod({
       environmentId,
       importInput.targetProfileId,
     );
-    return yield* browserImport.importCookies({
-      input: importInput,
-      scope,
-      persistent,
-      ...(namespace === undefined ? {} : { namespace }),
+    const partition = { scope, persistent, ...(namespace === undefined ? {} : { namespace }) };
+    const result = yield* browserImport.importCookies({ input: importInput, ...partition });
+    // An import keeps the profile in step with the browser from then on.
+    yield* (yield* BrowserCookieSync.BrowserCookieSync).start({
+      environmentId,
+      targetProfileId: importInput.targetProfileId,
+      sourceId: importInput.sourceId,
+      sourceProfileDirectory: importInput.sourceProfileDirectory,
+      ...partition,
     });
+    return result;
   }),
 });
 

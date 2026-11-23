@@ -24,7 +24,11 @@ import type { ManagedPolicyFileError } from "@t3tools/shared/managedPolicyFile";
 
 import * as DesktopManagedPolicy from "../../app/DesktopManagedPolicy.ts";
 import * as BrowserSession from "../BrowserSession.ts";
-import { ChromiumCookieReadError, readChromiumCookies } from "./ChromiumCookies.ts";
+import {
+  ChromiumCookieReadError,
+  readChromiumCookies,
+  type ChromiumKeyCache,
+} from "./ChromiumCookies.ts";
 import type { CookieReadResult } from "./CookieDatabase.ts";
 import { FirefoxCookieReadError, readFirefoxCookies } from "./FirefoxCookies.ts";
 import { readSafariCookies, safariAccessDenied, SafariCookieReadError } from "./SafariCookies.ts";
@@ -114,6 +118,11 @@ export class BrowserCookieWriteError extends Schema.TaggedError<BrowserCookieWri
   }
 }
 
+export type BrowserImportSourceInput = Pick<
+  BrowserImportInput,
+  "sourceId" | "sourceProfileDirectory"
+>;
+
 export class BrowserImport extends Context.Service<
   BrowserImport,
   {
@@ -124,6 +133,13 @@ export class BrowserImport extends Context.Service<
       readonly persistent: boolean;
       readonly namespace?: BrowserSession.BrowserSessionPartitionNamespace;
     }) => Effect.Effect<BrowserImportResult, BrowserImportFailedError | BrowserImportPolicyError>;
+    /** Reads a source profile's cookies, and the database they came from, without writing them anywhere. */
+    readonly readCookies: (
+      input: BrowserImportSourceInput,
+    ) => Effect.Effect<
+      { readonly databasePath: string; readonly read: CookieReadResult },
+      BrowserImportFailedError | BrowserImportPolicyError
+    >;
   }
 >()("@t3tools/desktop/preview/BrowserImport/BrowserImport") {}
 
@@ -230,19 +246,17 @@ export const make = Effect.gen(function* BrowserImportMake() {
     }),
   ).pipe(Effect.provide(platformServices));
 
-  const importCookies = Effect.fn("BrowserImport.importCookies")(function* (input: {
-    readonly input: BrowserImportInput;
-    readonly scope: string;
-    readonly persistent: boolean;
-    readonly namespace?: BrowserSession.BrowserSessionPartitionNamespace;
-  }) {
+  // Lives as long as the app, so a live sync reads the keychain once rather than on every change.
+  const chromiumKeys: ChromiumKeyCache = new Map();
+
+  const readCookies = Effect.fn("BrowserImport.readCookies")(function* (
+    input: BrowserImportSourceInput,
+  ) {
     yield* checkBrowserImportPolicy(managedPolicy.read);
-    const definition = BROWSER_IMPORT_SOURCES.find(
-      (candidate) => candidate.id === input.input.sourceId,
-    );
+    const definition = BROWSER_IMPORT_SOURCES.find((candidate) => candidate.id === input.sourceId);
     if (!definition) {
       return yield* new BrowserImportFailedError({
-        sourceId: input.input.sourceId,
+        sourceId: input.sourceId,
         reason: "unknownSource",
       });
     }
@@ -267,7 +281,7 @@ export const make = Effect.gen(function* BrowserImportMake() {
       Effect.provide(platformServices),
     );
     const requestedProfile = sourceProfiles.find(
-      (profile) => profile.directory === input.input.sourceProfileDirectory,
+      (profile) => profile.directory === input.sourceProfileDirectory,
     );
     if (requestedProfile === undefined) {
       return yield* new BrowserImportFailedError({
@@ -300,18 +314,24 @@ export const make = Effect.gen(function* BrowserImportMake() {
           ? readFirefoxCookies(databasePath).pipe(
               Effect.map((cookies) => ({ cookies, undecryptable: 0, undecryptableHosts: [] })),
             )
-          : readChromiumCookies({
-              cookieDatabasePath: databasePath,
-              keychainService: definition.keychainService,
-              keychainAccount: definition.keychainAccount,
-              linuxSecretApplication: definition.linuxSecretApplication,
-              ...(platform === "win32" && userDataDirectory !== undefined
-                ? {
-                    windowsLocalStatePath: pathContext.path.join(userDataDirectory, "Local State"),
-                  }
-                : {}),
-              platform,
-            });
+          : readChromiumCookies(
+              {
+                cookieDatabasePath: databasePath,
+                keychainService: definition.keychainService,
+                keychainAccount: definition.keychainAccount,
+                linuxSecretApplication: definition.linuxSecretApplication,
+                ...(platform === "win32" && userDataDirectory !== undefined
+                  ? {
+                      windowsLocalStatePath: pathContext.path.join(
+                        userDataDirectory,
+                        "Local State",
+                      ),
+                    }
+                  : {}),
+                platform,
+              },
+              chromiumKeys,
+            );
 
     const result = yield* read.pipe(
       Effect.scoped,
@@ -331,14 +351,23 @@ export const make = Effect.gen(function* BrowserImportMake() {
           ),
       }),
     );
+    return { databasePath, read: result };
+  });
 
+  const importCookies = Effect.fn("BrowserImport.importCookies")(function* (input: {
+    readonly input: BrowserImportInput;
+    readonly scope: string;
+    readonly persistent: boolean;
+    readonly namespace?: BrowserSession.BrowserSessionPartitionNamespace;
+  }) {
+    const { read } = yield* readCookies(input.input);
     const session = yield* browserSession
       .getSession(input.scope, input.persistent, input.namespace)
       .pipe(
         Effect.mapError(
           (cause) =>
             new BrowserImportFailedError({
-              sourceId: definition.id,
+              sourceId: input.input.sourceId,
               reason: "sessionUnavailable",
               cause,
             }),
@@ -346,10 +375,10 @@ export const make = Effect.gen(function* BrowserImportMake() {
       );
 
     // Chromium serializes writes; a rejected cookie should not prevent the others.
-    return yield* writeCookies(session, result);
+    return yield* writeCookies(session, read);
   });
 
-  return BrowserImport.of({ listSources, importCookies });
+  return BrowserImport.of({ listSources, importCookies, readCookies });
 });
 
 export const layer = Layer.effect(BrowserImport, make);

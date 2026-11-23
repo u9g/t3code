@@ -730,26 +730,26 @@ describe("DesktopBackendManager", () => {
     () =>
       Effect.scoped(
         Effect.gen(function* () {
-          const requestStarted = yield* Deferred.make<void>();
+          let requests = 0;
           const layerSpawner = Layer.succeed(
             ChildProcessSpawner.ChildProcessSpawner,
             ChildProcessSpawner.make(() =>
               Effect.succeed(
                 makeProcess({
-                  exitCode: Deferred.await(requestStarted).pipe(
-                    Effect.as(ChildProcessSpawner.ExitCode(SERVER_EXIT_CODE_PORT_IN_USE)),
+                  exitCode: Effect.succeed(
+                    ChildProcessSpawner.ExitCode(SERVER_EXIT_CODE_PORT_IN_USE),
                   ),
+                  getOutputFd: () => Stream.empty,
                 }),
               ),
             ),
           );
           // Another app's server that is still starting: it holds the port but cannot identify itself.
           const layerHttp = layerHttpClient((request) =>
-            Deferred.succeed(requestStarted, void 0).pipe(
-              Effect.as(
-                HttpClientResponse.fromWeb(request, new Response("starting", { status: 503 })),
-              ),
-            ),
+            Effect.sync(() => {
+              requests += 1;
+              return HttpClientResponse.fromWeb(request, new Response("starting", { status: 503 }));
+            }),
           );
           const run = yield* DesktopBackendManager.runBackendProcess({
             ...baseConfig,
@@ -761,6 +761,7 @@ describe("DesktopBackendManager", () => {
           );
 
           const exit = yield* Fiber.join(run);
+          assert.equal(requests, 0);
           assert.isTrue(exit.portTaken);
           assert.include(exit.reason, "already in use");
         }).pipe(Effect.provide(TestClock.layer())),
@@ -1089,10 +1090,7 @@ describe("DesktopBackendManager", () => {
             Queue.offer(reports, { exitCount, failure }).pipe(Effect.asVoid),
         });
         yield* instance.start;
-        // An early exit waits up to 1 s for the readiness probe to identify the listener.
-        while (!(yield* Deferred.isDone(firstExit))) {
-          yield* TestClock.adjust(Duration.millis(100));
-        }
+        yield* Deferred.await(firstExit);
         yield* TestClock.adjust(Duration.minutes(1));
         const { exitCount: exitsWhenReported, failure } = yield* Queue.take(reports);
         assert.equal(exitsWhenReported, exits);

@@ -686,10 +686,6 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   };
   const readinessTimeout = options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT;
   const usesControlChannel = options.bootstrap.desktopTelemetryControlFd !== undefined;
-  const ownershipProbe = {
-    httpBaseUrl: options.httpBaseUrl,
-    desktopLaunchId: options.bootstrap.desktopLaunchId,
-  };
   // The control channel belongs to the child. WSL has no control fd and checks the HTTP listener.
   const awaitReady = usesControlChannel
     ? Deferred.await(serverReady).pipe(
@@ -709,7 +705,7 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
       )
     : waitForHttpReady({
         ...readinessContext,
-        desktopLaunchId: ownershipProbe.desktopLaunchId,
+        desktopLaunchId: options.bootstrap.desktopLaunchId,
         timeout: readinessTimeout,
         ...(options.readinessProbe === undefined ? {} : { readinessProbe: options.readinessProbe }),
       });
@@ -789,16 +785,16 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     Exit.isSuccess(exit) && Option.exists(exit.value.code, (code) => code === expected);
   const stateDirOwned = exitedWith(SERVER_EXIT_CODE_STATE_DIR_OWNED);
   const portInUse = exitedWith(SERVER_EXIT_CODE_PORT_IN_USE);
-  if (!stateDirOwned && !portInUse && (yield* Ref.get(ownership)) === undefined) {
-    // Check for a foreign listener if the child exited before reporting readiness.
-    if (usesControlChannel) {
-      const listener = yield* checkBackendOwnership(ownershipProbe).pipe(Effect.option);
-      yield* Ref.set(ownership, Option.getOrUndefined(listener));
-    } else {
-      yield* Fiber.await(readinessFiber).pipe(
-        Effect.timeoutOption(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
-      );
-    }
+  if (
+    !usesControlChannel &&
+    !stateDirOwned &&
+    !portInUse &&
+    (yield* Ref.get(ownership)) === undefined
+  ) {
+    // WSL can exit while its HTTP probe is still identifying the listener.
+    yield* Fiber.await(readinessFiber).pipe(
+      Effect.timeoutOption(DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT),
+    );
   }
   yield* Effect.forEach(outputFibers, Fiber.await, {
     concurrency: "unbounded",

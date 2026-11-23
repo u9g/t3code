@@ -250,13 +250,15 @@ describe("DesktopLocalEnvironmentAuth", () => {
       const requestCount = yield* Ref.make(0);
       const layerHttpClient = Layer.succeed(
         HttpClient.HttpClient,
-        HttpClient.make((request) =>
-          Ref.updateAndGet(requestCount, (count) => count + 1).pipe(
-            Effect.tap(() => Ref.set(stopped, true)),
-            Effect.map((count) =>
-              count === 1
-                ? HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }))
-                : tokenResponse(request),
+        HttpClient.make(
+          asLaunchedBackend((request) =>
+            Ref.updateAndGet(requestCount, (count) => count + 1).pipe(
+              Effect.tap(() => Ref.set(stopped, true)),
+              Effect.map((count) =>
+                count === 1
+                  ? HttpClientResponse.fromWeb(request, new Response(null, { status: 503 }))
+                  : tokenResponse(request),
+              ),
             ),
           ),
         ),

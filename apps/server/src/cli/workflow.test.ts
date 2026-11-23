@@ -84,6 +84,7 @@ const runCli = (
     const calls: Array<Readonly<Record<string, unknown>>> = [];
     using _session = vi.spyOn(McpBridge, "mcpToolSession").mockReturnValue(
       Effect.succeed({
+        listTools: () => Effect.die("unexpected tools/list call"),
         call: (tool, input) => {
           calls.push(input);
           return call(tool, input);

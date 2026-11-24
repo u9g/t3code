@@ -11,10 +11,12 @@ import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopObservability from "../app/DesktopObservability.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
 import {
   commitActiveRuntime,
   hashDesktopShell,
+  readPendingRestart,
   readPendingRuntime,
   pruneRuntimeBundles,
   type RuntimeBundle,
@@ -64,11 +66,15 @@ export const listen = Effect.fn("desktop.runtimeUpdates.listen")(function* () {
   const backends = yield* DesktopBackendPool.DesktopBackendPool;
   const window = yield* DesktopWindow.DesktopWindow;
   const updates = yield* DesktopUpdates.DesktopUpdates;
+  const electronApp = yield* ElectronApp.ElectronApp;
   const backend = yield* backends.primary;
   const runtimeDirectory = environment.path.join(environment.baseDir, "runtime");
   const readyPath = environment.path.join(runtimeDirectory, "runtime-updates-ready.json");
   const pendingPath = environment.path.join(runtimeDirectory, "pending-runtime.json");
   const maintenancePath = environment.path.join(runtimeDirectory, "runtime-maintenance.json");
+  const restartPath = environment.path.join(runtimeDirectory, "pending-restart.json");
+  // Tells the installer this quit was for its update, so it reopens the app once it is swapped in.
+  const restartingPath = environment.path.join(runtimeDirectory, "restarting-for-update.json");
   const shellHash = bundledShellHash(environment.appRoot);
   if (shellHash === null) {
     yield* logError("Runtime updates unavailable: shell fingerprint could not be read");
@@ -96,7 +102,11 @@ export const listen = Effect.fn("desktop.runtimeUpdates.listen")(function* () {
           : readPendingRuntime(environment.baseDir, environment.appRoot, shellHash);
       idleSince = undefined;
     }
-    if (!pending || pending.version === selection.current()?.version) return;
+    const restart =
+      !pending || pending.version === selection.current()?.version
+        ? readPendingRestart(restartPath)
+        : null;
+    if (!restart && (!pending || pending.version === selection.current()?.version)) return;
     const snapshot = yield* backend.snapshot;
     if (
       !snapshot.desiredRunning ||
@@ -111,7 +121,7 @@ export const listen = Effect.fn("desktop.runtimeUpdates.listen")(function* () {
     const runtime = pending;
     const previous = selection.current();
     const acknowledgementPath = environment.path.join(runtimeDirectory, "runtime-quiescent.json");
-    const id = `${runtime.version}:${now}`;
+    const id = `${restart?.version ?? runtime?.version}:${now}`;
     const result = yield* Effect.scoped(
       Effect.gen(function* () {
         const renewLease = Effect.gen(function* () {
@@ -139,6 +149,17 @@ export const listen = Effect.fn("desktop.runtimeUpdates.listen")(function* () {
           runtimeHasWork(environment.path.join(environment.stateDir, "statev2.sqlite"))
         )
           return null;
+        if (restart) {
+          yield* Effect.sync(() =>
+            writeJson(restartingPath, { version: restart.version, pid: process.pid }),
+          );
+          yield* logInfo("Quitting so the installer can swap in a shell update", {
+            version: restart.version,
+          });
+          yield* electronApp.quit;
+          return "restarting" as const;
+        }
+        if (!runtime) return null;
         yield* logInfo("Applying runtime update without closing the window", {
           version: runtime.version,
         });
@@ -154,6 +175,11 @@ export const listen = Effect.fn("desktop.runtimeUpdates.listen")(function* () {
         });
       }),
     ).pipe(Effect.ensuring(Effect.sync(() => NodeFS.rmSync(maintenancePath, { force: true }))));
+    if (result === "restarting") return;
+    if (!runtime) {
+      idleSince = undefined;
+      return;
+    }
     yield* logInfo(result ? "Runtime update applied" : "Runtime update deferred or restored", {
       version: runtime.version,
     });

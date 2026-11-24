@@ -9,6 +9,7 @@ import {
   commitActiveRuntime,
   hashDesktopShell,
   loadCompatibleRuntime,
+  readPendingRestart,
   readPendingRuntime,
   pruneRuntimeBundles,
 } from "./runtimeBundle.ts";
@@ -184,5 +185,32 @@ describe("runtime bundles", () => {
       commitActiveRuntime(fixture.baseDir, { ...fixture.runtime, version: "../escape" }),
     ).toThrow();
     expect(NodeFS.readFileSync(manifestPath, "utf8")).toBe(before);
+  });
+});
+
+describe("readPendingRestart", () => {
+  const write = (value: unknown) => {
+    const file = NodePath.join(
+      NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-pending-restart-")),
+      "pending-restart.json",
+    );
+    NodeFS.writeFileSync(file, JSON.stringify(value));
+    return file;
+  };
+
+  it("wants a restart while the installer that staged the build is alive", () => {
+    expect(readPendingRestart(write({ version: "build-2", installerPid: process.pid }))).toEqual({
+      version: "build-2",
+    });
+  });
+
+  it("ignores a request whose installer is gone, so nothing reopens the app", () => {
+    expect(readPendingRestart(write({ version: "build-2", installerPid: 2 ** 22 + 1 }))).toBeNull();
+  });
+
+  it("ignores missing and malformed requests", () => {
+    expect(readPendingRestart("/nonexistent/pending-restart.json")).toBeNull();
+    expect(readPendingRestart(write({ version: "build-2" }))).toBeNull();
+    expect(readPendingRestart(write({ version: 2, installerPid: process.pid }))).toBeNull();
   });
 });

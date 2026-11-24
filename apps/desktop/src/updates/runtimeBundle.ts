@@ -197,3 +197,22 @@ export function pruneRuntimeBundles(
     /* Cleanup must not undo a successful activation. */
   }
 }
+
+/**
+ * A build whose shell differs installs only while the app is closed. The installer that staged it
+ * swaps it in and reopens the app, so a restart is wanted only while that installer is alive.
+ */
+export function readPendingRestart(file: string): { readonly version: string } | null {
+  try {
+    const { version, installerPid } = JSON.parse(NodeFS.readFileSync(file, "utf8")) as {
+      version?: unknown;
+      installerPid?: unknown;
+    };
+    if (typeof version !== "string" || !Number.isInteger(installerPid) || Number(installerPid) <= 0)
+      return null;
+    process.kill(Number(installerPid), 0);
+    return { version };
+  } catch {
+    return null;
+  }
+}

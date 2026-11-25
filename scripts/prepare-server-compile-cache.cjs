@@ -10,6 +10,13 @@ module.exports = async ({ appOutDir, electronPlatformName, arch, packager }) => 
     console.log(`[server-compile-cache] Skipping unsupported target ${electronPlatformName}`);
     return;
   }
+  // Windows installers stay under WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT, which a cache
+  // file per server chunk would exceed. Releases cross-build Windows, where this hook
+  // already skips, so a native Windows build ships the same payload.
+  if (electronPlatformName === "win32") {
+    console.log("[server-compile-cache] Skipping Windows payload file limit");
+    return;
+  }
   // Generating the cache runs the bundle, and a PR preview's bundle must never run next to signing secrets.
   if (process.env.T3CODE_DESKTOP_UNTRUSTED_BUNDLE === "true") {
     console.log("[server-compile-cache] Skipping untrusted bundle");

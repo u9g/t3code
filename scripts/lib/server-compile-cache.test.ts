@@ -8,6 +8,7 @@ import { cacheKey, seedPreparedCache } from "./server-compile-cache.ts";
 
 it.each([
   { platform: "freebsd", hostArch: "x64", arch: 1, reason: "unsupported target freebsd" },
+  { platform: "win32", hostArch: "x64", arch: 1, reason: "Windows payload file limit" },
   { platform: "linux", hostArch: "x64", arch: 3, reason: "unexecutable target linux/arm64" },
   { platform: "linux", hostArch: "arm64", arch: 1, reason: "unexecutable target linux/x64" },
   { platform: "darwin", hostArch: "arm64", arch: 3, reason: "untrusted bundle", untrusted: true },

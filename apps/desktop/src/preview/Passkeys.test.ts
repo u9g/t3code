@@ -286,6 +286,7 @@ describe("PreviewPasskeys", () => {
         [{ touchID: { keychainAccessGroup: "ABC1234567.com.t3tools.t3code.webauthn" } }],
       ]);
       assert.isFalse(entitled.bridgeEnabled);
+      assert.isTrue(entitled.appPasskeysEnabled);
       const { guest, handlers } = makeGuest();
       entitled.attachGuest(guest);
       assert.strictEqual(handlers.size, 0);
@@ -301,6 +302,10 @@ describe("PreviewPasskeys", () => {
       yield* unpackaged.configure;
       assert.strictEqual(electron.configureWebAuthn.mock.calls.length, 1);
       assert.isFalse(unpackaged.bridgeEnabled);
+      assert.isFalse(unpackaged.appPasskeysEnabled);
+
+      const unsigned = yield* PreviewPasskeys.PreviewPasskeys.pipe(Effect.provide(layerFor({})));
+      assert.isFalse(unsigned.appPasskeysEnabled);
     }),
   );
 

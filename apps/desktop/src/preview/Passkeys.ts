@@ -43,6 +43,9 @@ export class PreviewPasskeys extends Context.Service<
   PreviewPasskeys,
   {
     readonly bridgeEnabled: boolean;
+    /** macOS refuses passkey ceremonies from apps not signed with their Associated Domains
+     * entitlement, so Clerk's native passkeys work only in builds signed for them. */
+    readonly appPasskeysEnabled: boolean;
     /** Runs after app ready. */
     readonly configure: Effect.Effect<void>;
     readonly installSessionHandlers: (session: Session) => void;
@@ -136,6 +139,7 @@ const make = Effect.gen(function* () {
 
   return PreviewPasskeys.of({
     bridgeEnabled,
+    appPasskeysEnabled: environment.platform !== "darwin" || metadata !== undefined,
     configure: Effect.gen(function* () {
       if (keychainAccessGroup === undefined) return;
       yield* Effect.try({

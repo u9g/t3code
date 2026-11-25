@@ -3831,7 +3831,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               key="automations-shelf-header"
                               marker="automations-header"
                               className={cn(workingThreads.length === 0 && "mt-auto")}
-                              label="Automations"
+                              label={gt("Automations")}
                               count={automationThreads.length}
                               toggle={{
                                 expanded: automationsShelfExpanded,
@@ -3863,7 +3863,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               key="settled-shelf-header"
                               marker="settled-header"
                               className={cn(
-                                workingThreads.length + automationThreads.length + snoozedThreads.length ===
+                                workingThreads.length +
+                                  automationThreads.length +
+                                  snoozedThreads.length ===
                                   0 && "mt-auto",
                               )}
                               label={gt("Settled", { $context: "sidebar section" })}

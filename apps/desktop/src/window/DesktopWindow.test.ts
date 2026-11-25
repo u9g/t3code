@@ -47,7 +47,7 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
-import { SNAP_SHOT_EVENT_CHANNEL } from "../ipc/channels.ts";
+import { APP_PASSKEYS_DISABLED_ARGUMENT, SNAP_SHOT_EVENT_CHANNEL } from "../ipc/channels.ts";
 import * as DesktopServerExposure from "../backend/DesktopServerExposure.ts";
 import * as DesktopWindow from "./DesktopWindow.ts";
 import {
@@ -263,6 +263,7 @@ function layerTest(input: {
   }>;
   readonly primaryPasteEnabled?: boolean;
   readonly previewPasskeyBridgeEnabled?: boolean;
+  readonly appPasskeysEnabled?: boolean;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const layerDesktopAppSettings = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -371,6 +372,7 @@ function layerTest(input: {
         }),
         Layer.mock(PreviewPasskeys.PreviewPasskeys)({
           bridgeEnabled: input.previewPasskeyBridgeEnabled ?? false,
+          appPasskeysEnabled: input.appPasskeysEnabled ?? true,
           installSessionHandlers: () => {},
           attachGuest: () => () => {},
         }),
@@ -483,6 +485,7 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
           Layer.succeed(DesktopPrimaryPaste.DesktopPrimaryPaste, { enabled: true }),
           Layer.mock(PreviewPasskeys.PreviewPasskeys)({
             bridgeEnabled: false,
+            appPasskeysEnabled: true,
             installSessionHandlers: () => {},
             attachGuest: () => () => {},
           }),
@@ -612,6 +615,28 @@ describe("DesktopWindow", () => {
           yield* desktopWindow.dispatchMenuAction("new-thread");
           assert.equal(yield* Ref.get(createCount), 3);
         }).pipe(Effect.provide(layer));
+      }),
+  );
+
+  it.effect.each([
+    { appPasskeysEnabled: true, expected: undefined },
+    { appPasskeysEnabled: false, expected: [APP_PASSKEYS_DISABLED_ARGUMENT] },
+  ])(
+    "tells the app preload whether Clerk passkeys can work (%j)",
+    ({ appPasskeysEnabled, expected }) =>
+      Effect.gen(function* () {
+        const createdWindowOptions: Electron.BrowserWindowConstructorOptions[] = [];
+        const layer = layerTest({
+          window: makeFakeBrowserWindow().window,
+          createCount: yield* Ref.make(0),
+          mainWindow: yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none()),
+          createdWindowOptions,
+          appPasskeysEnabled,
+        });
+        yield* Effect.gen(function* () {
+          yield* (yield* DesktopWindow.DesktopWindow).ensureMain;
+        }).pipe(Effect.provide(layer));
+        assert.deepEqual(createdWindowOptions[0]?.webPreferences?.additionalArguments, expected);
       }),
   );
 

@@ -31,7 +31,9 @@ function isSnapShotEvent(value: unknown): value is DesktopSnapShotEvent {
   );
 }
 
-exposeClerkBridge({ passkeys: true });
+exposeClerkBridge({
+  passkeys: !process.argv.includes(IpcChannels.APP_PASSKEYS_DISABLED_ARGUMENT),
+});
 
 // Runs before any app script reads localStorage. See DesktopLegacyLocalStorage.
 try {

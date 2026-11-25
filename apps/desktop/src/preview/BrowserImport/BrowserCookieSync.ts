@@ -1,5 +1,6 @@
 import { BrowserImportSourceId, BrowserProfileId } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -36,6 +37,11 @@ export type CookieSyncBinding = typeof CookieSyncBinding.Type;
 const CookieSyncsJson = fromLenientJson(Schema.Array(CookieSyncBinding));
 const decodeCookieSyncs = Schema.decodeEffect(CookieSyncsJson);
 const encodeCookieSyncs = Schema.encodeEffect(CookieSyncsJson);
+
+class BrowserCookieSyncError extends Schema.TaggedError<BrowserCookieSyncError>()(
+  "BrowserCookieSyncError",
+  { operation: Schema.Literals(["read", "remove"]), cause: Schema.Defect() },
+) {}
 
 // The source browser writes its database in bursts; sync once the burst is over.
 const SETTLE = Duration.seconds(2);
@@ -167,17 +173,22 @@ export const make = Effect.gen(function* BrowserCookieSyncMake() {
           binding.persistent,
           binding.namespace,
         );
-        const current = yield* Effect.tryPromise(() => session.cookies.get({}));
-        const plan = planCookieSync(read.cookies, current, previous, Date.now() / 1000);
+        const current = yield* Effect.tryPromise({
+          try: () => session.cookies.get({}),
+          catch: (cause) => new BrowserCookieSyncError({ operation: "read", cause }),
+        });
+        const now = yield* Clock.currentTimeMillis;
+        const plan = planCookieSync(read.cookies, current, previous, now / 1000);
         const written = yield* BrowserImport.writeCookies(session, {
           cookies: plan.set,
           undecryptable: 0,
           undecryptableHosts: [],
         });
         yield* Effect.forEach(plan.remove, (cookie) =>
-          Effect.tryPromise(() => session.cookies.remove(cookie.url, cookie.name)).pipe(
-            Effect.ignore,
-          ),
+          Effect.tryPromise({
+            try: () => session.cookies.remove(cookie.url, cookie.name),
+            catch: (cause) => new BrowserCookieSyncError({ operation: "remove", cause }),
+          }).pipe(Effect.ignore),
         );
         previous = plan.keys;
         if (plan.set.length > 0 || plan.remove.length > 0) {

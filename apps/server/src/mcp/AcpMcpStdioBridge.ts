@@ -221,6 +221,9 @@ export function runAcpMcpStdioBridge(options: AcpMcpStdioBridgeOptions): Effect.
     runMcpHttpRelay({
       endpoint: options.endpoint,
       authorization: options.authorization,
+      ...(options.toolExposure === undefined
+        ? {}
+        : { headers: { [MCP_TOOL_EXPOSURE_HEADER]: options.toolExposure } }),
       // node:readline also splits on U+2028/U+2029, which JSON.stringify leaves raw inside strings.
       messages: Stream.fromAsyncIterable(options.input, bridgeError).pipe(
         Stream.map((chunk) => (typeof chunk === "string" ? Buffer.from(chunk) : chunk)),
@@ -298,9 +301,6 @@ export function runMcpHttpRelay(options: McpHttpRelayOptions): Effect.Effect<voi
                 "content-type": "application/json",
                 accept: "application/json, text/event-stream",
                 authorization: options.authorization,
-                ...(options.toolExposure === undefined
-                  ? {}
-                  : { [MCP_TOOL_EXPOSURE_HEADER]: options.toolExposure }),
                 ...(sessionId === null ? {} : { "mcp-session-id": sessionId }),
                 ...(protocolVersion === null ? {} : { "mcp-protocol-version": protocolVersion }),
               },

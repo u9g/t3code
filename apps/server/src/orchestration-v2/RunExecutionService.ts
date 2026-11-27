@@ -2367,14 +2367,14 @@ export const layer: Layer.Layer<
                   ))
               : compact
                 ? (input.session.compactThread?.(startInput) ??
-                    Effect.fail(
-                      turnStartError(
-                        new ProviderAdapter.ProviderCompactionUnsupportedError({
-                          driver: input.session.driver,
-                          providerThreadId: input.providerThread.id,
-                        }),
-                      ),
-                    ))
+                  Effect.fail(
+                    turnStartError(
+                      new ProviderAdapter.ProviderCompactionUnsupportedError({
+                        driver: input.session.driver,
+                        providerThreadId: input.providerThread.id,
+                      }),
+                    ),
+                  ))
                 : input.session
                     .startTurn(startInput)
                     .pipe(

@@ -4,6 +4,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Stream from "effect/Stream";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 import * as CodexManagedTokenBroker from "./CodexManagedTokenBroker.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { CodexSettings, EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
@@ -94,6 +95,7 @@ it.live.each(
           email: null,
         });
         yield* store.set(new TextEncoder().encode(json));
+        const hostEnv = yield* HostProcess.Environment;
         const ambient = {
           CODEX_HOME: "/user/.codex",
           ACCESS_TOKEN: "ambient-bearer",
@@ -101,8 +103,8 @@ it.live.each(
           OPENAI_API_KEY: "dummy-global-key",
           OPENAI_BASE_URL: "https://user-proxy.test",
           T3CODE_CODEX_LAUNCH_ARGS: "--config model_provider=global-proxy",
-          PATH: process.env.PATH,
-          SystemRoot: process.env.SystemRoot,
+          PATH: hostEnv.PATH,
+          SystemRoot: hostEnv.SystemRoot,
         };
         const runtime = yield* makeCodexManagedRuntime({
           instanceId,
@@ -197,6 +199,7 @@ it.live.each(
           assert.include(args, "features.api_key_model_discovery=true");
           assert.include(args, "features.multi_agent=false");
           assert.include(args, "features.multi_agent_v2=false");
+          assert.include(args, "agents.enabled=false");
           assert.notInclude(effective.config.launchArgs, "model_catalog_json");
           assert.notInclude(effective.config.launchArgs, "x-openai-chatpass-test");
           assert.include(provider, "supports_websockets=false");
@@ -271,7 +274,7 @@ it.live.each(
       Effect.provide(
         ServerConfig.layerTest(process.cwd(), {
           prefix: "t3-managed-runtime-",
-        }).pipe(Layer.provideMerge(NodeServices.layer)),
+        }).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
       ),
     ),
 );

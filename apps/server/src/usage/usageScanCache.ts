@@ -71,7 +71,7 @@ type SerializedRecord = readonly [
   cacheCreation1hTokens?: number | null,
   prompts?: number | null,
   generationMs?: number | null,
-  modelCalls?: number,
+  modelCalls?: number | null,
 ];
 
 interface SerializedFile {
